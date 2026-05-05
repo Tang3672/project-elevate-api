@@ -13,8 +13,11 @@ async def init_db():
     """Initialize database tables and pgvector extension."""
     pool = await get_pool()
     async with pool.acquire() as conn:
-        # Enable pgvector
-        await conn.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+        # Enable pgvector (optional — not available on all hosted Postgres)
+        try:
+            await conn.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+        except Exception as e:
+            print(f"⚠ pgvector not available: {e}")
 
         # Hospital needs table
         await conn.execute("""
