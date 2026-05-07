@@ -46,6 +46,8 @@ class PIReportState(TypedDict):
     report:          dict           # full PIReport dict from Researcher
     product_type:    str
 
+    expert_critic_rules: str = ""
+
     # Critic output
     flags:           List[ValidationFlag]
     critic_raw:      Optional[str]
@@ -185,8 +187,10 @@ async def critic_node(state: PIReportState) -> PIReportState:
     }
 
     try:
+        expert_rules = state.get("expert_critic_rules", "")
+        critic_sys = CRITIC_SYSTEM + ("\n\n" + expert_rules if expert_rules else "")
         raw = await _call_claude(
-            system=CRITIC_SYSTEM,
+            system=critic_sys,
             user=f"Review this PI report extract:\n\n{json.dumps(critic_input, indent=2)}\n\nFind errors and return JSON. Be concise — max 80 chars per field.",
             max_tokens=3000,
         )
@@ -332,7 +336,17 @@ async def validate_pi_report(report: dict, product_type: str = "antibiotic") -> 
         "critic_error":     None,
         "validated_report": None,
         "validation_passed": True,
+        "expert_critic_rules": "",
     }
+
+    # Inject domain-specific critic rules
+    try:
+        from app.services.expert_profiles import get_expert
+        expert = get_expert(product_type)
+        if expert:
+            initial_state["expert_critic_rules"] = f"\n\nDOMAIN-SPECIFIC RULES ({expert.display_name}):\n{expert.critic_rules}"
+    except Exception:
+        pass
 
     try:
         final_state = await graph.ainvoke(initial_state)
