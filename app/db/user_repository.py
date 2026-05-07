@@ -315,3 +315,13 @@ async def delete_draft(draft_id: int, user_id: int) -> bool:
             draft_id, user_id
         )
         return result == "DELETE 1"
+
+
+async def get_all_users() -> list:
+    """Get all users for weekly digest sending."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT id, email, name FROM users ORDER BY id"
+        )
+        return [dict(r) for r in rows]

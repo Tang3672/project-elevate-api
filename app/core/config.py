@@ -24,7 +24,26 @@ class Settings(BaseSettings):
     # HRSA: https://data.hrsa.gov/tools/web-services/registration
     HRSA_API_KEY: str = ""
 
+    # ── Reddit API (for pain point scraping) ──────────────────────────────────
+    # Create app at: https://www.reddit.com/prefs/apps
+    # Choose "script" type. Use client_id and client_secret.
+    REDDIT_CLIENT_ID: str = ""
+    REDDIT_CLIENT_SECRET: str = ""
+    REDDIT_USERNAME: str = ""   # optional, for user-agent
+
     # ── App ────────────────────────────────────────────────────────────────────
+    # ── Auth ───────────────────────────────────────────────────────────────
+    JWT_SECRET: str = "project-elevate-dev-secret-change-in-production"
+    GOOGLE_CLIENT_ID: str = ""
+
+    # ── Email (for weekly digests) ────────────────────────────────────────────
+    EMAIL_HOST:     str = ""   # smtp.gmail.com
+    EMAIL_PORT:     int = 587
+    EMAIL_USER:     str = ""   # your@gmail.com
+    EMAIL_PASSWORD: str = ""   # Gmail App Password
+    EMAIL_FROM:     str = ""   # "Project Elevate <alerts@projectelevate.io>"
+    GOOGLE_CLIENT_ID: str = ""  # optional — add your Google OAuth client ID
+
     DEBUG: bool = True
     ENVIRONMENT: str = "development"
 
@@ -36,6 +55,7 @@ class Settings(BaseSettings):
         env_file = ".env"
         env_file_encoding = "utf-8"
 
+@lru_cache()
 def get_settings():
     return Settings()
 

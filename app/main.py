@@ -4,6 +4,7 @@ from app.api import needs
 from app.api.demand import admin_router, demand_router
 from app.api.alignment import router as alignment_router
 from app.api.auth import router as auth_router
+from app.api.watchlist import router as watchlist_router, admin_router as watchlist_admin_router
 from app.db.database import init_db
 from app.db.demand_repository import ensure_demand_signals_table
 from app.core.config import settings
@@ -29,6 +30,8 @@ async def startup():
     await ensure_demand_signals_table()
     from app.db.user_repository import init_user_tables
     await init_user_tables()
+    from app.db.watchlist_repository import init_watchlist_tables
+    await init_watchlist_tables()
 
     # Start the ingestion scheduler if enabled
     if settings.ENABLE_SCHEDULER:
@@ -53,7 +56,11 @@ app.include_router(admin_router,         prefix="/api/v1/admin",   tags=["admin"
 app.include_router(alignment_router,     prefix="/api/v1/alignment", tags=["alignment"])
 
 # Step 4: user accounts
-app.include_router(auth_router,          prefix="/api/v1/auth",      tags=["auth"])
+app.include_router(auth_router,          prefix="/api/v1/auth",        tags=["auth"])
+
+# Step 5: watchlists & alerts
+app.include_router(watchlist_router,       prefix="/api/v1/watchlists",  tags=["watchlists"])
+app.include_router(watchlist_admin_router, prefix="/api/v1/admin",       tags=["admin"])
 
 @app.get("/health")
 async def health_check():
