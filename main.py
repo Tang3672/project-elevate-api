@@ -57,3 +57,14 @@ async def health_check():
         "version": "0.2.0",
         "scheduler_enabled": settings.ENABLE_SCHEDULER,
     }
+
+
+@app.get("/debug/env-check")
+def debug_env_check():
+    import os
+    key = os.getenv("ANTHROPIC_API_KEY")
+    return {
+        "anthropic_key_present": bool(key),
+        "anthropic_key_prefix": key[:14] + "..." if key else None,
+        "anthropic_key_length": len(key) if key else 0,
+    }
