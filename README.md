@@ -206,3 +206,4 @@ backend/
 | **Total per submission** | | **~$0.003** |
 
 At 1,000 submissions/month: ~$3.00. At 100,000: ~$300.
+# force redeploy Fri May  8 18:14:20 PDT 2026
