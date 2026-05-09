@@ -49,9 +49,10 @@ CLAUDE_MODEL      = "claude-opus-4-5"
 # ══════════════════════════════════════════════════════════════════════════════
 
 async def generate_pi_report(
-    idea:         str,
-    product_type: str = "other",
+    idea:           str,
+    product_type:   str = "other",
     disease_domain: str = "auto",
+    tier1_category: str = "drug_small_molecule",
 ) -> PIReport:
     """
     Full MoE pipeline: idea → Expert Router → Expert Context → Claude → PIReport.
@@ -96,7 +97,7 @@ async def generate_pi_report(
         logger.warning(f"Source building failed: {e}")
 
     # Attach routing metadata
-    report.expert_domain   = expert.domain_id
+    report.expert_domain   = getattr(expert, "sub_expert_id", getattr(expert, "domain_id", "unknown"))
     report.expert_name     = expert.display_name
     report.expert_icon     = expert.icon
     report.routing_method  = router_result.routing_method

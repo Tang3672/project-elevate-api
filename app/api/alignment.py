@@ -32,8 +32,12 @@ class PIReportRequest(BaseModel):
         description="For antibiotics: primary target pathogen (e.g. MRSA, CRE, C. difficile)")
     disease_domain: str = Field(default="auto",
         description="auto | antibiotic_amr | oncology | cardiology | neurology_cns | metabolic_diabetes | mental_health")
+    tier1_category: str = Field(default="drug_small_molecule",
+        description="drug_small_molecule | biologic | gene_cell_therapy | medical_device | diagnostic | digital_health | vaccine_immunotherapy | other_platform")
     disease_domain: str = Field(default="auto",
         description="auto | antibiotic_amr | oncology | cardiology | neurology_cns | metabolic_diabetes | mental_health")
+    tier1_category: str = Field(default="drug_small_molecule",
+        description="drug_small_molecule | biologic | gene_cell_therapy | medical_device | diagnostic | digital_health | vaccine_immunotherapy | other_platform")
 
 
 @router.post("/check", response_model=AlignmentReport)
@@ -64,7 +68,7 @@ async def get_pi_report(payload: PIReportRequest):
         idea = payload.idea
         if payload.target_pathogen:
             idea = f"{idea}\n\nTarget pathogen: {payload.target_pathogen}"
-        return await generate_pi_report(idea, payload.product_type, payload.disease_domain)
+        return await generate_pi_report(idea, payload.product_type, payload.disease_domain, getattr(payload, "tier1_category", "drug_small_molecule"))
     except ValueError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
