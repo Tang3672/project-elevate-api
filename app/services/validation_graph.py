@@ -251,6 +251,18 @@ def route_after_arbitrator(state: PIReportState) -> str:
 
 # ── Node 4: Formatter ─────────────────────────────────────────────────────────
 
+def source_formatter_node(state: PIReportState) -> PIReportState:
+    """Extracts inline [SOURCE: url] markers and builds sources list."""
+    try:
+        from app.services.source_formatter import extract_and_format_sources
+        report = extract_and_format_sources(state["report"].copy())
+        logger.info(f"Source formatter: {len(report.get('sources', []))} sources extracted")
+        return {**state, "report": report}
+    except Exception as e:
+        logger.warning(f"Source formatter failed: {e}")
+        return state
+
+
 def formatter_node(state: PIReportState) -> PIReportState:
     """Attaches validation results to the report."""
     report  = state["report"].copy()
@@ -288,16 +300,18 @@ def build_validation_graph():
     """Build and compile the LangGraph validation pipeline."""
     graph = StateGraph(PIReportState)
 
-    graph.add_node("researcher",  researcher_node)
-    graph.add_node("critic",      critic_node)
-    graph.add_node("arbitrator",  arbitrator_node)
-    graph.add_node("formatter",   formatter_node)
+    graph.add_node("researcher",       researcher_node)
+    graph.add_node("critic",           critic_node)
+    graph.add_node("arbitrator",       arbitrator_node)
+    graph.add_node("source_formatter", source_formatter_node)
+    graph.add_node("formatter",        formatter_node)
 
     graph.set_entry_point("researcher")
-    graph.add_edge("researcher",  "critic")
-    graph.add_edge("critic",      "arbitrator")
-    graph.add_conditional_edges("arbitrator", route_after_arbitrator, {"formatter": "formatter"})
-    graph.add_edge("formatter",   END)
+    graph.add_edge("researcher",       "critic")
+    graph.add_edge("critic",           "arbitrator")
+    graph.add_conditional_edges("arbitrator", route_after_arbitrator, {"source_formatter": "source_formatter"})
+    graph.add_edge("source_formatter", "formatter")
+    graph.add_edge("formatter",        END)
 
     return graph.compile()
 

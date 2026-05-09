@@ -190,6 +190,7 @@ class PIReport(BaseModel):
     expert_icon:            Optional[str]  = None
     routing_method:         Optional[str]  = None
     mismatch_warning:       Optional[str]  = None
+    sources:                List[dict]     = Field(default_factory=list)   # all cited sources with URLs
 
 
 # ── Legacy AlignmentReport (kept for backward compat) ─────────────────────────

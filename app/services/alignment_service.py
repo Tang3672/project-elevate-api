@@ -277,8 +277,21 @@ async def _generate_expert_report(idea, product_type, expert, demand_results, ho
     Injects expert system_prompt + knowledge_base into the researcher context.
     Falls back to antibiotic-specific parsing for AMR; generic parsing for others.
     """
-    # Build enriched context with expert knowledge base
-    context = _build_expert_context(idea, expert, demand_results, hospital_matches_raw)
+    # Option 3: Disease Classifier + Targeted Live Search
+    disease_info = {}
+    try:
+        from app.services.disease_knowledge import get_disease_knowledge
+        disease_knowledge, disease_info = await get_disease_knowledge(
+            idea=idea,
+            domain_id=expert.domain_id,
+            expert_knowledge_base=expert.knowledge_base,
+        )
+    except Exception as e:
+        logger.warning(f"Disease knowledge fetch failed: {e}")
+        disease_knowledge = expert.knowledge_base
+
+    # Build enriched context with disease knowledge
+    context = _build_expert_context(idea, expert, demand_results, hospital_matches_raw, disease_knowledge)
 
     # Use expert system prompt + JSON schema
     system = expert.system_prompt + "\n\n" + EXPERT_JSON_SCHEMA
@@ -290,14 +303,14 @@ async def _generate_expert_report(idea, product_type, expert, demand_results, ho
     return _parse_expert_response(data, idea, product_type, expert, demand_results, hospital_matches_raw, total_signals)
 
 
-def _build_expert_context(idea, expert, demand_results, hospital_matches):
+def _build_expert_context(idea, expert, demand_results, hospital_matches, disease_knowledge=""):
     lines = [
         f"PRINCIPAL INVESTIGATOR INNOVATION:\n{idea}",
         "",
         f"DOMAIN: {expert.display_name}",
         "",
-        "EXPERT KNOWLEDGE BASE:",
-        expert.knowledge_base,
+        "DISEASE KNOWLEDGE (use these facts and source URLs):",
+        disease_knowledge or expert.knowledge_base,
         "",
         f"DEMAND SIGNALS FROM FEDERAL DATABASES ({len(demand_results)} signals):",
     ]
@@ -321,7 +334,9 @@ def _build_expert_context(idea, expert, demand_results, hospital_matches):
 
 
 EXPERT_JSON_SCHEMA = """
-Generate a comprehensive source-cited PI report. Respond ONLY with valid compact JSON:
+Generate a comprehensive source-cited PI report. CRITICAL: Tag every statistic with [SOURCE: name | url] immediately after the fact. Example: "13,100 CRE infections/year [SOURCE: CDC AR Threats 2019 | https://www.cdc.gov/antimicrobial-resistance/data-research/threats/index.html]"
+
+Respond ONLY with valid compact JSON:
 {
   "executive_summary": "<2 sentences with specific numbers and sources>",
   "disease_intelligence": {
