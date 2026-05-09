@@ -16,11 +16,14 @@ from enum import Enum
 
 
 class ProductType(str, Enum):
-    ANTIBIOTIC   = "antibiotic"
+    ANTIBIOTIC     = "antibiotic"
+    ORPHAN_DRUG    = "orphan_drug"
+    ONCOLOGY_DRUG  = "oncology_drug"
+    GENE_THERAPY   = "gene_therapy"
     MEDICAL_DEVICE = "medical_device"
-    SOFTWARE     = "software"
-    DIAGNOSTIC   = "diagnostic"
-    OTHER        = "other"
+    SOFTWARE       = "software"
+    DIAGNOSTIC     = "diagnostic"
+    OTHER          = "other"
 
 
 # ── Market Sizing ─────────────────────────────────────────────────────────────
