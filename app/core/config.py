@@ -62,3 +62,17 @@ def get_settings():
     return Settings()
 
 settings = get_settings()
+
+
+import os as _os
+# Hard override: read directly from environment (fixes Railway deployment)
+def get_settings():
+    s = Settings()
+    # If key is empty, try reading directly from os.environ
+    if not s.ANTHROPIC_API_KEY:
+        s.ANTHROPIC_API_KEY = _os.environ.get("ANTHROPIC_API_KEY", "")
+    if not s.OPENAI_API_KEY:
+        s.OPENAI_API_KEY = _os.environ.get("OPENAI_API_KEY", "")
+    return s
+
+settings = get_settings()
