@@ -1,78 +1,61 @@
+import os
 from pydantic_settings import BaseSettings
-from functools import lru_cache
 
 class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = "postgresql://postgres:postgres@localhost:5432/project_elevate"
 
-    # OpenAI (for embeddings + Step 1 classification)
-    OPENAI_API_KEY: str
+    # OpenAI (for embeddings + classification)
+    OPENAI_API_KEY: str = ""
 
-    # Anthropic (for inventor alignment reports — Step 3)
+    # Anthropic (for PI reports)
     ANTHROPIC_API_KEY: str = ""
 
-    # ── Data source API keys (all free to obtain) ─────────────────────────────
-    # CDC Socrata app token: https://data.cdc.gov/profile/app_tokens
-    CDC_APP_TOKEN: str = ""
+    # Data source API keys
+    CDC_APP_TOKEN:    str = ""
+    FDA_API_KEY:      str = ""
+    CENSUS_API_KEY:   str = ""
+    HRSA_API_KEY:     str = ""
 
-    # FDA API key: https://open.fda.gov/apis/authentication/
-    FDA_API_KEY: str = ""
-
-    # Census Bureau: https://api.census.gov/data/key_signup.html
-    CENSUS_API_KEY: str = ""
-
-    # HRSA: https://data.hrsa.gov/tools/web-services/registration
-    HRSA_API_KEY: str = ""
-
-    # ── Reddit API (for pain point scraping) ──────────────────────────────────
-    # Create app at: https://www.reddit.com/prefs/apps
-    # Choose "script" type. Use client_id and client_secret.
-    REDDIT_CLIENT_ID: str = ""
+    # Reddit
+    REDDIT_CLIENT_ID:     str = ""
     REDDIT_CLIENT_SECRET: str = ""
-    REDDIT_USERNAME: str = ""   # optional, for user-agent
+    REDDIT_USERNAME:      str = ""
 
-    # ── App ────────────────────────────────────────────────────────────────────
-    # ── Auth ───────────────────────────────────────────────────────────────
-    JWT_SECRET: str = "project-elevate-dev-secret-change-in-production"
+    # Auth
+    JWT_SECRET:       str = "project-elevate-dev-secret-change-in-production"
     GOOGLE_CLIENT_ID: str = ""
 
-    # ── Email (for weekly digests) ────────────────────────────────────────────
-    EMAIL_HOST:     str = ""   # smtp.gmail.com
+    # Email
+    EMAIL_HOST:     str = ""
     EMAIL_PORT:     int = 587
-    EMAIL_USER:     str = ""   # your@gmail.com
-    EMAIL_PASSWORD: str = ""   # Gmail App Password
-    EMAIL_FROM:     str = ""   # "Project Elevate <alerts@projectelevate.io>"
-    GOOGLE_CLIENT_ID: str = ""  # optional — add your Google OAuth client ID
+    EMAIL_USER:     str = ""
+    EMAIL_PASSWORD: str = ""
+    EMAIL_FROM:     str = ""
 
-    DEBUG: bool = True
-    ENVIRONMENT: str = "development"
-
-    # Whether to start the ingestion scheduler on app startup
-    # Set to False during development to avoid background jobs
+    # App
+    DEBUG:            bool = True
+    ENVIRONMENT:      str  = "development"
     ENABLE_SCHEDULER: bool = False
 
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
-        env_file_override = False
         case_sensitive = False
 
-@lru_cache()
-def get_settings():
-    return Settings()
 
-settings = get_settings()
-
-
-import os as _os
-# Hard override: read directly from environment (fixes Railway deployment)
-def get_settings():
+def get_settings() -> Settings:
     s = Settings()
-    # If key is empty, try reading directly from os.environ
+    # Hard override from os.environ — fixes Railway where .env doesn't exist
     if not s.ANTHROPIC_API_KEY:
-        s.ANTHROPIC_API_KEY = _os.environ.get("ANTHROPIC_API_KEY", "")
+        s.ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
     if not s.OPENAI_API_KEY:
-        s.OPENAI_API_KEY = _os.environ.get("OPENAI_API_KEY", "")
+        s.OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+    if not s.DATABASE_URL or "localhost" in s.DATABASE_URL:
+        db = os.environ.get("DATABASE_URL", "")
+        if db:
+            s.DATABASE_URL = db
     return s
+
 
 settings = get_settings()
