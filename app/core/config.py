@@ -48,7 +48,12 @@ def get_settings() -> Settings:
     s = Settings()
     # Hard override from os.environ — fixes Railway where .env doesn't exist
     if not s.ANTHROPIC_API_KEY:
-        s.ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+        # Also check for key with trailing space (Railway UI bug)
+        s.ANTHROPIC_API_KEY = (
+            os.environ.get("ANTHROPIC_API_KEY") or
+            os.environ.get("ANTHROPIC_API_KEY ") or
+            ""
+        ).strip()
     if not s.OPENAI_API_KEY:
         s.OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
     if not s.DATABASE_URL or "localhost" in s.DATABASE_URL:
