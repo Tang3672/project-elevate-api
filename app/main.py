@@ -78,6 +78,19 @@ async def health_check():
     }
 
 
+
+@app.get("/debug/env-full")
+def debug_env_full():
+    import os
+    # Find anything anthropic-related
+    anthropic_vars = {k: v[:10]+"..." for k,v in os.environ.items() if "anthrop" in k.lower()}
+    all_keys = [k for k in os.environ.keys()]
+    return {
+        "anthropic_related": anthropic_vars,
+        "all_var_names": sorted(all_keys),
+        "total_vars": len(all_keys)
+    }
+
 @app.get("/debug/env-check")
 def debug_env_check():
     import os
