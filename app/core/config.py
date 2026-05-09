@@ -64,3 +64,11 @@ def get_settings() -> Settings:
 
 
 settings = get_settings()
+
+# Last resort: directly patch from env if still empty
+import os as _final_os
+if not settings.ANTHROPIC_API_KEY:
+    for _k, _v in _final_os.environ.items():
+        if _k.strip() == "ANTHROPIC_API_KEY" and _v.strip():
+            settings.ANTHROPIC_API_KEY = _v.strip()
+            break
