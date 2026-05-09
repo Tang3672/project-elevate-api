@@ -86,6 +86,15 @@ async def generate_pi_report(
     report = await _generate_expert_report(
         idea, pt, expert, demand_results, hospital_matches_raw, total_signals)
 
+    # Build sources from structured data
+    try:
+        from app.services.source_formatter import build_sources_from_report
+        report_dict = report.model_dump(mode="json")
+        report_dict = build_sources_from_report(report_dict)
+        report.sources = report_dict.get("sources", [])
+    except Exception as e:
+        logger.warning(f"Source building failed: {e}")
+
     # Attach routing metadata
     report.expert_domain   = expert.domain_id
     report.expert_name     = expert.display_name
