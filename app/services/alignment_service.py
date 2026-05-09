@@ -107,7 +107,9 @@ async def generate_pi_report(
     try:
         from app.services.validation_graph import validate_pi_report
         report_dict = report.model_dump(mode="json")
-        validated   = await validate_pi_report(report_dict, expert.domain_id)
+        # Pass sub_expert_id and critic context for domain-aware validation
+        _sub_id = getattr(expert, "sub_expert_id", getattr(expert, "domain_id", "drug_amr"))
+        validated   = await validate_pi_report(report_dict, _sub_id)
         report.validation = validated.get("validation")
     except Exception as e:
         logger.error(f"Validation graph error: {e}")
@@ -287,21 +289,46 @@ async def _generate_expert_report(idea, product_type, expert, demand_results, ho
     Injects expert system_prompt + knowledge_base into the researcher context.
     Falls back to antibiotic-specific parsing for AMR; generic parsing for others.
     """
-    # Option 3: Disease Classifier + Targeted Live Search
+    # ── Two-layer knowledge system ────────────────────────────────────────────
+    # Layer 1: Disease Classifier → specific disease name
     disease_info = {}
+    disease_name = "the indicated condition"
     try:
-        from app.services.disease_knowledge import get_disease_knowledge
-        disease_knowledge, disease_info = await get_disease_knowledge(
-            idea=idea,
-            domain_id=expert.domain_id,
-            expert_knowledge_base=expert.knowledge_base,
+        from app.services.disease_classifier import classify_disease
+        disease_info = await classify_disease(idea)
+        disease_name = disease_info.get("disease_name", "the indicated condition")
+    except Exception as e:
+        logger.warning(f"Disease classification failed: {e}")
+
+    # Layer 2: Knowledge Retriever → 5-6 parallel live searches
+    # Uses sub_expert_id from router (v2) or domain_id (v1 fallback)
+    sub_expert_id = getattr(expert, "sub_expert_id", getattr(expert, "domain_id", "drug_amr"))
+    expert_system_prompt = getattr(expert, "system_prompt", "")
+    expert_critic_rules  = getattr(expert, "critic_rules", "")
+    domain_static        = getattr(expert, "knowledge_base", "")
+
+    researcher_ctx = ""
+    critic_ctx     = ""
+    try:
+        from app.services.knowledge_retriever import build_full_expert_context
+        researcher_ctx, critic_ctx = await build_full_expert_context(
+            sub_expert_id           = sub_expert_id,
+            sub_expert_prompt       = expert_system_prompt,
+            sub_expert_critic       = expert_critic_rules,
+            disease_name            = disease_name,
+            product_desc            = idea[:200],
+            domain_static_knowledge = domain_static,
         )
     except Exception as e:
-        logger.warning(f"Disease knowledge fetch failed: {e}")
-        disease_knowledge = expert.knowledge_base
+        logger.warning(f"Knowledge retriever failed: {e} — using static knowledge")
+        researcher_ctx = expert_system_prompt + "\n\n" + domain_static
+        critic_ctx     = expert_critic_rules
 
-    # Build enriched context with disease knowledge
-    context = _build_expert_context(idea, expert, demand_results, hospital_matches_raw, disease_knowledge)
+    # Build final context with demand signals + hospital matches
+    context = _build_expert_context(
+        idea, expert, demand_results, hospital_matches_raw,
+        disease_knowledge=researcher_ctx
+    )
 
     # Use expert system prompt + JSON schema
     system = expert.system_prompt + "\n\n" + EXPERT_JSON_SCHEMA
