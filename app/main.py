@@ -94,11 +94,21 @@ def debug_env_full():
 @app.get("/debug/env-check")
 def debug_env_check():
     import os
-    key = os.getenv("ANTHROPIC_API_KEY")
+    # Scan all env vars stripping whitespace from key names
+    key = ""
+    for k, v in os.environ.items():
+        if k.strip() == "ANTHROPIC_API_KEY" and v.strip():
+            key = v.strip()
+            break
+    # Also check settings object
+    from app.core.config import settings
+    settings_key = settings.ANTHROPIC_API_KEY
     return {
         "anthropic_key_present": bool(key),
         "anthropic_key_prefix": key[:14] + "..." if key else None,
         "anthropic_key_length": len(key) if key else 0,
+        "settings_key_present": bool(settings_key),
+        "settings_key_length": len(settings_key),
         "has_openai_key": bool(os.getenv("OPENAI_API_KEY")),
         "has_database_url": bool(os.getenv("DATABASE_URL")),
     }
