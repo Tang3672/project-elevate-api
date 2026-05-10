@@ -44,6 +44,12 @@ class Settings(BaseSettings):
         case_sensitive = False
 
 
+    # ── Stripe Billing ────────────────────────────────────────────────────────
+    STRIPE_SECRET_KEY:     str = ""
+    STRIPE_WEBHOOK_SECRET: str = ""
+    STRIPE_PRICE_ID:       str = ""
+
+
 def get_settings() -> Settings:
     s = Settings()
     # Hard override from os.environ — fixes Railway where .env doesn't exist
