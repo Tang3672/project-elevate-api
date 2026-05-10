@@ -309,7 +309,7 @@ def build_validation_graph():
     graph.set_entry_point("researcher")
     graph.add_edge("researcher",       "critic")
     graph.add_edge("critic",           "arbitrator")
-    graph.add_conditional_edges("arbitrator", route_after_arbitrator, {"source_formatter": "source_formatter"})
+    graph.add_conditional_edges("arbitrator", route_after_arbitrator, {"source_formatter": "source_formatter", "formatter": "formatter"})
     graph.add_edge("source_formatter", "formatter")
     graph.add_edge("formatter",        END)
 

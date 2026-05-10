@@ -391,7 +391,11 @@ async def retrieve_knowledge(
 
     # Run all searches in parallel
     queries = queries[:3]  # Cap at 3 searches to avoid Railway timeout
-    tasks = [_run_single_search(q, f"{sub_expert_id}_{i}") for i, q in enumerate(queries)]
+    # Run searches sequentially with small delay to avoid 429 rate limits
+    async def _run_with_delay(q, idx):
+        if idx > 0: await asyncio.sleep(1.5)
+        return await _run_single_search(q, f"{sub_expert_id}_{idx}")
+    tasks = [_run_with_delay(q, i) for i, q in enumerate(queries)]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     # Combine results
