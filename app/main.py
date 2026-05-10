@@ -6,6 +6,7 @@ from app.api.alignment import router as alignment_router
 from app.api.auth import router as auth_router
 from app.api.watchlist import router as watchlist_router, admin_router as watchlist_admin_router
 from app.api.features import trial_router, portfolio_router, grant_router
+from app.api.billing import router as billing_router
 from app.db.database import init_db
 from app.db.demand_repository import ensure_demand_signals_table
 from app.core.config import settings
@@ -67,6 +68,7 @@ app.include_router(watchlist_admin_router, prefix="/api/v1/admin",       tags=["
 app.include_router(trial_router,     prefix="/api/v1", tags=["clinical-roadmap"])
 app.include_router(portfolio_router, prefix="/api/v1", tags=["portfolio"])
 app.include_router(grant_router,     prefix="/api/v1", tags=["grant"])
+app.include_router(billing_router,   prefix="/api/v1", tags=["billing"])
 
 @app.get("/health")
 async def health_check():
