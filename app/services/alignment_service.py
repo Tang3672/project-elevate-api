@@ -883,9 +883,34 @@ async def _call_claude(context: str, system_prompt: str, max_tokens: int = 2000)
 
 def _clean_json(raw: str) -> dict:
     clean = raw.strip()
+    # Strip markdown code fences
     if clean.startswith("```"):
         parts = clean.split("```")
         clean = parts[1] if len(parts) > 1 else clean
         if clean.startswith("json"):
             clean = clean[4:]
-    return json.loads(clean.strip())
+    clean = clean.strip()
+    # Try direct parse first
+    try:
+        return json.loads(clean)
+    except json.JSONDecodeError:
+        pass
+    # Replace smart quotes and problematic characters
+    clean = clean.replace('‘', "'").replace('’', "'")
+    clean = clean.replace('“', '"').replace('”', '"')
+    clean = clean.replace('–', '-').replace('—', '-')
+    clean = clean.replace(' ', ' ')
+    try:
+        return json.loads(clean)
+    except json.JSONDecodeError:
+        pass
+    # Last resort: find JSON boundaries
+    start = clean.find('{')
+    end   = clean.rfind('}') + 1
+    if start >= 0 and end > start:
+        try:
+            return json.loads(clean[start:end])
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON parse failed after cleanup: {e}")
+            raise
+    raise ValueError(f"No valid JSON found in response: {clean[:200]}")
