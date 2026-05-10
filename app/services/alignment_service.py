@@ -862,7 +862,7 @@ async def _call_claude(context: str, system_prompt: str, max_tokens: int = 2000)
     anthropic_api_key = os.getenv("ANTHROPIC_API_KEY") or settings.ANTHROPIC_API_KEY
     if not anthropic_api_key:
         raise ValueError("ANTHROPIC_API_KEY not set in Railway environment variables")
-    async with httpx.AsyncClient(timeout=90.0) as client:
+    async with httpx.AsyncClient(timeout=180.0) as client:
         r = await client.post(
             ANTHROPIC_API_URL,
             headers={

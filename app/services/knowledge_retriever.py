@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 SEARCH_MODEL      = "claude-sonnet-4-6"
-SEARCH_TIMEOUT    = 45.0
+SEARCH_TIMEOUT    = 30.0
 
 
 # ── Search Templates per Sub-Expert ──────────────────────────────────────────
@@ -390,6 +390,7 @@ async def retrieve_knowledge(
     logger.info(f"Retrieving knowledge: sub_expert={sub_expert_id} disease='{disease_short}' queries={len(queries)}")
 
     # Run all searches in parallel
+    queries = queries[:3]  # Cap at 3 searches to avoid Railway timeout
     tasks = [_run_single_search(q, f"{sub_expert_id}_{i}") for i, q in enumerate(queries)]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
