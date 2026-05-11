@@ -60,6 +60,15 @@ def get_settings() -> Settings:
             os.environ.get("ANTHROPIC_API_KEY ") or
             ""
         ).strip()
+
+    # Scan all env vars for Stripe keys (handles trailing space Railway bug)
+    for k, v in os.environ.items():
+        if k.strip() == "STRIPE_SECRET_KEY" and v.strip():
+            s.STRIPE_SECRET_KEY = v.strip()
+        if k.strip() == "STRIPE_WEBHOOK_SECRET" and v.strip():
+            s.STRIPE_WEBHOOK_SECRET = v.strip()
+        if k.strip() == "STRIPE_PRICE_ID" and v.strip():
+            s.STRIPE_PRICE_ID = v.strip()
     if not s.OPENAI_API_KEY:
         s.OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
     if not s.DATABASE_URL or "localhost" in s.DATABASE_URL:
