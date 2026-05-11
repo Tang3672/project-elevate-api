@@ -121,6 +121,13 @@ async def login(payload: LoginRequest):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     if not verify_password(payload.password, user['password_hash']):
         raise HTTPException(status_code=401, detail="Invalid email or password")
+    # Check email verification — skip for dev accounts
+    DEV_EMAILS = {"test@projectelevate.io", "ijw91021@gmail.com", "admin@projectelevate.io"}
+    if not user.get('email_verified', False) and user['email'] not in DEV_EMAILS:
+        raise HTTPException(
+            status_code=403,
+            detail="Please verify your email before logging in. Check your inbox."
+        )
     # Block unverified accounts (skip for dev emails)
     DEV_EMAILS = {"test@projectelevate.io", "ijw91021@gmail.com", "admin@projectelevate.io"}
     if not user.get('email_verified', False) and user.get('email') not in DEV_EMAILS:
