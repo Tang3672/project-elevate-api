@@ -69,8 +69,17 @@ async def get_optional_user(authorization: Optional[str] = Header(None)) -> Opti
 # ── Register ──────────────────────────────────────────────────────────────────
 
 @router.post("/register", response_model=AuthResponse)
-async def register(payload: RegisterRequest):
+async def register(payload: RegisterRequest, request: Request):
     """Create a new account with email + password."""
+    # Password strength validation
+    pw = payload.password
+    if len(pw) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+    if not any(c.isdigit() for c in pw):
+        raise HTTPException(status_code=400, detail="Password must contain at least one number")
+    if not any(c.isalpha() for c in pw):
+        raise HTTPException(status_code=400, detail="Password must contain at least one letter")
+
     existing = await get_user_by_email(payload.email)
     if existing:
         raise HTTPException(status_code=409, detail="Email already registered")
@@ -83,6 +92,15 @@ async def register(payload: RegisterRequest):
     )
     if not user:
         raise HTTPException(status_code=409, detail="Email already registered")
+
+    # Send verification email
+    try:
+        from app.services.email_verification import create_verification_token, send_verification_email
+        base_url = str(request.base_url).rstrip('/')
+        ver_token = await create_verification_token(user['id'])
+        await send_verification_email(user['email'], user.get('name',''), ver_token, base_url)
+    except Exception as e:
+        logger.warning(f"Verification email failed: {e}")
 
     token = create_access_token(user['id'], user['email'])
     return AuthResponse(
@@ -103,6 +121,13 @@ async def login(payload: LoginRequest):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     if not verify_password(payload.password, user['password_hash']):
         raise HTTPException(status_code=401, detail="Invalid email or password")
+    # Block unverified accounts (skip for dev emails)
+    DEV_EMAILS = {"test@projectelevate.io", "ijw91021@gmail.com", "admin@projectelevate.io"}
+    if not user.get('email_verified', False) and user.get('email') not in DEV_EMAILS:
+        raise HTTPException(
+            status_code=403,
+            detail="Please verify your email before logging in. Check your inbox for a verification link."
+        )
 
     token = create_access_token(user['id'], user['email'])
     return AuthResponse(
@@ -114,6 +139,17 @@ async def login(payload: LoginRequest):
 
 
 # ── Google OAuth ──────────────────────────────────────────────────────────────
+
+
+
+@router.get("/verify-email")
+async def verify_email(token: str):
+    """Verify email via token link."""
+    from app.services.email_verification import verify_token
+    user_id = await verify_token(token)
+    if not user_id:
+        raise HTTPException(status_code=400, detail="Invalid or expired verification link. Please register again.")
+    return {"message": "Email verified! You can now log in to Project Elevate."}
 
 @router.post("/google", response_model=AuthResponse)
 async def google_auth(payload: GoogleAuthRequest):
