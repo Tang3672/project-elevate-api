@@ -45,6 +45,7 @@ class Settings(BaseSettings):
 
 
     # ── Stripe Billing ────────────────────────────────────────────────────────
+    SMTP_PASS: str = ""
     STRIPE_SECRET_KEY:     str = ""
     STRIPE_WEBHOOK_SECRET: str = ""
     STRIPE_PRICE_ID:       str = ""
