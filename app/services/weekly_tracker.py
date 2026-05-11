@@ -267,7 +267,8 @@ async def run_weekly_tracker():
         watchlists = await get_all_active_watchlists()
     except Exception as e:
         logger.error(f"Failed to fetch watchlists: {e}")
-        return
+        # Table may not exist yet — return gracefully
+        return []
 
     if not watchlists:
         logger.info("No active watchlists to process")
@@ -379,7 +380,11 @@ async def send_weekly_digest_email(user: dict, results: List[dict]):
 async def run_tracker_for_user(user_id: int):
     """Manually trigger tracker for a single user (for testing)."""
     from app.db.watchlist_repository import get_watchlists_for_user
-    watchlists = await get_watchlists_for_user(user_id)
+    try:
+        watchlists = await get_watchlists_for_user(user_id)
+    except Exception as e:
+        logger.error(f"Failed to fetch watchlists for user {user_id}: {e}")
+        return []
     results = []
     for wl in watchlists:
         result = await process_watchlist(wl)
