@@ -133,4 +133,4 @@ async def start_tracker_scheduler():
         id="weekly_tracker", replace_existing=True
     )
     _tracker_scheduler.start()
-    logger.info("Weekly tracker scheduler started")
+    import logging; logging.getLogger(__name__).info("Weekly tracker scheduler started")
