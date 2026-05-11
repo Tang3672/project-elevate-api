@@ -41,10 +41,6 @@ async def check_subscription(user_id: int, path: str) -> dict:
     if path not in GATED_PATHS:
         return {"allowed": True}
 
-    user = await get_user_by_id(user_id)
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-
     status    = user.get("subscription_status", "none")
     trial_end = user.get("trial_ends_at")
     now       = datetime.now(timezone.utc)
