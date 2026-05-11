@@ -68,18 +68,19 @@ async def get_pi_report(payload: PIReportRequest):
         idea = payload.idea
         if payload.target_pathogen:
             idea = f"{idea}\n\nTarget pathogen: {payload.target_pathogen}"
-        return await generate_pi_report(idea, payload.product_type, payload.disease_domain, getattr(payload, "tier1_category", "drug_small_molecule"))
-    # Increment free report counter if not subscribed
-    try:
-        if current_user:
-            from app.db.user_repository import get_user_by_id, increment_free_report_count
-            user = await get_user_by_id(current_user["id"])
-            status = user.get("subscription_status", "none") if user else "none"
-            dev_emails = {"test@projectelevate.io", "ijw91021@gmail.com", "admin@projectelevate.io"}
-            if status not in ("active", "trialing") and current_user.get("email") not in dev_emails:
-                await increment_free_report_count(current_user["id"])
-    except Exception as e:
-        import logging; logging.getLogger(__name__).warning(f"Failed to increment free report count: {e}")
+        report = await generate_pi_report(idea, payload.product_type, payload.disease_domain, getattr(payload, "tier1_category", "drug_small_molecule"))
+        # Increment free report counter if not subscribed
+        try:
+            if current_user:
+                from app.db.user_repository import get_user_by_id, increment_free_report_count
+                user = await get_user_by_id(current_user["id"])
+                status = user.get("subscription_status", "none") if user else "none"
+                dev_emails = {"test@projectelevate.io", "ijw91021@gmail.com", "admin@projectelevate.io"}
+                if status not in ("active", "trialing") and current_user.get("email") not in dev_emails:
+                    await increment_free_report_count(current_user["id"])
+        except Exception as inc_e:
+            import logging; logging.getLogger(__name__).warning(f"Failed to increment free report count: {inc_e}")
+        return report
     except ValueError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
