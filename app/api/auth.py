@@ -17,7 +17,7 @@ GET  /api/v1/auth/drafts          — list drafts
 DELETE /api/v1/auth/drafts/{id}   — delete a draft
 """
 import logging
-from fastapi import APIRouter, HTTPException, Depends, Header
+from fastapi import APIRouter, HTTPException, Request, Depends, Header
 from typing import Optional, List
 
 from app.models.user import (
