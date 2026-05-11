@@ -7,6 +7,7 @@ from app.api.auth import router as auth_router
 from app.api.watchlist import router as watchlist_router, admin_router as watchlist_admin_router
 from app.api.features import trial_router, portfolio_router, grant_router
 from app.api.billing import router as billing_router
+from app.api.tracker import router as tracker_router
 from app.db.database import init_db
 from app.db.demand_repository import ensure_demand_signals_table
 from app.core.config import settings
@@ -69,6 +70,7 @@ app.include_router(trial_router,     prefix="/api/v1", tags=["clinical-roadmap"]
 app.include_router(portfolio_router, prefix="/api/v1", tags=["portfolio"])
 app.include_router(grant_router,     prefix="/api/v1", tags=["grant"])
 app.include_router(billing_router,   prefix="/api/v1", tags=["billing"])
+app.include_router(tracker_router,   prefix="/api/v1", tags=["tracker"])
 
 @app.get("/health")
 async def health_check():
@@ -114,3 +116,21 @@ def debug_env_check():
         "has_openai_key": bool(os.getenv("OPENAI_API_KEY")),
         "has_database_url": bool(os.getenv("DATABASE_URL")),
     }
+
+
+# ── Weekly Tracker Scheduler ──────────────────────────────────────────────────
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+import asyncio
+
+_tracker_scheduler = AsyncIOScheduler(timezone="UTC")
+
+@app.on_event("startup")
+async def start_tracker_scheduler():
+    from app.services.weekly_tracker import run_weekly_tracker
+    _tracker_scheduler.add_job(
+        lambda: asyncio.create_task(run_weekly_tracker()),
+        trigger="cron", day_of_week="mon", hour=8, minute=0,
+        id="weekly_tracker", replace_existing=True
+    )
+    _tracker_scheduler.start()
+    logger.info("Weekly tracker scheduler started")
