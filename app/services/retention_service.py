@@ -430,8 +430,11 @@ async def compute_signal_delta(watchlist: dict, days_back: int = 30) -> dict:
     Compare current demand signals against signals from N days ago.
     Shows how the hospital/federal demand picture has changed.
     """
-    from app.db.demand_repository import search_similar_signals, get_pool
-    from app.services.embedding_service import embed_text
+    try:
+        from app.db.demand_repository import search_similar_signals
+        from app.services.embedding_service import embed_text
+    except ImportError as e:
+        return {"new_in_30_days": 0, "delta_summary": f"Service unavailable: {e}"}
 
     desc = watchlist.get("product_description", "")
     if not desc:
