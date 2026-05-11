@@ -370,3 +370,22 @@ async def get_user_by_id(user_id: int):
     async with pool.acquire() as conn:
         row = await conn.fetchrow("SELECT * FROM users WHERE id = $1", user_id)
         return dict(row) if row else None
+
+
+async def increment_free_report_count(user_id: int):
+    """Increment the free report counter for a user."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE users SET free_reports_used = free_reports_used + 1 WHERE id = $1",
+            user_id
+        )
+
+async def get_free_reports_used(user_id: int) -> int:
+    """Get how many free reports a user has used."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT free_reports_used FROM users WHERE id = $1", user_id
+        )
+        return row['free_reports_used'] if row else 0

@@ -67,12 +67,15 @@ async def billing_status(current_user: dict = Depends(get_current_user)):
             trial_ends_aware = trial_ends.replace(tzinfo=timezone.utc) if trial_ends.tzinfo is None else trial_ends
             is_active = now < trial_ends_aware
 
+    free_used = user.get("free_reports_used", 0)
     return {
-        "subscription_status": sub_status,
-        "is_active":           is_active,
-        "trial_ends_at":       trial_ends.isoformat() if trial_ends else None,
-        "stripe_customer_id":  stripe_id,
-        "plan":                "starter" if is_active else "none",
+        "subscription_status":   sub_status,
+        "is_active":             is_active,
+        "trial_ends_at":         trial_ends.isoformat() if trial_ends else None,
+        "stripe_customer_id":    stripe_id,
+        "plan":                  "starter" if is_active else "none",
+        "free_reports_used":     free_used,
+        "free_reports_remaining": max(0, 1 - free_used) if not is_active else 999,
     }
 
 
