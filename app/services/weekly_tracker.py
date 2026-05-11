@@ -28,7 +28,7 @@ import httpx
 from app.core.config import settings
 from app.db.watchlist_repository import get_all_active_watchlists, create_alert
 from app.db.user_repository import get_user_by_id
-from app.services.email_service import send_weekly_digest
+# Email sent inline via send_weekly_digest_email function below
 
 logger = logging.getLogger(__name__)
 
