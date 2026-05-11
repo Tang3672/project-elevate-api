@@ -39,3 +39,34 @@ async def trigger_all(current_user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=403, detail="Admin only")
     results = await run_weekly_tracker()
     return {"status": "complete", "processed": len(results) if results else 0}
+
+
+@router.get("/tracker/grants")
+async def get_grant_deadlines(
+    domain: str = "all",
+    current_user: dict = Depends(get_current_user)
+):
+    """Get upcoming grant deadlines relevant to a domain."""
+    from app.services.retention_service import check_grant_deadlines
+    grants = await check_grant_deadlines(domain, [])
+    return {"grants": grants, "total": len(grants)}
+
+
+@router.post("/tracker/check-staleness/{report_id}")
+async def check_staleness(
+    report_id: int,
+    current_user: dict = Depends(get_current_user)
+):
+    """Check if a saved report is outdated."""
+    from app.services.retention_service import check_report_staleness
+    from app.db.user_repository import get_pool
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM saved_reports WHERE id = $1 AND user_id = $2",
+            report_id, current_user["id"]
+        )
+    if not row:
+        raise HTTPException(status_code=404, detail="Report not found")
+    result = await check_report_staleness(dict(row))
+    return result

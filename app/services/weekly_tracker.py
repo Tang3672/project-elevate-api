@@ -186,6 +186,30 @@ async def process_watchlist(watchlist: dict) -> dict:
 
     combined = "\n\n".join(results)
 
+    # Run retention intelligence checks (staleness, grants, competitors, signals)
+    try:
+        from app.services.retention_service import run_retention_checks, format_retention_alert_body
+        from app.db.user_repository import get_user_by_id
+        # Get saved reports for this user
+        try:
+            from app.db.user_repository import get_pool
+            pool = await get_pool()
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(
+                    "SELECT * FROM saved_reports WHERE user_id = $1 ORDER BY created_at DESC LIMIT 3",
+                    watchlist["user_id"]
+                )
+                saved_reports = [dict(r) for r in rows]
+        except Exception:
+            saved_reports = []
+
+        retention_results = await run_retention_checks(watchlist, saved_reports)
+        retention_body    = format_retention_alert_body(retention_results, watchlist.get("name", ""))
+    except Exception as e:
+        logger.error(f"Retention checks failed: {e}")
+        retention_results = {}
+        retention_body    = ""
+
     # Analyze findings
     analysis = await _analyze_findings(watchlist, combined)
 
