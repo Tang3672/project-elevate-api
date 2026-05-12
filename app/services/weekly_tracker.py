@@ -169,7 +169,7 @@ async def _analyze_findings(watchlist: dict, search_results: str) -> dict:
 
 async def process_watchlist(watchlist: dict) -> dict:
     """Run full weekly intelligence scan for one watchlist."""
-    wl_id   = watchlist["id"]
+    wl_id   = watchlist["watchlist_id"]
     wl_name = watchlist.get("name", "Watchlist")
     user_id = watchlist["user_id"]
 
