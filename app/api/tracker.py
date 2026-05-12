@@ -94,10 +94,10 @@ async def test_full_retention(current_user: dict = Depends(get_current_user)):
 
         watchlist = dict(wl_rows[0]) if wl_rows else {
             "id": 0, "user_id": current_user["id"],
-            "name": "CRE Antibiotic Market (Demo)",
-            "product_description": "A novel beta-lactam/beta-lactamase inhibitor combination targeting carbapenem-resistant Klebsiella pneumoniae and Acinetobacter baumannii in hospitalized patients with serious infections.",
-            "keywords": ["CRE", "carbapenem", "QIDP", "beta-lactamase", "KPC", "NDM"],
-            "disease_domain": "drug_amr",
+            "name": "GLP-1 Obesity Drug (Demo — high activity)",
+            "product_description": "A next-generation oral GLP-1 receptor agonist for type 2 diabetes and obesity, targeting patients who cannot tolerate injectable semaglutide or tirzepatide, with improved GI tolerability profile.",
+            "keywords": ["GLP-1", "semaglutide", "tirzepatide", "obesity", "diabetes", "SGLT2"],
+            "disease_domain": "drug_metabolic",
         }
 
         saved_report = dict(report_rows[0]) if report_rows else {
@@ -105,23 +105,24 @@ async def test_full_retention(current_user: dict = Depends(get_current_user)):
             "user_id": current_user["id"],
             "created_at": "2026-02-01T00:00:00Z",
             "report_data": {
-                "idea_submitted": "A novel beta-lactam/BLI targeting CRE",
-                "expert_name": "AMR / Antibiotic Drug Expert",
-                "expert_domain": "drug_amr",
+                "idea_submitted": "A next-generation oral GLP-1 receptor agonist for obesity",
+                "expert_name": "Metabolic / Diabetes Drug Expert",
+                "expert_domain": "drug_metabolic",
                 "disease_intelligence": {
-                    "condition": "Carbapenem-Resistant Enterobacterales (CRE)",
+                    "condition": "Obesity and Type 2 Diabetes (GLP-1 market)",
                     "data_points": [
-                        {"metric": "Annual U.S. CRE infections", "value": "13,100", "year": "2019", "source": "CDC AR Threats Report"},
-                        {"metric": "Annual U.S. CRE deaths", "value": "1,100", "year": "2019", "source": "CDC AR Threats Report"},
+                        {"metric": "U.S. obesity prevalence", "value": "42%", "year": "2023", "source": "CDC"},
+                        {"metric": "GLP-1 market size 2023", "value": "$35B", "year": "2023", "source": "IQVIA"},
+                        {"metric": "Semaglutide (Ozempic/Wegovy) revenue", "value": "$21B", "year": "2023", "source": "Novo Nordisk annual report"},
                     ]
                 },
                 "market_sizing": {
-                    "total_addressable_market_usd": 285000000,
-                    "serviceable_market_usd": 95000000,
+                    "total_addressable_market_usd": 50000000000,
+                    "serviceable_market_usd": 5000000000,
                 },
                 "regulatory_pathway": {
-                    "recommended_pathway": "NDA 505(b)(1) with QIDP designation",
-                    "designations": [{"name": "QIDP", "priority": "recommended"}]
+                    "recommended_pathway": "NDA 505(b)(1) with CVOT requirement",
+                    "designations": [{"name": "Fast Track", "priority": "recommended"}]
                 }
             }
         }
