@@ -296,37 +296,65 @@ def get_relevant_grants(sub_expert_id: str, disease_keywords: List[str]) -> List
 async def check_grant_deadlines(sub_expert_id: str, keywords: List[str]) -> List[dict]:
     """Check for upcoming grant deadlines relevant to this watchlist."""
     grants = get_relevant_grants(sub_expert_id, keywords)
+
+    # Always include NIH SBIR and R01 deadlines since they apply to all PIs
+    # Calculate next upcoming deadline from the 3x/year cycle
+    always_relevant = ["NIH SBIR Phase I", "NIH SBIR Phase II", "NIH R01"]
+    existing_names = {g["name"] for g in grants}
+    for g in GRANT_CALENDAR:
+        if g["name"] in always_relevant and g["name"] not in existing_names:
+            grants.append(g)
+
     now = datetime.now(timezone.utc)
 
     upcoming = []
+    added_ids = set()
+
     for grant in grants:
-        # Check if any deadline is within 60 days
-        for deadline_str in grant.get("deadlines", []):
+        grant_key = grant.get("name", "")
+        deadlines = grant.get("deadlines", [])
+
+        added = False
+        for deadline_str in deadlines:
             if "rolling" in deadline_str.lower() or "check" in deadline_str.lower():
-                upcoming.append({**grant, "days_until": None, "urgency": "check_website"})
+                if grant_key not in added_ids:
+                    upcoming.append({**grant, "days_until": None, "urgency": "check_website"})
+                    added_ids.add(grant_key)
+                added = True
                 break
-            else:
-                try:
-                    # Try to parse deadline like "April 5"
-                    for year in [now.year, now.year + 1]:
+
+        if not added:
+            # Try each deadline string against current and next year
+            for deadline_str in deadlines:
+                matched = False
+                for year in [now.year, now.year + 1]:
+                    for fmt in ["%B %d %Y", "%b %d %Y"]:
                         try:
-                            deadline = datetime.strptime(f"{deadline_str} {year}", "%B %d %Y")
+                            deadline = datetime.strptime(f"{deadline_str} {year}", fmt)
                             deadline = deadline.replace(tzinfo=timezone.utc)
                             days_until = (deadline - now).days
-                            if 0 <= days_until <= 90:
-                                upcoming.append({
-                                    **grant,
-                                    "days_until": days_until,
-                                    "deadline_date": deadline.strftime("%B %d, %Y"),
-                                    "urgency": "urgent" if days_until <= 14 else "upcoming",
-                                })
+                            if -7 <= days_until <= 120:  # Include recently passed (grace) and up to 120 days out
+                                if grant_key not in added_ids:
+                                    upcoming.append({
+                                        **grant,
+                                        "days_until": max(0, days_until),
+                                        "deadline_date": deadline.strftime("%B %d, %Y"),
+                                        "urgency": "urgent" if days_until <= 14 else "upcoming",
+                                    })
+                                    added_ids.add(grant_key)
+                                matched = True
                                 break
                         except ValueError:
-                            pass
-                except Exception:
-                    pass
+                            continue
+                    if matched:
+                        break
 
-    return upcoming
+            # If no specific deadline matched, still include as rolling
+            if grant_key not in added_ids:
+                upcoming.append({**grant, "days_until": None, "urgency": "check_website"})
+                added_ids.add(grant_key)
+
+    return sorted(upcoming, key=lambda x: (x.get("days_until") is None, x.get("days_until", 999)))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -450,7 +478,7 @@ async def compute_signal_delta(watchlist: dict, days_back: int = 30) -> dict:
         cutoff = datetime.now(timezone.utc) - timedelta(days=days_back)
         new_signals = []
         for sig in current_signals:
-            fetched_at = sig.get("fetched_at")
+            fetched_at = sig.get("fetched_at") or sig.get("created_at") or sig.get("last_fetched")
             if fetched_at:
                 try:
                     if isinstance(fetched_at, str):
