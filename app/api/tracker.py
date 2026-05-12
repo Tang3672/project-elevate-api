@@ -148,12 +148,32 @@ async def test_full_retention(current_user: dict = Depends(get_current_user)):
         except Exception as e:
             results["features"]["grant_deadlines"] = []
 
-        # 3. Competitor milestones
+        # 3. Competitor milestones (Claude web search)
         try:
             desc = watchlist.get("product_description", "")[:100]
             results["features"]["competitor_milestones"] = await track_competitor_milestones(desc, desc)
         except Exception as e:
             results["features"]["competitor_milestones"] = []
+
+        # 3b. ClinicalTrials.gov + FDA live pipeline (moat wideners 2+3)
+        try:
+            from app.services.fda_pipeline import get_full_competitive_intelligence
+            condition = watchlist.get("product_description", "obesity GLP-1 diabetes")[:80]
+            keywords  = watchlist.get("keywords", ["GLP-1", "obesity"])
+            ci = await get_full_competitive_intelligence(
+                condition=condition,
+                disease_keywords=keywords,
+            )
+            results["features"]["clinical_trials"] = {
+                "total_trials":        ci.get("trial_pipeline", {}).get("total_trials", 0),
+                "recruiting":          ci.get("trial_pipeline", {}).get("recruiting_count", 0),
+                "threat_level":        ci.get("trial_pipeline", {}).get("competitive_threat_level", "unknown"),
+                "top_trials":          ci.get("trial_pipeline", {}).get("active_trials", [])[:4],
+                "recently_completed":  ci.get("recently_completed", [])[:2],
+                "summary":             ci.get("intelligence_summary", ""),
+            }
+        except Exception as e:
+            results["features"]["clinical_trials"] = {"error": str(e)}
 
         # 4. Signal delta
         try:
@@ -176,3 +196,23 @@ async def test_full_retention(current_user: dict = Depends(get_current_user)):
 
     except Exception as e:
         return {"error": str(e), "traceback": traceback.format_exc()}
+
+
+@router.get("/competitive-intel")
+async def get_competitive_intel(
+    condition: str = "carbapenem-resistant infections",
+    current_user: dict = Depends(get_current_user)
+):
+    """Get live FDA + ClinicalTrials competitive intelligence for a condition."""
+    from app.services.fda_pipeline import (
+        get_full_competitive_intelligence,
+        format_competitive_intelligence_for_report
+    )
+    keywords = condition.split()[:4]
+    ci = await get_full_competitive_intelligence(
+        condition=condition,
+        disease_keywords=keywords,
+    )
+    ci["formatted"] = format_competitive_intelligence_for_report(ci)
+    return ci
+✅ Competitive intel endpoint addedcat

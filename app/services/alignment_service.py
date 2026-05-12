@@ -319,6 +319,25 @@ async def _generate_expert_report(idea, product_type, expert, demand_results, ho
             product_desc            = idea[:200],
             domain_static_knowledge = domain_static,
         )
+
+    # Moat Widener 2+3: inject FDA history + ClinicalTrials live pipeline
+    try:
+        from app.services.fda_pipeline import (
+            get_full_competitive_intelligence,
+            format_competitive_intelligence_for_report
+        )
+        disease_keywords = disease_name.replace("(", "").replace(")", "").split()[:4]
+        ci = await get_full_competitive_intelligence(
+            condition=disease_name,
+            disease_keywords=disease_keywords,
+        )
+        ci_context = format_competitive_intelligence_for_report(ci)
+        researcher_ctx = researcher_ctx + ci_context
+        # Store for later use in report metadata
+        _competitive_intelligence = ci
+    except Exception as e:
+        logger.warning(f"Competitive intelligence fetch failed: {e}")
+        _competitive_intelligence = {}
     except Exception as e:
         logger.warning(f"Knowledge retriever failed: {e} — using static knowledge")
         researcher_ctx = expert_system_prompt + "\n\n" + domain_static
