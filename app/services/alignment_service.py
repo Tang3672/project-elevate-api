@@ -319,6 +319,10 @@ async def _generate_expert_report(idea, product_type, expert, demand_results, ho
             product_desc            = idea[:200],
             domain_static_knowledge = domain_static,
         )
+    except Exception as e:
+        logger.warning(f"Knowledge retriever failed: {e} — using static knowledge")
+        researcher_ctx = expert_system_prompt + "\n\n" + domain_static
+        critic_ctx     = expert_critic_rules
 
     # Moat Widener 2+3: inject FDA history + ClinicalTrials live pipeline
     try:
@@ -333,15 +337,11 @@ async def _generate_expert_report(idea, product_type, expert, demand_results, ho
         )
         ci_context = format_competitive_intelligence_for_report(ci)
         researcher_ctx = researcher_ctx + ci_context
-        # Store for later use in report metadata
         _competitive_intelligence = ci
     except Exception as e:
         logger.warning(f"Competitive intelligence fetch failed: {e}")
         _competitive_intelligence = {}
-    except Exception as e:
-        logger.warning(f"Knowledge retriever failed: {e} — using static knowledge")
-        researcher_ctx = expert_system_prompt + "\n\n" + domain_static
-        critic_ctx     = expert_critic_rules
+
 
     # Build final context with demand signals + hospital matches
     context = _build_expert_context(
