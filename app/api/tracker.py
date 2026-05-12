@@ -82,15 +82,19 @@ async def test_full_retention(current_user: dict = Depends(get_current_user)):
         from app.db.user_repository import get_pool
 
         pool = await get_pool()
-        async with pool.acquire() as conn:
-            wl_rows = await conn.fetch(
-                "SELECT * FROM watchlists WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1",
-                current_user["id"]
-            )
-            report_rows = await conn.fetch(
-                "SELECT * FROM saved_reports WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1",
-                current_user["id"]
-            )
+        try:
+            async with pool.acquire() as conn:
+                wl_rows = await conn.fetch(
+                    "SELECT * FROM watchlists WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1",
+                    current_user["id"]
+                )
+                report_rows = await conn.fetch(
+                    "SELECT * FROM saved_reports WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1",
+                    current_user["id"]
+                )
+        except Exception:
+            wl_rows = []
+            report_rows = []
 
         watchlist = dict(wl_rows[0]) if wl_rows else {
             "id": 0, "user_id": current_user["id"],
