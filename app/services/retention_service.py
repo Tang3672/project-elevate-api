@@ -455,145 +455,84 @@ Respond ONLY in JSON array:
 
 async def compute_signal_delta(watchlist: dict, days_back: int = 30) -> dict:
     """
-    Compare current demand signals against signals from N days ago.
-    Shows how the hospital/federal demand picture has changed.
+    Search for recent news and publications about the watchlist topic
+    from the last 30 days using live web search.
     """
-    try:
-        from app.db.demand_repository import search_similar_signals
-        from app.services.embedding_service import embed_text
-    except ImportError as e:
-        return {"new_in_30_days": 0, "delta_summary": f"Service unavailable: {e}"}
+    desc     = watchlist.get("product_description", "")
+    keywords = watchlist.get("keywords", [])
+    name     = watchlist.get("name", "")
+    kw_str   = " ".join(keywords[:3]) if keywords else desc[:60]
 
-    desc = watchlist.get("product_description", "")
-    if not desc:
-        return {"new_signals": 0, "delta_summary": "No product description"}
+    queries = [
+        f"{kw_str} news research update May 2026",
+        f"{kw_str} FDA approval clinical trial 2026",
+        f"{kw_str} new study publication April May 2026",
+    ]
 
-    try:
-        embedding = await embed_text(desc)
-        current_signals = await search_similar_signals(
-            query_embedding=embedding, top_k=50, min_similarity=0.55
-        )
+    all_findings = []
+    from app.core.config import settings
+    import httpx as _httpx
 
-        # Signals added in last 30 days
-        cutoff = datetime.now(timezone.utc) - timedelta(days=days_back)
-        new_signals = []
-        for sig in current_signals:
-            fetched_at = sig.get("fetched_at") or sig.get("created_at") or sig.get("last_fetched")
-            if fetched_at:
-                try:
-                    if isinstance(fetched_at, str):
-                        fetched_dt = datetime.fromisoformat(fetched_at.replace("Z", "+00:00"))
-                    else:
-                        fetched_dt = fetched_at
-                    if fetched_dt.replace(tzinfo=timezone.utc) > cutoff:
-                        new_signals.append(sig)
-                except Exception:
-                    pass
+    for i, query in enumerate(queries):
+        if i > 0:
+            await asyncio.sleep(1.0)
+        try:
+            async with _httpx.AsyncClient(timeout=30.0) as client:
+                r = await client.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers={
+                        "x-api-key": settings.ANTHROPIC_API_KEY,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json",
+                    },
+                    json={
+                        "model": "claude-haiku-4-5-20251001",
+                        "max_tokens": 500,
+                        "tools": [{"type": "web_search_20250305", "name": "web_search"}],
+                        "messages": [{"role": "user", "content": (
+                            f"Search: {query}\n\n"
+                            f"Find news or publications from the LAST 30 DAYS only (April-May 2026).\n"
+                            f"Format each finding as: TITLE | DATE | KEY FINDING | URL\n"
+                            f"If nothing recent found, say: No recent findings"
+                        )}],
+                    }
+                )
+                text = ""
+                for block in r.json().get("content", []):
+                    if block.get("type") == "text":
+                        text += block.get("text", "")
+                if "No recent findings" not in text and len(text) > 50:
+                    for line in text.split("\n"):
+                        line = line.strip()
+                        if "|" in line and len(line) > 20:
+                            parts = [p.strip() for p in line.split("|")]
+                            if len(parts) >= 2:
+                                all_findings.append({
+                                    "title":   parts[0][:120],
+                                    "date":    parts[1] if len(parts) > 1 else "Recent",
+                                    "finding": parts[2][:200] if len(parts) > 2 else "",
+                                    "url":     parts[3] if len(parts) > 3 else "",
+                                })
+        except Exception as e:
+            logger.warning(f"News search failed: {e}")
 
-        # Summarize new signals by source
-        by_source = {}
-        for sig in new_signals:
-            src = sig.get("source", "unknown")
-            by_source[src] = by_source.get(src, 0) + 1
+    # Deduplicate
+    seen, unique = set(), []
+    for f in all_findings:
+        key = f["title"][:40].lower()
+        if key not in seen:
+            seen.add(key)
+            unique.append(f)
 
-        source_summary = ", ".join(f"{count} from {src}" for src, count in by_source.items())
-
-        return {
-            "total_current": len(current_signals),
-            "new_in_30_days": len(new_signals),
-            "by_source": by_source,
-            "source_summary": source_summary or "No new signals",
-            "top_new_signals": [
-                {
-                    "title": s.get("title", ""),
-                    "source": s.get("source", ""),
-                    "signal_type": s.get("signal_type", ""),
-                    "location": s.get("location_name", ""),
-                }
-                for s in new_signals[:3]
-            ],
-        }
-    except Exception as e:
-        logger.error(f"Signal delta failed: {e}")
-        return {"new_signals": 0, "delta_summary": str(e)}
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# 5. REPORT VERSIONING
-# ══════════════════════════════════════════════════════════════════════════════
-
-def diff_reports(old_report: dict, new_report: dict) -> dict:
-    """
-    Compare two PIReport dicts and return a structured diff.
-    Shows what changed between the PI's old report and a fresh analysis.
-    """
-    changes = []
-
-    # Compare TAM
-    old_tam = old_report.get("market_sizing", {}).get("total_addressable_market_usd", 0)
-    new_tam = new_report.get("market_sizing", {}).get("total_addressable_market_usd", 0)
-    if old_tam and new_tam and abs(new_tam - old_tam) / old_tam > 0.1:
-        pct = ((new_tam - old_tam) / old_tam) * 100
-        changes.append({
-            "field": "Total Addressable Market",
-            "old_value": f"${old_tam/1e6:.0f}M",
-            "new_value": f"${new_tam/1e6:.0f}M",
-            "change": f"{pct:+.0f}%",
-            "significance": "high" if abs(pct) > 25 else "medium",
-        })
-
-    # Compare regulatory pathway
-    old_path = old_report.get("regulatory_pathway", {}).get("recommended_pathway", "")
-    new_path = new_report.get("regulatory_pathway", {}).get("recommended_pathway", "")
-    if old_path and new_path and old_path != new_path:
-        changes.append({
-            "field": "Recommended Regulatory Pathway",
-            "old_value": old_path,
-            "new_value": new_path,
-            "change": "Changed",
-            "significance": "high",
-        })
-
-    # Compare designations count
-    old_desig = len(old_report.get("regulatory_pathway", {}).get("designations", []))
-    new_desig = len(new_report.get("regulatory_pathway", {}).get("designations", []))
-    if new_desig > old_desig:
-        changes.append({
-            "field": "Regulatory Designations Available",
-            "old_value": f"{old_desig} designations",
-            "new_value": f"{new_desig} designations",
-            "change": f"+{new_desig - old_desig} new designations identified",
-            "significance": "medium",
-        })
-
-    # Compare disease data points
-    old_dp = {dp.get("metric", ""): dp.get("value", "") for dp in old_report.get("disease_intelligence", {}).get("data_points", [])}
-    new_dp = {dp.get("metric", ""): dp.get("value", "") for dp in new_report.get("disease_intelligence", {}).get("data_points", [])}
-
-    for metric in set(old_dp.keys()) & set(new_dp.keys()):
-        if old_dp[metric] != new_dp[metric] and old_dp[metric] and new_dp[metric]:
-            changes.append({
-                "field": f"Disease Data: {metric}",
-                "old_value": old_dp[metric],
-                "new_value": new_dp[metric],
-                "change": "Updated",
-                "significance": "medium",
-            })
-
-    high_changes = [c for c in changes if c["significance"] == "high"]
-    
     return {
-        "total_changes": len(changes),
-        "high_significance_changes": len(high_changes),
-        "changes": changes[:10],
-        "summary": f"{len(changes)} things changed since your last report" if changes else "No significant changes detected",
-        "needs_regeneration": len(high_changes) >= 2 or any(c["field"] == "Total Addressable Market" for c in high_changes),
+        "new_in_30_days": len(unique),
+        "findings":       unique[:6],
+        "source_summary": "Live web search — news, PubMed, FDA, ClinicalTrials.gov",
+        "delta_summary":  f"{len(unique)} developments found in last 30 days for {name or kw_str}." if unique else f"No major developments found in last 30 days for {kw_str}.",
+        "topic":          kw_str,
     }
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# UNIFIED RETENTION CHECK — runs as part of weekly tracker
-# ══════════════════════════════════════════════════════════════════════════════
 
 async def run_retention_checks(watchlist: dict, saved_reports: List[dict]) -> dict:
     """
