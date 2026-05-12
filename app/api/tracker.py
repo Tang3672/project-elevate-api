@@ -75,7 +75,9 @@ async def check_staleness(
 @router.post("/tracker/test-full")
 async def test_full_retention(current_user: dict = Depends(get_current_user)):
     """Full retention test — runs all 5 features and returns results."""
-    from app.services.retention_service import (
+    import traceback
+    try:
+        from app.services.retention_service import (
         check_report_staleness, check_grant_deadlines,
         track_competitor_milestones, compute_signal_delta,
         format_retention_alert_body
@@ -175,3 +177,5 @@ async def test_full_retention(current_user: dict = Depends(get_current_user)):
         results["formatted_alert"] = f"Format error: {e}"
 
     return results
+    except Exception as e:
+        return {"error": str(e), "traceback": traceback.format_exc()}
