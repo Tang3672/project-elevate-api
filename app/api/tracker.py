@@ -215,4 +215,3 @@ async def get_competitive_intel(
     )
     ci["formatted"] = format_competitive_intelligence_for_report(ci)
     return ci
-✅ Competitive intel endpoint addedcat
