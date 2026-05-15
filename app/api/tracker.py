@@ -17,6 +17,7 @@ async def trigger_tracker(current_user: dict = Depends(get_current_user)):
     """Manually trigger weekly tracker for the current user's watchlists."""
     try:
         from app.services.weekly_tracker import run_tracker_for_user
+        logger.info(f"Tracker called for user: {current_user}")
         results = await run_tracker_for_user(current_user["id"])
         return {
             "status": "complete",
