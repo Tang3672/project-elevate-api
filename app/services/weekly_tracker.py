@@ -256,11 +256,12 @@ async def process_watchlist(watchlist: dict) -> dict:
     alert = await create_alert(
         watchlist_id = wl_id,
         user_id      = user_id,
-        alert_type   = "weekly_scan",
         title        = title,
-        summary      = body,
+        body         = body,
         severity     = severity,
         source       = "weekly_tracker",
+        recalculation_needed = needs_recalc,
+        significance_score   = score,
     )
 
     return {
