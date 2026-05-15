@@ -221,7 +221,7 @@ async def create_report(
     current_user: dict = Depends(get_current_user),
 ):
     """Save a PI report."""
-    return await save_report(
+    saved = await save_report(
         user_id      = current_user['id'],
         name         = payload.name,
         product_type = payload.product_type,
@@ -229,6 +229,18 @@ async def create_report(
         report_data  = payload.report_data,
         pathogen     = payload.pathogen,
     )
+    # Async memory extraction — non-blocking, never fails the save
+    try:
+        import asyncio
+        from app.services.pi_memory_service import extract_and_store_memory
+        asyncio.create_task(extract_and_store_memory(
+            user_id     = current_user['id'],
+            idea        = payload.idea,
+            report_data = payload.report_data,
+        ))
+    except Exception:
+        pass
+    return saved
 
 
 @router.get("/reports", response_model=List[SavedReportSummary])

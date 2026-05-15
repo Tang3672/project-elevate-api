@@ -53,6 +53,7 @@ async def generate_pi_report(
     product_type:   str = "other",
     disease_domain: str = "auto",
     tier1_category: str = "drug_small_molecule",
+    user_id:        int = None,
 ) -> PIReport:
     """
     Full MoE pipeline: idea → Expert Router → Expert Context → Claude → PIReport.
@@ -73,6 +74,17 @@ async def generate_pi_report(
         query_embedding=idea_embedding, top_k=20, min_similarity=0.50)
     hospital_matches_raw = await find_similar_needs(
         query_embedding=idea_embedding, top_k=10, min_similarity=0.50)
+
+    # ── PI Institutional Memory ───────────────────────────────────────────────
+    pi_memory_context = ""
+    if user_id:
+        try:
+            from app.services.pi_memory_service import get_pi_memory_context
+            pi_memory_context = await get_pi_memory_context(user_id)
+            if pi_memory_context:
+                logger.info(f"PI memory loaded for user {user_id}")
+        except Exception as e:
+            logger.warning(f"PI memory load failed (non-fatal): {e}")
 
     # ── MoE Routing ───────────────────────────────────────────────────────────
     router_result = await route_expert(idea=idea, pi_domain=disease_domain)
@@ -346,7 +358,8 @@ async def _generate_expert_report(idea, product_type, expert, demand_results, ho
     # Build final context with demand signals + hospital matches
     context = _build_expert_context(
         idea, expert, demand_results, hospital_matches_raw,
-        disease_knowledge=researcher_ctx
+        disease_knowledge=researcher_ctx,
+        pi_memory=pi_memory_context,
     )
 
     # Use expert system prompt + JSON schema
@@ -359,10 +372,14 @@ async def _generate_expert_report(idea, product_type, expert, demand_results, ho
     return _parse_expert_response(data, idea, product_type, expert, demand_results, hospital_matches_raw, total_signals)
 
 
-def _build_expert_context(idea, expert, demand_results, hospital_matches, disease_knowledge=""):
+def _build_expert_context(idea, expert, demand_results, hospital_matches, disease_knowledge="", pi_memory=""):
     lines = [
         f"PRINCIPAL INVESTIGATOR INNOVATION:\n{idea}",
         "",
+    ]
+    if pi_memory:
+        lines += [pi_memory, ""]
+    lines += [
         f"DOMAIN: {expert.display_name}",
         "",
         "DISEASE KNOWLEDGE (use these facts and source URLs):",

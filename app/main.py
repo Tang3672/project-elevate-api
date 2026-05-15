@@ -35,6 +35,8 @@ async def startup():
     await init_user_tables()
     from app.db.watchlist_repository import init_watchlist_tables
     await init_watchlist_tables()
+    from app.services.pi_memory_service import init_pi_memory_table
+    await init_pi_memory_table()
 
     # Start the ingestion scheduler if enabled
     if settings.ENABLE_SCHEDULER:
