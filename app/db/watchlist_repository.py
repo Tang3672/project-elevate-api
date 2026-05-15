@@ -294,7 +294,7 @@ async def get_watchlists_for_user(user_id: int) -> list:
     pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT * FROM user_watchlists WHERE user_id = $1 ORDER BY created_at DESC",
+            "SELECT id AS watchlist_id, user_id, name, disease_domain, product_description, keywords, last_checked, created_at FROM user_watchlists WHERE user_id = $1 ORDER BY created_at DESC",
             user_id
         )
         return [dict(r) for r in rows]
