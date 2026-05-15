@@ -363,7 +363,19 @@ async def _generate_expert_report(idea, product_type, expert, demand_results, ho
     )
 
     # Use expert system prompt + JSON schema
-    system = expert.system_prompt + "\n\n" + EXPERT_JSON_SCHEMA
+    # ── Dynamic Expert Prompt ─────────────────────────────────────────────────
+    try:
+        from app.services.dynamic_prompt_generator import generate_expert_system_prompt
+        dynamic_prompt = await generate_expert_system_prompt(
+            sub_expert_id=getattr(expert, "sub_expert_id", getattr(expert, "domain_id", "")),
+            disease_name=disease_name,
+            idea=idea,
+        )
+        system = dynamic_prompt + "\n\n" + EXPERT_JSON_SCHEMA
+        logger.info(f"✅ Dynamic system prompt injected for {disease_name}")
+    except Exception as e:
+        logger.warning(f"Dynamic prompt failed, falling back to static: {e}")
+        system = expert.system_prompt + "\n\n" + EXPERT_JSON_SCHEMA
 
     raw  = await _call_claude(context, system, max_tokens=6000)
     data = _clean_json(raw)
