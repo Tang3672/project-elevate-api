@@ -284,7 +284,7 @@ async def get_all_active_watchlists() -> list:
     pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT * FROM watchlists ORDER BY created_at DESC"
+            "SELECT * FROM user_watchlists ORDER BY created_at DESC"
         )
         return [dict(r) for r in rows]
 
@@ -294,7 +294,7 @@ async def get_watchlists_for_user(user_id: int) -> list:
     pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT * FROM watchlists WHERE user_id = $1 ORDER BY created_at DESC",
+            "SELECT * FROM user_watchlists WHERE user_id = $1 ORDER BY created_at DESC",
             user_id
         )
         return [dict(r) for r in rows]
@@ -314,7 +314,7 @@ async def create_alert(
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            """INSERT INTO alerts
+            """INSERT INTO user_alerts
                (watchlist_id, user_id, title, body, severity, source,
                 recalculation_needed, significance_score)
                VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
