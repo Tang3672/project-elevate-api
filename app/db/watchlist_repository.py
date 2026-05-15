@@ -34,15 +34,15 @@ async def init_watchlist_tables():
         """)
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS user_alerts (
-                id           SERIAL PRIMARY KEY,
-                watchlist_id INTEGER NOT NULL REFERENCES user_watchlists(id) ON DELETE CASCADE,
-                user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                signal_id    INTEGER,
-                alert_type   VARCHAR(50)  NOT NULL,
-                title        TEXT         NOT NULL,
-                summary      TEXT         NOT NULL,
-                severity     VARCHAR(20)  NOT NULL DEFAULT 'medium',
-                source       VARCHAR(100) NOT NULL,
+                id                   SERIAL PRIMARY KEY,
+                watchlist_id         INTEGER NOT NULL REFERENCES user_watchlists(id) ON DELETE CASCADE,
+                user_id              INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                title                TEXT         NOT NULL,
+                body                 TEXT         NOT NULL DEFAULT '',
+                severity             VARCHAR(20)  NOT NULL DEFAULT 'medium',
+                source               VARCHAR(100) NOT NULL DEFAULT 'weekly_tracker',
+                recalculation_needed BOOLEAN      NOT NULL DEFAULT FALSE,
+                significance_score   INTEGER      NOT NULL DEFAULT 0,
                 source_url   TEXT,
                 seen         BOOLEAN      DEFAULT FALSE,
                 created_at   TIMESTAMPTZ  DEFAULT NOW()
