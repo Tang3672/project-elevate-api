@@ -216,3 +216,10 @@ async def get_competitive_intel(
     )
     ci["formatted"] = format_competitive_intelligence_for_report(ci)
     return ci
+
+@router.get("/tracker/debug")
+async def debug_tracker(current_user: dict = Depends(get_current_user)):
+    from app.db.watchlist_repository import get_watchlists_for_user
+    user_id = current_user.get("id")
+    watchlists = await get_watchlists_for_user(user_id)
+    return {"current_user": current_user, "user_id": user_id, "watchlists": watchlists}
