@@ -71,14 +71,35 @@ async def get_optional_user(authorization: Optional[str] = Header(None)) -> Opti
 @router.post("/register", response_model=AuthResponse)
 async def register(payload: RegisterRequest, request: Request):
     """Create a new account with email + password."""
-    # Password strength validation
+    # Password strength validation — check all rules, return all failures at once
     pw = payload.password
+    import re
+    errors = []
     if len(pw) < 8:
-        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+        errors.append("At least 8 characters")
+    if not any(c.isupper() for c in pw):
+        errors.append("At least one uppercase letter (A-Z)")
+    if not any(c.islower() for c in pw):
+        errors.append("At least one lowercase letter (a-z)")
     if not any(c.isdigit() for c in pw):
-        raise HTTPException(status_code=400, detail="Password must contain at least one number")
-    if not any(c.isalpha() for c in pw):
-        raise HTTPException(status_code=400, detail="Password must contain at least one letter")
+        errors.append("At least one number (0-9)")
+    if not re.search(r'[!@#$%^&*()_+\-=\[\]{};':"\|,.<>\/?`~]', pw):
+        errors.append("At least one special character (!@#$%^&*...)")
+    if errors:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "Password does not meet requirements",
+                "requirements_failed": errors,
+                "all_requirements": [
+                    "At least 8 characters",
+                    "At least one uppercase letter (A-Z)",
+                    "At least one lowercase letter (a-z)",
+                    "At least one number (0-9)",
+                    "At least one special character (!@#$%^&*...)"
+                ]
+            }
+        )
 
     existing = await get_user_by_email(payload.email)
     if existing:

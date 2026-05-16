@@ -101,20 +101,29 @@ async def send_verification_email(email: str, name: str, token: str, base_url: s
     </div>
     """
 
-    if not settings.SMTP_HOST or not settings.SMTP_USER:
+    # Resolve SMTP settings — handle both SMTP_HOST and EMAIL_HOST naming
+    import os
+    smtp_host = getattr(settings, 'SMTP_HOST', '') or os.environ.get('SMTP_HOST', '') or os.environ.get('EMAIL_HOST', '')
+    smtp_port = int(getattr(settings, 'SMTP_PORT', 0) or os.environ.get('SMTP_PORT', 587) or 587)
+    smtp_user = getattr(settings, 'SMTP_USER', '') or os.environ.get('SMTP_USER', '') or os.environ.get('EMAIL_USER', '')
+    smtp_pass = getattr(settings, 'SMTP_PASS', '') or os.environ.get('SMTP_PASS', '') or os.environ.get('EMAIL_PASSWORD', '')
+    email_from = getattr(settings, 'EMAIL_FROM', '') or os.environ.get('EMAIL_FROM', '') or smtp_user
+
+    if not smtp_host or not smtp_user:
         logger.warning(f"SMTP not configured — verification URL: {verify_url}")
         return
 
     try:
         msg = MIMEMultipart('alternative')
         msg['Subject'] = 'Verify your Project Elevate account'
-        msg['From']    = settings.EMAIL_FROM or f"Project Elevate <{settings.SMTP_USER}>"
+        msg['From']    = f"Project Elevate <{email_from}>"
         msg['To']      = email
         msg.attach(MIMEText(html, 'html'))
 
-        with smtplib.SMTP_SSL(settings.SMTP_HOST, settings.SMTP_PORT or 465) as server:
-            server.login(settings.SMTP_USER, settings.SMTP_PASS)
-            server.sendmail(settings.SMTP_USER, email, msg.as_string())
+        with smtplib.SMTP(smtp_host, smtp_port) as server:
+            server.starttls()
+            server.login(smtp_user, smtp_pass)
+            server.sendmail(smtp_user, email, msg.as_string())
         logger.info(f"Verification email sent to {email}")
     except Exception as e:
         logger.error(f"Failed to send verification email: {e}")

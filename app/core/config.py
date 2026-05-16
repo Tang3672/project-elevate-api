@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     EMAIL_USER:     str = ""
     EMAIL_PASSWORD: str = ""
     EMAIL_FROM:     str = ""
+    SMTP_HOST:      str = ""
+    SMTP_PORT:      int = 587
+    SMTP_USER:      str = ""
+    SMTP_PASS:      str = ""
 
     # App
     DEBUG:            bool = True
