@@ -107,7 +107,7 @@ async def send_verification_email(email: str, name: str, token: str, base_url: s
     smtp_port = int(getattr(settings, 'SMTP_PORT', 0) or os.environ.get('SMTP_PORT', 587) or 587)
     smtp_user = getattr(settings, 'SMTP_USER', '') or os.environ.get('SMTP_USER', '') or os.environ.get('EMAIL_USER', '')
     smtp_pass = getattr(settings, 'SMTP_PASS', '') or os.environ.get('SMTP_PASS', '') or os.environ.get('EMAIL_PASSWORD', '')
-    email_from = getattr(settings, 'EMAIL_FROM', '') or os.environ.get('EMAIL_FROM', '') or smtp_user
+    email_from = os.environ.get('EMAIL_FROM', '') or getattr(settings, 'EMAIL_FROM', '') or 'noreply@hudatabase.online'
 
     logger.info(f"SMTP debug: host={smtp_host} user={smtp_user} pass_len={len(smtp_pass)} from={email_from}")
     if not smtp_host or not smtp_user:
