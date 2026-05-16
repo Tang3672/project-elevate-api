@@ -76,6 +76,16 @@ def get_settings() -> Settings:
             s.STRIPE_PRICE_ID = v.strip()
     if not s.OPENAI_API_KEY:
         s.OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+    if not s.SMTP_HOST:
+        s.SMTP_HOST = os.environ.get("SMTP_HOST", "").strip()
+    if not s.SMTP_USER:
+        s.SMTP_USER = os.environ.get("SMTP_USER", "").strip()
+    if not s.SMTP_PASS:
+        s.SMTP_PASS = os.environ.get("SMTP_PASS", "").strip()
+    if not s.EMAIL_FROM:
+        s.EMAIL_FROM = os.environ.get("EMAIL_FROM", "").strip()
+    if not s.SMTP_PORT:
+        s.SMTP_PORT = int(os.environ.get("SMTP_PORT", 587))
     if not s.DATABASE_URL or "localhost" in s.DATABASE_URL:
         db = os.environ.get("DATABASE_URL", "")
         if db:
