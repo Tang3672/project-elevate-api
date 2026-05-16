@@ -1,3 +1,4 @@
+import asyncio
 import os
 """
 PI Alignment Service v2
@@ -342,14 +343,36 @@ async def _generate_expert_report(idea, product_type, expert, demand_results, ho
             get_full_competitive_intelligence,
             format_competitive_intelligence_for_report
         )
-        disease_keywords = disease_name.replace("(", "").replace(")", "").split()[:4]
-        ci = await get_full_competitive_intelligence(
-            condition=disease_name,
-            disease_keywords=disease_keywords,
+        from app.services.pubmed_service import (
+            get_landmark_publications,
+            format_publications_for_expert
         )
-        ci_context = format_competitive_intelligence_for_report(ci)
-        researcher_ctx = researcher_ctx + ci_context
-        _competitive_intelligence = ci
+        disease_keywords = disease_name.replace("(", "").replace(")", "").split()[:4]
+        sub_expert_id = getattr(expert, "sub_expert_id", getattr(expert, "domain_id", ""))
+
+        # Run FDA/ClinicalTrials and PubMed in parallel
+        ci, pub_data = await asyncio.gather(
+            get_full_competitive_intelligence(
+                condition=disease_name,
+                disease_keywords=disease_keywords,
+            ),
+            get_landmark_publications(
+                disease_name=disease_name,
+                sub_expert_id=sub_expert_id,
+            ),
+            return_exceptions=True
+        )
+
+        if not isinstance(ci, Exception):
+            ci_context = format_competitive_intelligence_for_report(ci)
+            researcher_ctx = researcher_ctx + ci_context
+            _competitive_intelligence = ci
+
+        if not isinstance(pub_data, Exception) and pub_data:
+            pub_context = format_publications_for_expert(pub_data)
+            researcher_ctx = researcher_ctx + pub_context
+            logger.info(f"✅ PubMed: {pub_data.get('total_found', 0)} publications loaded for {disease_name}")
+
     except Exception as e:
         logger.warning(f"Competitive intelligence fetch failed: {e}")
         _competitive_intelligence = {}
