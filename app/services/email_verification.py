@@ -124,7 +124,7 @@ async def send_verification_email(email: str, name: str, token: str, base_url: s
         with smtplib.SMTP(smtp_host, smtp_port) as server:
             server.starttls()
             server.login(smtp_user, smtp_pass)
-            server.sendmail(smtp_user, email, msg.as_string())
+            server.sendmail(email_from, email, msg.as_string())
         logger.info(f"Verification email sent to {email}")
     except Exception as e:
         logger.error(f"Failed to send verification email: {e}")
