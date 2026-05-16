@@ -83,7 +83,7 @@ async def register(payload: RegisterRequest, request: Request):
         errors.append("At least one lowercase letter (a-z)")
     if not any(c.isdigit() for c in pw):
         errors.append("At least one number (0-9)")
-    if not re.search(r'[!@#$%^&*()_+\-=\[\]{};':"\|,.<>\/?`~]', pw):
+    if not re.search(r"[!@#$%^&*()_+=\[\]{};:|,.<>/?`~-]", pw):
         errors.append("At least one special character (!@#$%^&*...)")
     if errors:
         raise HTTPException(
