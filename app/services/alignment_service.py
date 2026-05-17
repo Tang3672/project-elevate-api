@@ -297,7 +297,7 @@ You must respond with ONLY a valid JSON object. No markdown, no preamble. Use th
 
 
 
-async def _generate_expert_report(idea, product_type, expert, demand_results, hospital_matches_raw, total_signals):
+async def _generate_expert_report(idea, product_type, expert, demand_results, hospital_matches_raw, total_signals, pi_memory_context=""):
     """
     Generates a PI report using the selected Expert's domain knowledge.
     Injects expert system_prompt + knowledge_base into the researcher context.
