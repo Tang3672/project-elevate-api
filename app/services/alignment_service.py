@@ -538,7 +538,7 @@ def _parse_expert_response(data, idea, product_type, expert, demand_results, hos
         key_friction_points         = rp_data.get("key_friction_points", []),
         loopholes_and_strategies    = rp_data.get("loopholes_and_strategies", []),
         funding_programs            = [
-            f"{fp['name']}: {fp['amount']} ({fp['stage']}) — {fp['notes']} {fp['url']}"
+            (fp.get("name","") + ": " + fp.get("amount","") + " (" + fp.get("stage","") + ") — " + fp.get("notes","") + " " + fp.get("url",""))
             if isinstance(fp, dict) else fp
             for fp in rp_data.get("funding_programs", [])
         ],
@@ -634,7 +634,7 @@ async def _generate_antibiotic_report(
             key_friction_points=rp_data.get("key_friction_points", []),
             loopholes_and_strategies=rp_data.get("loopholes_and_strategies", []),
             funding_programs=[
-            f"{fp['name']}: {fp['amount']} ({fp['stage']}) — {fp['notes']} {fp['url']}"
+            (fp.get("name","") + ": " + fp.get("amount","") + " (" + fp.get("stage","") + ") — " + fp.get("notes","") + " " + fp.get("url",""))
             if isinstance(fp, dict) else fp
             for fp in rp_data.get("funding_programs", [])
         ],
