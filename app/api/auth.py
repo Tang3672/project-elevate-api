@@ -30,6 +30,7 @@ from app.services.auth_service import (
     create_access_token, verify_access_token,
     verify_google_token,
 )
+from app.db.database import get_pool
 from app.db.user_repository import (
     create_user, get_user_by_email, get_user_by_id,
     get_user_by_google_id, update_user_google_id,
@@ -340,3 +341,35 @@ async def remove_draft(
     if not deleted:
         raise HTTPException(status_code=404, detail="Draft not found")
     return {"deleted": True}
+
+
+@router.post("/change-password")
+async def change_password(request: Request, current_user: dict = Depends(get_current_user)):
+    """Change password for logged-in user."""
+    body = await request.json()
+    current_pw = body.get("current_password", "")
+    new_pw     = body.get("new_password", "")
+
+    user = await get_user_by_id(current_user["id"])
+    if not user or not user.get("password_hash"):
+        raise HTTPException(status_code=400, detail="Cannot change password for OAuth accounts")
+
+    if not verify_password(current_pw, user["password_hash"]):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+
+    import re
+    errors = []
+    if len(new_pw) < 8:                                    errors.append("At least 8 characters")
+    if not any(c.isupper() for c in new_pw):               errors.append("At least one uppercase letter")
+    if not any(c.islower() for c in new_pw):               errors.append("At least one lowercase letter")
+    if not any(c.isdigit() for c in new_pw):               errors.append("At least one number")
+    if not re.search(r"[!@#$%^&*()_+=\[\]{};:|,.<>/?`~-]", new_pw): errors.append("At least one special character")
+    if errors:
+        raise HTTPException(status_code=400, detail={"message": "Password requirements not met", "requirements_failed": errors})
+
+    hashed = hash_password(new_pw)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE users SET password_hash=$1 WHERE id=$2", hashed, current_user["id"])
+
+    return {"message": "Password updated successfully"}
