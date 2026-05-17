@@ -443,47 +443,67 @@ def _build_expert_context(idea, expert, demand_results, hospital_matches, diseas
 
 
 EXPERT_JSON_SCHEMA = """
-Generate a comprehensive source-cited PI report. CRITICAL: Tag every statistic with [SOURCE: name | url] immediately after the fact. Example: "13,100 CRE infections/year [SOURCE: CDC AR Threats 2019 | https://www.cdc.gov/antimicrobial-resistance/data-research/threats/index.html]"
+Generate a comprehensive source-cited biomedical research intelligence report.
+
+CRITICAL SOURCE RULES — these are non-negotiable:
+1. Every data_point MUST have a real source_url (CDC, PubMed, FDA, NIH, ClinicalTrials.gov). Never use null.
+2. Every market sizing step MUST have a real source_url. If pricing data, link to FDA label, CMS data, or published WAC source.
+3. Every designation MUST link to the FDA guidance document URL.
+4. Every clinical trial requirement MUST link to the FDA guidance document URL.
+5. Every funding program MUST include the program URL and dollar amounts.
+6. Every key opinion leader entry MUST include their institution.
+7. literature_citations MUST include real PubMed URLs (https://pubmed.ncbi.nlm.nih.gov/PMID/).
 
 Respond ONLY with valid compact JSON:
 {
-  "executive_summary": "<2 sentences with specific numbers and sources>",
+  "executive_summary": "<2-3 sentences with specific numbers and inline source citations>",
   "disease_intelligence": {
     "condition": "<primary condition>",
-    "data_points": [{"metric":"<>","value":"<>","year":"<>","source":"<>","source_url":"<or null>"}],
-    "resistance_profile": "<or null>",
-    "pipeline_status": "<1 sentence on competing products>",
-    "unmet_need_summary": "<1 sentence>"
+    "data_points": [{"metric":"<>","value":"<>","year":"<>","source":"<full source name>","source_url":"<REQUIRED: real URL>"}],
+    "resistance_profile": "<specific resistance mechanisms, prevalence data with sources>",
+    "pipeline_status": "<named competing products with approval dates and mechanism coverage>",
+    "unmet_need_summary": "<specific unmet need with quantified gap>"
   },
+  "literature_citations": [
+    {
+      "title": "<full paper title>",
+      "authors": "<First author et al.>",
+      "journal": "<journal name>",
+      "year": "<year>",
+      "pmid": "<PubMed ID>",
+      "source_url": "<https://pubmed.ncbi.nlm.nih.gov/PMID/>",
+      "relevance": "<1 sentence on why this paper matters for this product>"
+    }
+  ],
   "market_sizing": {
-    "steps": [{"label":"<>","value":0,"unit":"<>","source":"<>","source_url":"<or null>","notes":"<or null>"}],
+    "steps": [{"label":"<>","value":0,"unit":"<>","source":"<full source name>","source_url":"<REQUIRED: real URL>","notes":"<methodology note>"}],
     "formula": "<patients x price x penetration = TAM>",
     "total_addressable_market_usd": 0,
     "serviceable_market_usd": 0,
-    "methodology_note": "<1-2 sentences>"
+    "methodology_note": "<1-2 sentences with source citations>"
   },
   "regulatory_pathway": {
     "recommended_pathway": "<>",
     "pathway_rationale": "<1-2 sentences>",
-    "designations": [{"name":"<>","description":"<1 sentence>","benefit":"<1 sentence>","eligibility":"<1 sentence>","how_to_apply":"<1 sentence>","timeline":"<1 sentence>","source":"<>","source_url":"<or null>","priority":"<recommended|consider|optional>"}],
-    "clinical_trial_requirements": [{"phase":"<Phase 1|2|3>","patient_count":"<range>","duration":"<>","estimated_cost":"<>","key_endpoints":["<>"],"fda_guidance_document":"<>","source_url":"<or null>","success_probability":"<>"}],
+    "designations": [{"name":"<>","description":"<1 sentence>","benefit":"<specific exclusivity/timeline benefit>","eligibility":"<specific criteria>","how_to_apply":"<specific steps>","timeline":"<specific timeline>","source":"<FDA guidance name>","source_url":"<REQUIRED: FDA.gov URL>","priority":"<recommended|consider|optional>"}],
+    "clinical_trial_requirements": [{"phase":"<Phase 1|2|3>","patient_count":"<range>","duration":"<>","estimated_cost":"<>","key_endpoints":["<specific endpoint from FDA guidance>"],"fda_guidance_document":"<guidance name>","source_url":"<REQUIRED: FDA.gov guidance URL>","success_probability":"<historical rate>"}],
     "total_timeline_estimate": "<>",
     "total_cost_estimate": "<>",
-    "key_friction_points": ["<max 3>"],
-    "loopholes_and_strategies": ["<max 3>"],
-    "funding_programs": ["<max 3>"]
+    "key_friction_points": ["<specific obstacle with evidence>"],
+    "loopholes_and_strategies": ["<specific strategy with mechanism>"],
+    "funding_programs": [{"name":"<program name>","amount":"<specific dollar range>","stage":"<eligible development stage>","url":"<REQUIRED: program URL>","notes":"<key requirement or restriction>"}]
   },
   "market_access": {
-    "primary_channel": "<>",
-    "buyer_segments": [{"segment_name":"<>","buyer_count":"<>","decision_maker":"<>","price_per_unit":"<>","annual_spend_per_facility":"<>","access_mechanism":"<1 sentence>","timeline_to_access":"<>","source":"<>"}],
-    "key_opinion_leaders": ["<max 2>"],
-    "reimbursement_pathway": "<1-2 sentences>",
-    "first_commercial_step": "<1 sentence>",
-    "international_opportunities": ["<max 2>"]
+    "primary_channel": "<specific channel with decision-maker>",
+    "buyer_segments": [{"segment_name":"<>","buyer_count":"<>","decision_maker":"<>","price_per_unit":"<with source>","annual_spend_per_facility":"<>","access_mechanism":"<specific mechanism>","timeline_to_access":"<>","source":"<source name>","source_url":"<URL if available>"}],
+    "key_opinion_leaders": [{"name":"<>","institution":"<>","expertise":"<>"}],
+    "reimbursement_pathway": "<specific reimbursement codes and amounts>",
+    "first_commercial_step": "<specific first step>",
+    "international_opportunities": ["<specific opportunity with market size>"]
   },
-  "market_geography": {"description":"<1-2 sentences>","top_states":["<state>"],"scope":"<national|regional|concentrated>"},
-  "recommended_next_steps": ["<max 5 specific steps>"],
-  "limitations": "<1-2 sentences>"
+  "market_geography": {"description":"<specific geographic concentration with data>","top_states":["<state>"],"scope":"<national|regional|concentrated>"},
+  "recommended_next_steps": ["<specific actionable step with timeline>"],
+  "limitations": "<1-2 sentences on data gaps>"
 }"""
 
 
@@ -517,7 +537,11 @@ def _parse_expert_response(data, idea, product_type, expert, demand_results, hos
         total_cost_estimate         = rp_data.get("total_cost_estimate", ""),
         key_friction_points         = rp_data.get("key_friction_points", []),
         loopholes_and_strategies    = rp_data.get("loopholes_and_strategies", []),
-        funding_programs            = rp_data.get("funding_programs", []),
+        funding_programs            = [
+            f"{fp['name']}: {fp['amount']} ({fp['stage']}) — {fp['notes']} {fp['url']}"
+            if isinstance(fp, dict) else fp
+            for fp in rp_data.get("funding_programs", [])
+        ],
     ) if rp_data else None
 
     ma_data = data.get("market_access", {})
@@ -609,7 +633,11 @@ async def _generate_antibiotic_report(
             total_cost_estimate=rp_data.get("total_cost_estimate", ""),
             key_friction_points=rp_data.get("key_friction_points", []),
             loopholes_and_strategies=rp_data.get("loopholes_and_strategies", []),
-            funding_programs=rp_data.get("funding_programs", []),
+            funding_programs=[
+            f"{fp['name']}: {fp['amount']} ({fp['stage']}) — {fp['notes']} {fp['url']}"
+            if isinstance(fp, dict) else fp
+            for fp in rp_data.get("funding_programs", [])
+        ],
         )
 
     # Parse market access
