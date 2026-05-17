@@ -971,6 +971,13 @@ def _clean_json(raw: str) -> dict:
         return json.loads(clean)
     except json.JSONDecodeError:
         pass
+    # Try removing literature_citations if it's causing parse issues
+    import re
+    try:
+        clean_no_lit = re.sub(r',?\s*"literature_citations"\s*:\s*\[.*?\]', '', clean, flags=re.DOTALL)
+        return json.loads(clean_no_lit)
+    except json.JSONDecodeError:
+        pass
     # Last resort: find JSON boundaries
     start = clean.find('{')
     end   = clean.rfind('}') + 1
