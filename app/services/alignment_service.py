@@ -445,64 +445,50 @@ def _build_expert_context(idea, expert, demand_results, hospital_matches, diseas
 EXPERT_JSON_SCHEMA = """
 Generate a comprehensive source-cited biomedical research intelligence report.
 
-CRITICAL SOURCE RULES — these are non-negotiable:
-1. Every data_point MUST have a real source_url (CDC, PubMed, FDA, NIH, ClinicalTrials.gov). Never use null.
-2. Every market sizing step MUST have a real source_url. If pricing data, link to FDA label, CMS data, or published WAC source.
-3. Every designation MUST link to the FDA guidance document URL.
-4. Every clinical trial requirement MUST link to the FDA guidance document URL.
-5. Every funding program MUST include the program URL and dollar amounts.
-6. Every key opinion leader entry MUST include their institution.
-7. literature_citations MUST include real PubMed URLs (https://pubmed.ncbi.nlm.nih.gov/PMID/).
+CRITICAL: Every source_url field MUST contain a real URL. Never use null for source_url.
+Use pubmed.ncbi.nlm.nih.gov for clinical papers, fda.gov for regulatory docs, cdc.gov for epidemiology.
 
-Respond ONLY with valid compact JSON:
+Respond ONLY with valid JSON (no markdown, no extra text):
 {
-  "executive_summary": "<2-3 sentences with specific numbers and inline source citations>",
+  "executive_summary": "<2-3 sentences with specific numbers>",
   "disease_intelligence": {
     "condition": "<primary condition>",
-    "data_points": [{"metric":"<>","value":"<>","year":"<>","source":"<full source name>","source_url":"<REQUIRED: real URL>"}],
-    "resistance_profile": "<specific resistance mechanisms, prevalence data with sources>",
-    "pipeline_status": "<named competing products with approval dates and mechanism coverage>",
-    "unmet_need_summary": "<specific unmet need with quantified gap>"
+    "data_points": [{"metric":"<>","value":"<>","year":"<>","source":"<full name>","source_url":"<real URL required>"}],
+    "resistance_profile": "<specific mechanisms and prevalence>",
+    "pipeline_status": "<named competing products with approval dates>",
+    "unmet_need_summary": "<specific gap with quantified need>"
   },
   "literature_citations": [
-    {
-      "title": "<full paper title>",
-      "authors": "<First author et al.>",
-      "journal": "<journal name>",
-      "year": "<year>",
-      "pmid": "<PubMed ID>",
-      "source_url": "<https://pubmed.ncbi.nlm.nih.gov/PMID/>",
-      "relevance": "<1 sentence on why this paper matters for this product>"
-    }
+    {"title":"<full paper title>","authors":"<First author et al.>","journal":"<journal>","year":"<year>","pmid":"<PMID>","source_url":"<https://pubmed.ncbi.nlm.nih.gov/PMID/>","relevance":"<why this paper matters>"}
   ],
   "market_sizing": {
-    "steps": [{"label":"<>","value":0,"unit":"<>","source":"<full source name>","source_url":"<REQUIRED: real URL>","notes":"<methodology note>"}],
+    "steps": [{"label":"<>","value":0,"unit":"<>","source":"<full name>","source_url":"<real URL required>","notes":"<methodology>"}],
     "formula": "<patients x price x penetration = TAM>",
     "total_addressable_market_usd": 0,
     "serviceable_market_usd": 0,
-    "methodology_note": "<1-2 sentences with source citations>"
+    "methodology_note": "<1-2 sentences>"
   },
   "regulatory_pathway": {
     "recommended_pathway": "<>",
     "pathway_rationale": "<1-2 sentences>",
-    "designations": [{"name":"<>","description":"<1 sentence>","benefit":"<specific exclusivity/timeline benefit>","eligibility":"<specific criteria>","how_to_apply":"<specific steps>","timeline":"<specific timeline>","source":"<FDA guidance name>","source_url":"<REQUIRED: FDA.gov URL>","priority":"<recommended|consider|optional>"}],
-    "clinical_trial_requirements": [{"phase":"<Phase 1|2|3>","patient_count":"<range>","duration":"<>","estimated_cost":"<>","key_endpoints":["<specific endpoint from FDA guidance>"],"fda_guidance_document":"<guidance name>","source_url":"<REQUIRED: FDA.gov guidance URL>","success_probability":"<historical rate>"}],
+    "designations": [{"name":"<>","description":"<1 sentence>","benefit":"<specific benefit>","eligibility":"<criteria>","how_to_apply":"<steps>","timeline":"<timeline>","source":"<FDA guidance name>","source_url":"<real FDA.gov URL>","priority":"<recommended|consider|optional>"}],
+    "clinical_trial_requirements": [{"phase":"<Phase 1|2|3>","patient_count":"<range>","duration":"<>","estimated_cost":"<>","key_endpoints":["<endpoint>"],"fda_guidance_document":"<guidance name>","source_url":"<real FDA.gov URL>","success_probability":"<rate>"}],
     "total_timeline_estimate": "<>",
     "total_cost_estimate": "<>",
-    "key_friction_points": ["<specific obstacle with evidence>"],
-    "loopholes_and_strategies": ["<specific strategy with mechanism>"],
-    "funding_programs": ["<program name>: <amount>, <stage eligibility>. URL: <program URL>. Key requirement: <restriction>"]
+    "key_friction_points": ["<specific obstacle>"],
+    "loopholes_and_strategies": ["<specific strategy>"],
+    "funding_programs": ["<Program name: amount, stage, URL, key requirement>"]
   },
   "market_access": {
-    "primary_channel": "<specific channel with decision-maker>",
-    "buyer_segments": [{"segment_name":"<>","buyer_count":"<>","decision_maker":"<>","price_per_unit":"<with source>","annual_spend_per_facility":"<>","access_mechanism":"<specific mechanism>","timeline_to_access":"<>","source":"<source name>","source_url":"<URL if available>"}],
-    "key_opinion_leaders": ["<Name, Institution, expertise area>"],
-    "reimbursement_pathway": "<specific reimbursement codes and amounts>",
-    "first_commercial_step": "<specific first step>",
-    "international_opportunities": ["<specific opportunity with market size>"]
+    "primary_channel": "<specific channel>",
+    "buyer_segments": [{"segment_name":"<>","buyer_count":"<>","decision_maker":"<>","price_per_unit":"<>","annual_spend_per_facility":"<>","access_mechanism":"<specific mechanism>","timeline_to_access":"<>","source":"<source name>","source_url":"<URL or empty string>"}],
+    "key_opinion_leaders": ["<Name, Institution - expertise>"],
+    "reimbursement_pathway": "<specific codes and amounts>",
+    "first_commercial_step": "<specific step>",
+    "international_opportunities": ["<specific opportunity>"]
   },
-  "market_geography": {"description":"<specific geographic concentration with data>","top_states":["<state>"],"scope":"<national|regional|concentrated>"},
-  "recommended_next_steps": ["<specific actionable step with timeline>"],
+  "market_geography": {"description":"<specific data>","top_states":["<state>"],"scope":"<national|regional|concentrated>"},
+  "recommended_next_steps": ["<specific actionable step>"],
   "limitations": "<1-2 sentences on data gaps>"
 }"""
 
