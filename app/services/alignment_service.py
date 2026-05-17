@@ -447,9 +447,7 @@ Respond ONLY with valid JSON (no markdown, no extra text):
     "pipeline_status": "<named competing products with approval dates>",
     "unmet_need_summary": "<specific gap with quantified need>"
   },
-  "literature_citations": [
-    {"title":"<full paper title>","authors":"<First author et al.>","journal":"<journal>","year":"<year>","pmid":"<PMID>","source_url":"<https://pubmed.ncbi.nlm.nih.gov/PMID/>","relevance":"<why this paper matters>"}
-  ],
+
   "market_sizing": {
     "steps": [{"label":"<>","value":0,"unit":"<>","source":"<full name>","source_url":"<real URL required>","notes":"<methodology>"}],
     "formula": "<patients x price x penetration = TAM>",
