@@ -491,12 +491,12 @@ Respond ONLY with valid compact JSON:
     "total_cost_estimate": "<>",
     "key_friction_points": ["<specific obstacle with evidence>"],
     "loopholes_and_strategies": ["<specific strategy with mechanism>"],
-    "funding_programs": [{"name":"<program name>","amount":"<specific dollar range>","stage":"<eligible development stage>","url":"<REQUIRED: program URL>","notes":"<key requirement or restriction>"}]
+    "funding_programs": ["<program name>: <amount>, <stage eligibility>. URL: <program URL>. Key requirement: <restriction>"]
   },
   "market_access": {
     "primary_channel": "<specific channel with decision-maker>",
     "buyer_segments": [{"segment_name":"<>","buyer_count":"<>","decision_maker":"<>","price_per_unit":"<with source>","annual_spend_per_facility":"<>","access_mechanism":"<specific mechanism>","timeline_to_access":"<>","source":"<source name>","source_url":"<URL if available>"}],
-    "key_opinion_leaders": [{"name":"<>","institution":"<>","expertise":"<>"}],
+    "key_opinion_leaders": ["<Name, Institution, expertise area>"],
     "reimbursement_pathway": "<specific reimbursement codes and amounts>",
     "first_commercial_step": "<specific first step>",
     "international_opportunities": ["<specific opportunity with market size>"]
@@ -537,11 +537,7 @@ def _parse_expert_response(data, idea, product_type, expert, demand_results, hos
         total_cost_estimate         = rp_data.get("total_cost_estimate", ""),
         key_friction_points         = rp_data.get("key_friction_points", []),
         loopholes_and_strategies    = rp_data.get("loopholes_and_strategies", []),
-        funding_programs            = [
-            (fp.get("name","") + ": " + fp.get("amount","") + " (" + fp.get("stage","") + ") — " + fp.get("notes","") + " " + fp.get("url",""))
-            if isinstance(fp, dict) else fp
-            for fp in rp_data.get("funding_programs", [])
-        ],
+        funding_programs            = rp_data.get("funding_programs", []),
     ) if rp_data else None
 
     ma_data = data.get("market_access", {})
@@ -633,11 +629,7 @@ async def _generate_antibiotic_report(
             total_cost_estimate=rp_data.get("total_cost_estimate", ""),
             key_friction_points=rp_data.get("key_friction_points", []),
             loopholes_and_strategies=rp_data.get("loopholes_and_strategies", []),
-            funding_programs=[
-            (fp.get("name","") + ": " + fp.get("amount","") + " (" + fp.get("stage","") + ") — " + fp.get("notes","") + " " + fp.get("url",""))
-            if isinstance(fp, dict) else fp
-            for fp in rp_data.get("funding_programs", [])
-        ],
+            funding_programs=rp_data.get("funding_programs", []),
         )
 
     # Parse market access
