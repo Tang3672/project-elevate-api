@@ -98,7 +98,8 @@ async def generate_pi_report(
 
     # ── Generate with Expert context ──────────────────────────────────────────
     report = await _generate_expert_report(
-        idea, pt, expert, demand_results, hospital_matches_raw, total_signals)
+        idea, pt, expert, demand_results, hospital_matches_raw, total_signals,
+        pi_memory_context=pi_memory_context)
 
     # Build sources from structured data
     try:
