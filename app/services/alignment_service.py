@@ -432,51 +432,48 @@ def _build_expert_context(idea, expert, demand_results, hospital_matches, diseas
 
 
 EXPERT_JSON_SCHEMA = """
-Generate a comprehensive source-cited biomedical research intelligence report.
+Generate a biomedical research intelligence report. Return ONLY valid JSON with no markdown fences.
 
-CRITICAL: Every source_url field MUST contain a real URL. Never use null for source_url.
-Use pubmed.ncbi.nlm.nih.gov for clinical papers, fda.gov for regulatory docs, cdc.gov for epidemiology.
+RULES: Every source_url must be a real URL. Use pubmed.ncbi.nlm.nih.gov for papers, fda.gov for regulatory docs, cdc.gov for epidemiology. Keep all string values under 200 characters. No newlines inside string values.
 
-Respond ONLY with valid JSON (no markdown, no extra text):
 {
-  "executive_summary": "<2-3 sentences with specific numbers>",
+  "executive_summary": "<2 sentences, under 300 chars>",
   "disease_intelligence": {
-    "condition": "<primary condition>",
-    "data_points": [{"metric":"<>","value":"<>","year":"<>","source":"<full name>","source_url":"<real URL required>"}],
-    "resistance_profile": "<specific mechanisms and prevalence>",
-    "pipeline_status": "<named competing products with approval dates>",
-    "unmet_need_summary": "<specific gap with quantified need>"
+    "condition": "<condition name>",
+    "data_points": [{"metric":"<>","value":"<>","year":"<>","source":"<name>","source_url":"<real URL>"}],
+    "resistance_profile": "<under 200 chars>",
+    "pipeline_status": "<under 200 chars>",
+    "unmet_need_summary": "<under 150 chars>"
   },
-
   "market_sizing": {
-    "steps": [{"label":"<>","value":0,"unit":"<>","source":"<full name>","source_url":"<real URL required>","notes":"<methodology>"}],
-    "formula": "<patients x price x penetration = TAM>",
+    "steps": [{"label":"<>","value":0,"unit":"<>","source":"<name>","source_url":"<real URL>","notes":"<under 100 chars>"}],
+    "formula": "<under 150 chars>",
     "total_addressable_market_usd": 0,
     "serviceable_market_usd": 0,
-    "methodology_note": "<1-2 sentences>"
+    "methodology_note": "<under 200 chars>"
   },
   "regulatory_pathway": {
-    "recommended_pathway": "<>",
-    "pathway_rationale": "<1-2 sentences>",
-    "designations": [{"name":"<>","description":"<1 sentence>","benefit":"<specific benefit>","eligibility":"<criteria>","how_to_apply":"<steps>","timeline":"<timeline>","source":"<FDA guidance name>","source_url":"<real FDA.gov URL>","priority":"<recommended|consider|optional>"}],
-    "clinical_trial_requirements": [{"phase":"<Phase 1|2|3>","patient_count":"<range>","duration":"<>","estimated_cost":"<>","key_endpoints":["<endpoint>"],"fda_guidance_document":"<guidance name>","source_url":"<real FDA.gov URL>","success_probability":"<rate>"}],
+    "recommended_pathway": "<under 100 chars>",
+    "pathway_rationale": "<under 200 chars>",
+    "designations": [{"name":"<>","description":"<under 150 chars>","benefit":"<under 150 chars>","eligibility":"<under 150 chars>","how_to_apply":"<under 150 chars>","timeline":"<under 100 chars>","source":"<name>","source_url":"<real FDA URL>","priority":"<recommended|consider|optional>"}],
+    "clinical_trial_requirements": [{"phase":"<Phase 1|2|3>","patient_count":"<range>","duration":"<>","estimated_cost":"<>","key_endpoints":["<under 80 chars>"],"fda_guidance_document":"<name>","source_url":"<real FDA URL>","success_probability":"<>"}],
     "total_timeline_estimate": "<>",
     "total_cost_estimate": "<>",
-    "key_friction_points": ["<specific obstacle>"],
-    "loopholes_and_strategies": ["<specific strategy>"],
-    "funding_programs": ["<Program name: amount, stage, URL, key requirement>"]
+    "key_friction_points": ["<under 150 chars each, max 3>"],
+    "loopholes_and_strategies": ["<under 150 chars each, max 3>"],
+    "funding_programs": ["<under 150 chars each, max 3>"]
   },
   "market_access": {
-    "primary_channel": "<specific channel>",
-    "buyer_segments": [{"segment_name":"<>","buyer_count":"<>","decision_maker":"<>","price_per_unit":"<>","annual_spend_per_facility":"<>","access_mechanism":"<specific mechanism>","timeline_to_access":"<>","source":"<source name>","source_url":"<URL or empty string>"}],
-    "key_opinion_leaders": ["<Name, Institution - expertise>"],
-    "reimbursement_pathway": "<specific codes and amounts>",
-    "first_commercial_step": "<specific step>",
-    "international_opportunities": ["<specific opportunity>"]
+    "primary_channel": "<under 150 chars>",
+    "buyer_segments": [{"segment_name":"<>","buyer_count":"<>","decision_maker":"<>","price_per_unit":"<>","annual_spend_per_facility":"<>","access_mechanism":"<under 150 chars>","timeline_to_access":"<>","source":"<name>","source_url":"<URL or empty string>"}],
+    "key_opinion_leaders": ["<Name, Institution - under 100 chars>"],
+    "reimbursement_pathway": "<under 200 chars>",
+    "first_commercial_step": "<under 150 chars>",
+    "international_opportunities": ["<under 150 chars each, max 2>"]
   },
-  "market_geography": {"description":"<specific data>","top_states":["<state>"],"scope":"<national|regional|concentrated>"},
-  "recommended_next_steps": ["<specific actionable step>"],
-  "limitations": "<1-2 sentences on data gaps>"
+  "market_geography": {"description":"<under 200 chars>","top_states":["<state>"],"scope":"<national|regional|concentrated>"},
+  "recommended_next_steps": ["<under 150 chars each, max 5>"],
+  "limitations": "<under 200 chars>"
 }"""
 
 
