@@ -31,8 +31,15 @@ async def create_checkout(
 ):
     """Create a Stripe Checkout session and return the URL."""
     origin = request.headers.get("origin", "https://preeminent-zuccutto-bd1f9d.netlify.app")
-    success_url = f"{origin}/billing/success?session_id={{CHECKOUT_SESSION_ID}}"
-    cancel_url  = f"{origin}/billing/cancel"
+    success_url = f"{origin}?stripe=success"
+    cancel_url  = f"{origin}?stripe=cancel"
+
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+    plan = body.get("plan", "starter")
 
     try:
         checkout_url = await create_checkout_session(
@@ -40,6 +47,7 @@ async def create_checkout(
             user_email  = current_user["email"],
             success_url = success_url,
             cancel_url  = cancel_url,
+            plan        = plan,
         )
         return {"checkout_url": checkout_url}
     except Exception as e:
@@ -73,7 +81,7 @@ async def billing_status(current_user: dict = Depends(get_current_user)):
         "is_active":             is_active,
         "trial_ends_at":         trial_ends.isoformat() if trial_ends else None,
         "stripe_customer_id":    stripe_id,
-        "plan":                  "starter" if is_active else "none",
+        "plan":                  user.get("plan", "starter") if is_active else "none",
         "free_reports_used":     free_used,
         "free_reports_remaining": max(0, 1 - free_used) if not is_active else 999,
     }
