@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     STRIPE_WEBHOOK_SECRET: str = ""
     STRIPE_PRICE_ID:       str = ""
     STRIPE_BASIC_PRICE_ID:  str = ""
+    STRIPE_PRO_PRICE_ID:    str = ""
 
 
 def get_settings() -> Settings:
