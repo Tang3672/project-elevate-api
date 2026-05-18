@@ -283,7 +283,7 @@ You must respond with ONLY a valid JSON object. No markdown, no preamble. Use th
     "scope": "<national|regional|concentrated>"
   },
 
-    "strategic_playbook": [{"strategy":"<strategy name under 100 chars>","example":"<Company - Drug>","what_they_did":"<under 120 chars>","how_to_apply":"<under 120 chars>","source_url":"<real URL>"}],
+    "strategic_playbook": [{"strategy":"<REQUIRED - strategy name>","example":"<REQUIRED - real Company - real Drug name>","what_they_did":"<REQUIRED - what they actually did, under 120 chars>","how_to_apply":"<REQUIRED - how to apply to this product, under 120 chars>","source_url":"<REQUIRED - real URL>"}],
 
 "recommended_next_steps": [
     "<specific, actionable step with timeline>",
@@ -399,6 +399,15 @@ Do NOT separate citations from claims. Do NOT use [SOURCE: x] format. Embed the 
         if not isinstance(strategic_intel, Exception):
             strategic_context = format_intelligence_for_expert(strategic_intel, disease_name)
             researcher_ctx = researcher_ctx + strategic_context
+        else:
+            # Always inject at least the domain strategies even if full intel fails
+            from app.services.competitive_intelligence_service import DOMAIN_STRATEGIES, _DEFAULT_STRATEGIES, format_intelligence_for_expert
+            fallback_intel = {
+                'competitor_trials': {'trials': [], 'total_found': 0},
+                'fda_precedents': {'approvals': []},
+                'strategic_playbook': DOMAIN_STRATEGIES.get(sub_expert_id, _DEFAULT_STRATEGIES),
+            }
+            researcher_ctx = researcher_ctx + format_intelligence_for_expert(fallback_intel, disease_name)
 
         if not isinstance(aggregated_sources, Exception):
             agg_context = format_aggregated_sources(aggregated_sources, disease_name)
