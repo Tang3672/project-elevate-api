@@ -143,11 +143,12 @@ async def _search_pubmed(query: str, max_results: int = 5) -> List[str]:
 
 
 async def _fetch_paper_summaries(pmids: List[str]) -> List[Dict]:
-    """Fetch paper summaries for a list of PMIDs."""
+    """Fetch paper summaries and abstracts for a list of PMIDs."""
     if not pmids:
         return []
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+            # Get summary data
             r = await client.get(PUBMED_SUMMARY_URL, params={
                 "db": "pubmed",
                 "id": ",".join(pmids),
@@ -168,7 +169,7 @@ async def _fetch_paper_summaries(pmids: List[str]) -> List[Dict]:
                 authors = paper.get("authors", [])
                 author_str = authors[0].get("name", "") if authors else "Unknown"
                 if len(authors) > 1:
-                    author_str += f" et al."
+                    author_str += " et al."
 
                 pub_date = paper.get("pubdate", "")
                 journal = paper.get("source", "")
@@ -185,6 +186,36 @@ async def _fetch_paper_summaries(pmids: List[str]) -> List[Dict]:
                     "url":      f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
                 })
 
+            # Fetch abstracts in one batch call
+            await asyncio.sleep(RATE_LIMIT_DELAY)
+            try:
+                ra = await client.get(PUBMED_FETCH_URL, params={
+                    "db": "pubmed",
+                    "id": ",".join(pmids),
+                    "rettype": "abstract",
+                    "retmode": "text",
+                })
+                if ra.status_code == 200:
+                    abstract_text = ra.text
+                    # Parse individual abstracts by PMID
+                    for p in papers:
+                        pmid = p["pmid"]
+                        # Find abstract section for this PMID
+                        idx = abstract_text.find(f"PMID- {pmid}")
+                        if idx == -1:
+                            idx = abstract_text.find(pmid)
+                        if idx != -1:
+                            ab_start = abstract_text.find("AB  -", idx)
+                            ab_end = abstract_text.find("
+
+", ab_start) if ab_start != -1 else -1
+                            if ab_start != -1 and ab_end != -1:
+                                abstract = abstract_text[ab_start+6:ab_end].replace("
+      ", " ").strip()
+                                p["abstract"] = abstract[:500]  # Cap at 500 chars
+            except Exception as e:
+                logger.warning(f"Abstract fetch failed: {e}")
+
             return papers
 
     except Exception as e:
@@ -193,36 +224,43 @@ async def _fetch_paper_summaries(pmids: List[str]) -> List[Dict]:
 
 
 def format_publications_for_expert(pub_data: Dict) -> str:
-    """Format publication data as expert context string."""
+    """Format publication data as expert context for grant writing and investor reports."""
     if not pub_data.get("publications"):
         return ""
 
-    lines = [f"\n=== LANDMARK PUBLICATIONS: {pub_data['disease'].upper()} ==="]
-    lines.append(f"Total relevant publications found: {pub_data['total_found']}\n")
+    lines = [f"\n=== PEER-REVIEWED LITERATURE: {pub_data['disease'].upper()} ==="]
+    lines.append(f"({pub_data['total_found']} papers retrieved from PubMed)\n")
+    lines.append("INSTRUCTIONS: Cite these papers throughout your report using [SOURCE: Author Year | URL] format.")
+    lines.append("For market sizing, use epidemiology papers to justify patient population estimates.")
+    lines.append("For regulatory section, cite clinical trial results and guidelines.")
+    lines.append("For grant writing context, highlight unmet need from systematic reviews.\n")
 
-    if pub_data.get("guidelines"):
-        lines.append("CLINICAL GUIDELINES & CONSENSUS:")
-        for p in pub_data["guidelines"][:2]:
-            lines.append(f"  - {p['authors']} ({p['year']}). {p['title']}. {p['journal']}. PMID:{p['pmid']} {p['url']}")
+    categories = [
+        ("CLINICAL GUIDELINES (cite for regulatory strategy)", pub_data.get("guidelines", []), 2),
+        ("SYSTEMATIC REVIEWS & META-ANALYSES (cite for market sizing epidemiology)", pub_data.get("systematic_reviews", []), 3),
+        ("CLINICAL TRIAL RESULTS (cite for competitive landscape)", pub_data.get("recent_trials", []), 3),
+    ]
 
-    if pub_data.get("systematic_reviews"):
-        lines.append("\nSYSTEMATIC REVIEWS & META-ANALYSES:")
-        for p in pub_data["systematic_reviews"][:2]:
-            lines.append(f"  - {p['authors']} ({p['year']}). {p['title']}. {p['journal']}. PMID:{p['pmid']} {p['url']}")
+    used = set()
+    for label, papers, limit in categories:
+        if papers:
+            lines.append(label + ":")
+            for p in papers[:limit]:
+                used.add(p["pmid"])
+                abstract = p.get("abstract", "")
+                abstract_preview = f" | Abstract: {abstract[:200]}..." if abstract else ""
+                lines.append(f"  PMID {p['pmid']}: {p['authors']} ({p['year']}). "{p['title']}". {p['journal']}.{abstract_preview}")
+                lines.append(f"  URL: {p['url']}")
+            lines.append("")
 
-    if pub_data.get("recent_trials"):
-        lines.append("\nRECENT CLINICAL TRIAL RESULTS:")
-        for p in pub_data["recent_trials"][:2]:
-            lines.append(f"  - {p['authors']} ({p['year']}). {p['title']}. {p['journal']}. PMID:{p['pmid']} {p['url']}")
-
-    remaining = [p for p in pub_data["publications"]
-                 if p not in pub_data["guidelines"]
-                 and p not in pub_data["systematic_reviews"]
-                 and p not in pub_data["recent_trials"]]
+    remaining = [p for p in pub_data["publications"] if p["pmid"] not in used]
     if remaining:
-        lines.append("\nOTHER KEY PUBLICATIONS:")
+        lines.append("OTHER KEY PAPERS:")
         for p in remaining[:2]:
-            lines.append(f"  - {p['authors']} ({p['year']}). {p['title']}. {p['journal']}. PMID:{p['pmid']} {p['url']}")
+            abstract = p.get("abstract", "")
+            abstract_preview = f" | {abstract[:150]}..." if abstract else ""
+            lines.append(f"  PMID {p['pmid']}: {p['authors']} ({p['year']}). "{p['title']}". {p['journal']}.{abstract_preview}")
+            lines.append(f"  URL: {p['url']}")
 
-    lines.append("\n[Use these publications as sources in your report. Cite them with PMID and URL.]")
+    lines.append("\n[These are real PubMed papers. Use their data to support every quantitative claim in the report.]")
     return "\n".join(lines)

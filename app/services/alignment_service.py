@@ -438,6 +438,7 @@ RULES: Every source_url must be a real URL. Use pubmed.ncbi.nlm.nih.gov for pape
 
 {
   "executive_summary": "<2 sentences, under 300 chars>",
+  "literature_citations": [{"pmid":"<PMID from context>","title":"<under 120 chars>","authors":"<First author et al.>","journal":"<journal name>","year":"<year>","url":"<pubmed URL>","relevance":"<under 100 chars>"}],
   "disease_intelligence": {
     "condition": "<condition name>",
     "data_points": [{"metric":"<>","value":"<>","year":"<>","source":"<name>","source_url":"<real URL>"}],
