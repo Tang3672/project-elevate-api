@@ -87,7 +87,7 @@ DOMAIN_STRATEGIES = {
             "example_company": "Paratek Pharmaceuticals",
             "example_drug": "Omadacycline (Nuzyra)",
             "what_they_did": "Paratek received $216M BARDA contract to fund Phase 3 trials for CABP and ABSSSI. This allowed them to complete two Phase 3 trials without major equity dilution. Approved 2018.",
-            "source_url": "https://www.medicalcountermeasures.gov/barda/cbrn/omadacycline/",
+            "source_url": "https://medicalcountermeasures.gov/barda/cbrn/broad-spectrum-antimicrobials/",
             "applicability": "Any novel antibiotic against a national security pathogen (CRE, Acinetobacter, anthrax) should pursue BARDA before Phase 3."
         },
     ],
@@ -189,7 +189,7 @@ DOMAIN_STRATEGIES = {
             "example_company": "Moderna",
             "example_drug": "mRNA-1273 (Spikevax)",
             "what_they_did": "Moderna received $955M BARDA OTA in 2020 for Phase 3 and manufacturing scale-up. OTA structure allowed faster contracting than FAR-based grants. Procurement guarantee of 100M doses de-risked manufacturing investment.",
-            "source_url": "https://www.medicalcountermeasures.gov/barda/coronavirus/",
+            "source_url": "https://medicalcountermeasures.gov/barda/cbrn/covid-19/",
             "applicability": "Any vaccine against a pathogen on BARDA priority list (pandemic flu, COVID variants, bioterrorism agents) should pursue OTA structure for maximum funding speed."
         },
     ],
@@ -203,7 +203,7 @@ _DEFAULT_STRATEGIES = [
         "example_company": "Multiple — standard practice for rare/serious conditions",
         "example_drug": "Most recently approved rare disease drugs have 3+ designations",
         "what_they_did": "Companies like Vertex (for CF modulators) and Sarepta (for DMD) systematically obtained all applicable designations, cutting review timelines by 40-50%.",
-        "source_url": "https://www.fda.gov/patients/fast-track-breakthrough-therapy-accelerated-approval-priority-review",
+        "source_url": "https://www.fda.gov/patients/fast-track-breakthrough-therapy-accelerated-approval-priority-review/fast-track",
         "applicability": "File for all applicable designations simultaneously at Phase 1 completion. Each has a different eligibility bar — don't assume disqualification."
     },
 ]
