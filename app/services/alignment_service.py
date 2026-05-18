@@ -346,13 +346,6 @@ Do NOT separate citations from claims. Do NOT use [SOURCE: x] format. Embed the 
     except Exception as e:
         logger.warning(f"Knowledge retriever failed: {e} - using static knowledge")
 
-CITATION STYLE: Write like a Nature Medicine paper or NIH grant application. Every statistic, claim, and regulatory fact must be attributed inline. Examples:
-- "A 2019 CDC Threats Report (https://www.cdc.gov/antimicrobial-resistance/) documented 2.8 million AMR infections annually in the U.S., with 35,000 deaths."
-- "The pivotal SOLO I/II trials (Eckmann et al., NEJM 2015, PMID 25853744) demonstrated non-inferiority of oritavancin vs vancomycin for ABSSSI, establishing the 48-72 hour responder endpoint now required by FDA guidance."
-- "Under 21 CFR 314.500, FDA's accelerated approval pathway allows approval based on a surrogate endpoint reasonably likely to predict clinical benefit."
-Do NOT separate citations from claims. Do NOT use [SOURCE: x] format. Embed the citation in the sentence itself.
-"""
-    researcher_ctx = expert_system_prompt + "\n\n" + citation_style_instruction + "\n\n" + domain_static
     critic_ctx     = expert_critic_rules
 
     # Moat Widener 2+3: inject FDA history + ClinicalTrials live pipeline
