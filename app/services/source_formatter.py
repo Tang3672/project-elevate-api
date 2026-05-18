@@ -169,7 +169,7 @@ def build_sources_from_report(report: dict) -> dict:
     # Extract from market_access buyer_segments
     ma = report.get("market_access") or {}
     for seg in ma.get("buyer_segments", []):
-        add_source(seg.get("source", ""), "")
+        add_source(seg.get("source", ""), seg.get("source_url", ""))
 
     # Also run inline [SOURCE:] extraction on text fields
     inline_report = extract_and_format_sources(report)

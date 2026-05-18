@@ -480,7 +480,11 @@ RIGHT: "Under the GAIN Act of 2012 (21 U.S.C. 355f), QIDP designation confers an
 
 For literature_citations entries, write the relevance field as a full sentence explaining exactly what the paper found and why it matters: "Murray et al. (Lancet, 2022) estimated 1.27 million deaths directly attributable to AMR globally in 2019, establishing the epidemiological basis for the unmet need calculation in this report."
 
-RULES: Every source_url must be a real URL. Use pubmed.ncbi.nlm.nih.gov for papers, fda.gov for regulatory docs, cdc.gov for epidemiology. Keep all string values under 200 characters. No newlines inside string values.
+RULES:
+1. Every source_url must be a real URL. Use pubmed.ncbi.nlm.nih.gov for papers, fda.gov for regulatory docs, cdc.gov for epidemiology.
+2. Keep all string values under 200 characters. No newlines inside string values.
+3. CRITICAL: The MULTI-SOURCE INTELLIGENCE PACKAGE in your context contains papers from CrossRef, Semantic Scholar, NIH Reporter, and news sources. You MUST cite these in your report and include them in the sources array. Do not only cite FDA and CDC - use the full range of sources provided.
+4. For buyer segments, always include a source_url pointing to the organization or publication that supports the buyer data.
 
 {
   "executive_summary": "<2 sentences, under 300 chars>",
