@@ -345,7 +345,7 @@ CITATION STYLE: Write like a Nature Medicine paper or NIH grant application. Eve
 Do NOT separate citations from claims. Do NOT use [SOURCE: x] format. Embed the citation in the sentence itself.
 """
     researcher_ctx = expert_system_prompt + "\n\n" + citation_style_instruction + "\n\n" + domain_static
-        critic_ctx     = expert_critic_rules
+    critic_ctx     = expert_critic_rules
 
     # Moat Widener 2+3: inject FDA history + ClinicalTrials live pipeline
     try:
