@@ -337,7 +337,14 @@ async def _generate_expert_report(idea, product_type, expert, demand_results, ho
         )
     except Exception as e:
         logger.warning(f"Knowledge retriever failed: {e} — using static knowledge")
-        researcher_ctx = expert_system_prompt + "\n\n" + domain_static
+        citation_style_instruction = """
+CITATION STYLE: Write like a Nature Medicine paper or NIH grant application. Every statistic, claim, and regulatory fact must be attributed inline. Examples:
+- "A 2019 CDC Threats Report (https://www.cdc.gov/antimicrobial-resistance/) documented 2.8 million AMR infections annually in the U.S., with 35,000 deaths."
+- "The pivotal SOLO I/II trials (Eckmann et al., NEJM 2015, PMID 25853744) demonstrated non-inferiority of oritavancin vs vancomycin for ABSSSI, establishing the 48-72 hour responder endpoint now required by FDA guidance."
+- "Under 21 CFR 314.500, FDA's accelerated approval pathway allows approval based on a surrogate endpoint reasonably likely to predict clinical benefit."
+Do NOT separate citations from claims. Do NOT use [SOURCE: x] format. Embed the citation in the sentence itself.
+"""
+    researcher_ctx = expert_system_prompt + "\n\n" + citation_style_instruction + "\n\n" + domain_static
         critic_ctx     = expert_critic_rules
 
     # Moat Widener 2+3: inject FDA history + ClinicalTrials live pipeline
@@ -448,6 +455,17 @@ def _build_expert_context(idea, expert, demand_results, hospital_matches, diseas
 
 EXPERT_JSON_SCHEMA = """
 Generate a biomedical research intelligence report. Return ONLY valid JSON with no markdown fences.
+
+CITATION STYLE RULES - CRITICAL:
+Write every factual claim as a scientist would in a grant application or NEJM paper. Do NOT say "Source: CDC" at the end. Instead, weave the citation INTO the sentence naturally.
+
+WRONG: "CRE causes 13,100 infections per year. Source: CDC AR Threats Report."
+RIGHT: "According to the CDC Antimicrobial Resistance Threats Report (2019), carbapenem-resistant Enterobacterales (CRE) cause approximately 13,100 infections and 1,100 deaths annually in the United States."
+
+WRONG: "The QIDP pathway provides exclusivity benefits."
+RIGHT: "Under the GAIN Act of 2012 (21 U.S.C. 355f), QIDP designation confers an additional five years of market exclusivity and guarantees Priority Review with a six-month FDA target action date."
+
+For literature_citations entries, write the relevance field as a full sentence explaining exactly what the paper found and why it matters: "Murray et al. (Lancet, 2022) estimated 1.27 million deaths directly attributable to AMR globally in 2019, establishing the epidemiological basis for the unmet need calculation in this report."
 
 RULES: Every source_url must be a real URL. Use pubmed.ncbi.nlm.nih.gov for papers, fda.gov for regulatory docs, cdc.gov for epidemiology. Keep all string values under 200 characters. No newlines inside string values.
 
