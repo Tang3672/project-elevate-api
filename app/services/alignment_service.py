@@ -76,7 +76,7 @@ async def generate_pi_report(
     hospital_matches_raw = await find_similar_needs(
         query_embedding=idea_embedding, top_k=10, min_similarity=0.50)
 
-    # ── PI Institutional Memory ───────────────────────────────────────────────
+    #  PI Institutional Memory 
     pi_memory_context = ""
     if user_id:
         try:
@@ -87,7 +87,7 @@ async def generate_pi_report(
         except Exception as e:
             logger.warning(f"PI memory load failed (non-fatal): {e}")
 
-    # ── MoE Routing ───────────────────────────────────────────────────────────
+    #  MoE Routing 
     router_result = await route_expert(idea=idea, pi_domain=disease_domain)
     expert        = router_result.expert
     logger.info(
@@ -96,7 +96,7 @@ async def generate_pi_report(
         f"confidence={router_result.confidence:.2f}"
     )
 
-    # ── Generate with Expert context ──────────────────────────────────────────
+    #  Generate with Expert context 
     report = await _generate_expert_report(
         idea, pt, expert, demand_results, hospital_matches_raw, total_signals,
         pi_memory_context=pi_memory_context)
@@ -117,7 +117,7 @@ async def generate_pi_report(
     report.routing_method  = router_result.routing_method
     report.mismatch_warning = router_result.mismatch_warning
 
-    # ── LangGraph Validation ──────────────────────────────────────────────────
+    #  LangGraph Validation 
     try:
         from app.services.validation_graph import validate_pi_report
         report_dict = report.model_dump(mode="json")
@@ -138,7 +138,7 @@ async def generate_pi_report(
 
 
 async def generate_alignment_report(idea: str) -> AlignmentReport:
-    """Legacy entry point — kept for backward compatibility."""
+    """Legacy entry point - kept for backward compatibility."""
     source_counts       = await get_signal_counts_by_source()
     total_signals       = sum(r["count"] for r in source_counts)
     idea_embedding      = await embed_text(idea)
@@ -166,7 +166,7 @@ CRITICAL RULES:
 2. Every data point must include source name + URL where available.
 3. Market sizing must be bottom-up: (patients × price per course × penetration rate = TAM).
 4. Regulatory guidance must be specific to the pathogen/indication, not generic.
-5. Show friction points honestly — do not sugarcoat commercial challenges.
+5. Show friction points honestly - do not sugarcoat commercial challenges.
 6. Include specific loopholes and expedient strategies used by real antibiotic developers.
 
 You must respond with ONLY a valid JSON object. No markdown, no preamble. Use this exact schema:
@@ -214,7 +214,7 @@ You must respond with ONLY a valid JSON object. No markdown, no preamble. Use th
       {
         "name": "<e.g. QIDP Designation>",
         "description": "<what it is>",
-        "benefit": "<what the PI gets — be specific: +5yr exclusivity, priority review, etc.>",
+        "benefit": "<what the PI gets - be specific: +5yr exclusivity, priority review, etc.>",
         "eligibility": "<how to qualify>",
         "how_to_apply": "<practical steps to apply>",
         "timeline": "<when to apply and FDA response time>",
@@ -243,7 +243,7 @@ You must respond with ONLY a valid JSON object. No markdown, no preamble. Use th
     ],
     "loopholes_and_strategies": [
       "<e.g. Stack QIDP + Orphan Drug Designation for narrow-spectrum agents targeting rare infections (e.g., Burkholderia, NTM) to get 5yr QIDP + 7yr ODE exclusivity simultaneously>",
-      "<e.g. 505(b)(2) NDA pathway: rely on FDA's prior findings for a known mechanism, reformulate or combine, reducing Phase 3 requirements by 30-40% — used by Aradigm (ciprofloxacin inhaled), Paratek (omadacycline)>"
+      "<e.g. 505(b)(2) NDA pathway: rely on FDA's prior findings for a known mechanism, reformulate or combine, reducing Phase 3 requirements by 30-40% - used by Aradigm (ciprofloxacin inhaled), Paratek (omadacycline)>"
     ],
     "funding_programs": [
       "<e.g. CARB-X: up to $4M preclinical + $6M Phase 1 non-dilutive funding; apply at carb-x.org; deadlines twice yearly>",
@@ -266,10 +266,10 @@ You must respond with ONLY a valid JSON object. No markdown, no preamble. Use th
       }
     ],
     "key_opinion_leaders": [
-      "<e.g. IDSA Fellows in infectious disease — most influential; target IDSA Annual Meeting poster/oral presentations>",
-      "<e.g. Hospital antimicrobial stewardship pharmacists — the actual formulary decision-makers in >80% of cases>"
+      "<e.g. IDSA Fellows in infectious disease - most influential; target IDSA Annual Meeting poster/oral presentations>",
+      "<e.g. Hospital antimicrobial stewardship pharmacists - the actual formulary decision-makers in >80% of cases>"
     ],
-    "reimbursement_pathway": "<e.g. CMS New Technology Add-On Payment (NTAP): 75% cost add-on above DRG for QIDP-designated antibiotics, effective 2-3 years post-approval — apply 2 years before expected approval date>",
+    "reimbursement_pathway": "<e.g. CMS New Technology Add-On Payment (NTAP): 75% cost add-on above DRG for QIDP-designated antibiotics, effective 2-3 years post-approval - apply 2 years before expected approval date>",
     "first_commercial_step": "<most important first step to market>",
     "international_opportunities": [
       "<e.g. UK NHS Subscription Model: up to £10M/yr fixed payment per antibiotic, delinked from sales volume; apply via NICE health-tech assessment; deadline annually>",
@@ -305,7 +305,7 @@ async def _generate_expert_report(idea, product_type, expert, demand_results, ho
     Injects expert system_prompt + knowledge_base into the researcher context.
     Falls back to antibiotic-specific parsing for AMR; generic parsing for others.
     """
-    # ── Two-layer knowledge system ────────────────────────────────────────────
+    #  Two-layer knowledge system 
     # Layer 1: Disease Classifier → specific disease name
     disease_info = {}
     disease_name = "the indicated condition"
@@ -344,7 +344,7 @@ Do NOT separate citations from claims. Do NOT use [SOURCE: x] format. Embed the 
             domain_static_knowledge = domain_static,
         )
     except Exception as e:
-        logger.warning(f"Knowledge retriever failed: {e} — using static knowledge")
+        logger.warning(f"Knowledge retriever failed: {e} - using static knowledge")
 
 CITATION STYLE: Write like a Nature Medicine paper or NIH grant application. Every statistic, claim, and regulatory fact must be attributed inline. Examples:
 - "A 2019 CDC Threats Report (https://www.cdc.gov/antimicrobial-resistance/) documented 2.8 million AMR infections annually in the U.S., with 35,000 deaths."
@@ -460,7 +460,7 @@ def _build_expert_context(idea, expert, demand_results, hospital_matches, diseas
             f"\nTitle: {s['title']}"
             f"\nDesc: {s['description'][:350]}"
             f"\nMagnitude: {s.get('magnitude')} {s.get('magnitude_unit','')}"
-            f"\nGeo: {s.get('geographic_scope')} — {s.get('location_name') or 'National'}"
+            f"\nGeo: {s.get('geographic_scope')} - {s.get('location_name') or 'National'}"
         )
     if hospital_matches:
         lines.append(f"\nCLINICAL PAIN POINTS ({len(hospital_matches)} matches):")
@@ -714,7 +714,7 @@ def _build_antibiotic_context(idea: str, demand_results: list, hospital_matches:
             f"\nTitle: {s['title']}"
             f"\nDescription: {s['description'][:350]}"
             f"\nMagnitude: {s.get('magnitude')} {s.get('magnitude_unit','')}"
-            f"\nGeography: {s.get('geographic_scope')} — {s.get('location_name') or 'National'}"
+            f"\nGeography: {s.get('geographic_scope')} - {s.get('location_name') or 'National'}"
         )
     if hospital_matches:
         lines.append(f"\nHOSPITAL / CLINICAL PAIN POINTS ({len(hospital_matches)} matches):")
@@ -733,7 +733,7 @@ def _build_antibiotic_context(idea: str, demand_results: list, hospital_matches:
 
 GENERIC_PI_SYSTEM_PROMPT = """You are a go-to-market intelligence engine for principal investigators (PIs) developing healthcare products.
 
-Generate a source-cited intelligence report. Every data point must show its source. No opaque 0-100 scores — use transparent bottom-up calculations.
+Generate a source-cited intelligence report. Every data point must show its source. No opaque 0-100 scores - use transparent bottom-up calculations.
 
 Respond with ONLY this JSON schema:
 {
@@ -871,7 +871,7 @@ def _build_legacy_context(idea: str, demand_results: list, hospital_matches: lis
             f"\nSignal {i} [{s['source']} | {s['signal_type']} | sim={s['similarity_score']:.2f}]"
             f"\nTitle: {s['title']}\nDesc: {s['description'][:350]}"
             f"\nMagnitude: {s.get('magnitude')} {s.get('magnitude_unit','')}"
-            f"\nGeo: {s.get('geographic_scope')} — {s.get('location_name') or 'National'}"
+            f"\nGeo: {s.get('geographic_scope')} - {s.get('location_name') or 'National'}"
         )
     if hospital_matches:
         lines.append(f"\nHOSPITAL NEEDS ({len(hospital_matches)}):")
@@ -934,16 +934,16 @@ SOURCE_URLS = {
 }
 
 SOURCE_EXPLANATIONS = {
-    "fda_adverse_events":   "FDA FAERS safety data — existing drug solutions failing patients",
-    "fda_device_events":    "FDA MAUDE device malfunction data — existing hardware inadequate",
-    "fda_recalls":          "Active FDA Class I recall — strongest signal replacement is needed",
-    "clinical_trials":      "Active trial pipeline — validated commercial and research investment",
-    "cdc_places":           "County-level disease burden — geographic demand concentration",
-    "census_sahie":         "Uninsured population — underserved markets with access gaps",
-    "cms_hospital_quality": "Hospital quality deficit — where improvement technology is needed",
-    "hrsa_shortage":        "Federal provider shortage designation — regulatory gap validation",
-    "cdc_wastewater":       "Real-time surveillance — near-term demand surge signal",
-    "cdc_fluview":          "Weekly respiratory illness — seasonal demand pattern",
+    "fda_adverse_events":   "FDA FAERS safety data - existing drug solutions failing patients",
+    "fda_device_events":    "FDA MAUDE device malfunction data - existing hardware inadequate",
+    "fda_recalls":          "Active FDA Class I recall - strongest signal replacement is needed",
+    "clinical_trials":      "Active trial pipeline - validated commercial and research investment",
+    "cdc_places":           "County-level disease burden - geographic demand concentration",
+    "census_sahie":         "Uninsured population - underserved markets with access gaps",
+    "cms_hospital_quality": "Hospital quality deficit - where improvement technology is needed",
+    "hrsa_shortage":        "Federal provider shortage designation - regulatory gap validation",
+    "cdc_wastewater":       "Real-time surveillance - near-term demand surge signal",
+    "cdc_fluview":          "Weekly respiratory illness - seasonal demand pattern",
 }
 
 
@@ -1022,7 +1022,7 @@ def _clean_json(raw: str) -> dict:
     # Replace smart quotes and problematic characters
     clean = clean.replace('‘', "'").replace('’', "'")
     clean = clean.replace('“', '"').replace('”', '"')
-    clean = clean.replace('–', '-').replace('—', '-')
+    clean = clean.replace('-', '-').replace('-', '-')
     clean = clean.replace(' ', ' ')
     try:
         return json.loads(clean)
