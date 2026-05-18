@@ -236,5 +236,28 @@ async def mock_pi_report():
             {"number": 5, "name": "PubMed: IDSA SSTI Guidelines", "url": "https://pubmed.ncbi.nlm.nih.gov/24947530/", "accessed": "2026-05-17"},
             {"number": 6, "name": "PubMed: Delafloxacin Phase 3 Trial", "url": "https://pubmed.ncbi.nlm.nih.gov/28537196/", "accessed": "2026-05-17"}
         ],
+        "strategic_playbook": [
+            {
+                "strategy": "LPAD approval for resistant subset then label expansion",
+                "example": "Pfizer - Aztreonam-avibactam (Emblaveo)",
+                "what_they_did": "Sought approval specifically for NDM-producing organisms no other drug covers, then planned sNDA expansion to broader gram-negative indications post-commercialization.",
+                "how_to_apply": "If your antibiotic covers a resistance mechanism with no approved alternative, file LPAD for that niche first. Broader expansion follows with real-world evidence.",
+                "source_url": "https://pubmed.ncbi.nlm.nih.gov/36223745/"
+            },
+            {
+                "strategy": "BARDA partnership before Phase 3 to eliminate dilutive financing",
+                "example": "Paratek Pharmaceuticals - Omadacycline (Nuzyra)",
+                "what_they_did": "Secured $216M BARDA contract to fund both Phase 3 trials (CABP and ABSSSI) before raising equity. Approved 2018 with minimal dilution during most expensive development stage.",
+                "how_to_apply": "Submit BARDA TechWatch pre-application before Phase 2 completion. Frame as national security asset if pathogen is on CDC urgent threat list.",
+                "source_url": "https://www.medicalcountermeasures.gov/barda/cbrn/omadacycline/"
+            },
+            {
+                "strategy": "Antibiotic-BLI combination packaging to create new patentable entity from off-patent drug",
+                "example": "AstraZeneca/Pfizer - Ceftazidime-avibactam (Avycaz)",
+                "what_they_did": "Licensed avibactam BLI and combined with off-patent ceftazidime. Created new patentable combination with QIDP designation. AZ sold US rights to Pfizer for $1.6B in 2016.",
+                "how_to_apply": "If developing a BLI, identify which off-patent beta-lactams best complement your inhibitor spectrum. The combination becomes a new patentable entity with independent IP.",
+                "source_url": "https://pubmed.ncbi.nlm.nih.gov/26063370/"
+            }
+        ],
         "limitations": "Market sizing based on 2019 CDC surveillance data; actual MRSA SSTI incidence may vary. Pricing assumptions derived from delafloxacin comparator and subject to payer negotiation."
     }
