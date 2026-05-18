@@ -365,8 +365,12 @@ Do NOT separate citations from claims. Do NOT use [SOURCE: x] format. Embed the 
             gather_competitive_intelligence,
             format_intelligence_for_expert,
         )
+        from app.services.source_aggregator_service import (
+            aggregate_all_sources,
+            format_aggregated_sources,
+        )
 
-        ci, pub_data, strategic_intel = await asyncio.gather(
+        ci, pub_data, strategic_intel, aggregated_sources = await asyncio.gather(
             get_full_competitive_intelligence(
                 condition=disease_name,
                 disease_keywords=disease_keywords,
@@ -376,6 +380,10 @@ Do NOT separate citations from claims. Do NOT use [SOURCE: x] format. Embed the 
                 sub_expert_id=sub_expert_id,
             ),
             gather_competitive_intelligence(
+                disease_name=disease_name,
+                sub_expert_id=sub_expert_id,
+            ),
+            aggregate_all_sources(
                 disease_name=disease_name,
                 sub_expert_id=sub_expert_id,
             ),
@@ -390,6 +398,10 @@ Do NOT separate citations from claims. Do NOT use [SOURCE: x] format. Embed the 
         if not isinstance(strategic_intel, Exception):
             strategic_context = format_intelligence_for_expert(strategic_intel, disease_name)
             researcher_ctx = researcher_ctx + strategic_context
+
+        if not isinstance(aggregated_sources, Exception):
+            agg_context = format_aggregated_sources(aggregated_sources, disease_name)
+            researcher_ctx = researcher_ctx + agg_context
 
         if not isinstance(pub_data, Exception) and pub_data:
             pub_context = format_publications_for_expert(pub_data)
