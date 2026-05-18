@@ -352,12 +352,21 @@ async def _generate_expert_report(idea, product_type, expert, demand_results, ho
         sub_expert_id = getattr(expert, "sub_expert_id", getattr(expert, "domain_id", ""))
 
         # Run FDA/ClinicalTrials and PubMed in parallel
-        ci, pub_data = await asyncio.gather(
+        from app.services.competitive_intelligence_service import (
+            gather_competitive_intelligence,
+            format_intelligence_for_expert,
+        )
+
+        ci, pub_data, strategic_intel = await asyncio.gather(
             get_full_competitive_intelligence(
                 condition=disease_name,
                 disease_keywords=disease_keywords,
             ),
             get_landmark_publications(
+                disease_name=disease_name,
+                sub_expert_id=sub_expert_id,
+            ),
+            gather_competitive_intelligence(
                 disease_name=disease_name,
                 sub_expert_id=sub_expert_id,
             ),
@@ -368,6 +377,10 @@ async def _generate_expert_report(idea, product_type, expert, demand_results, ho
             ci_context = format_competitive_intelligence_for_report(ci)
             researcher_ctx = researcher_ctx + ci_context
             _competitive_intelligence = ci
+
+        if not isinstance(strategic_intel, Exception):
+            strategic_context = format_intelligence_for_expert(strategic_intel, disease_name)
+            researcher_ctx = researcher_ctx + strategic_context
 
         if not isinstance(pub_data, Exception) and pub_data:
             pub_context = format_publications_for_expert(pub_data)
