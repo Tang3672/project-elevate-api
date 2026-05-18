@@ -335,7 +335,7 @@ CITATION STYLE: Write like a Nature Medicine paper or NIH grant application. Eve
 Do NOT separate citations from claims. Do NOT use [SOURCE: x] format. Embed the citation in the sentence itself.
 """
 
-    researcher_ctx, critic_ctx = await build_full_expert_context(
+        researcher_ctx, critic_ctx = await build_full_expert_context(
             sub_expert_id           = sub_expert_id,
             sub_expert_prompt       = expert_system_prompt,
             sub_expert_critic       = expert_critic_rules,
