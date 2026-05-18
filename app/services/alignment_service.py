@@ -483,6 +483,9 @@ For literature_citations entries, write the relevance field as a full sentence e
 RULES:
 1. Every source_url must be a real URL. Use pubmed.ncbi.nlm.nih.gov for papers, fda.gov for regulatory docs, cdc.gov for epidemiology.
 2. Keep all string values under 200 characters. No newlines inside string values.
+3. CRITICAL: Your context includes papers from CrossRef, Semantic Scholar, Europe PMC, NIH Reporter grants, and news sources. Cite these throughout the report and include them in the sources array - do not only cite FDA and CDC.
+4. For buyer segments always include a real source_url for the organization or publication supporting the buyer data.
+5. For clinical trial FDA guidance URLs use the exact URL from the guidance document in your context - do not guess URLs.
 3. CRITICAL: The MULTI-SOURCE INTELLIGENCE PACKAGE in your context contains papers from CrossRef, Semantic Scholar, NIH Reporter, and news sources. You MUST cite these in your report and include them in the sources array. Do not only cite FDA and CDC - use the full range of sources provided.
 4. For buyer segments, always include a source_url pointing to the organization or publication that supports the buyer data.
 
