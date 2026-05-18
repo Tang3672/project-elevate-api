@@ -283,7 +283,9 @@ You must respond with ONLY a valid JSON object. No markdown, no preamble. Use th
     "scope": "<national|regional|concentrated>"
   },
 
-  "recommended_next_steps": [
+    "strategic_playbook": [{"strategy":"<strategy name under 100 chars>","example":"<Company - Drug>","what_they_did":"<under 120 chars>","how_to_apply":"<under 120 chars>","source_url":"<real URL>"}],
+
+"recommended_next_steps": [
     "<specific, actionable step with timeline>",
     "<step 2>",
     "<step 3>",
