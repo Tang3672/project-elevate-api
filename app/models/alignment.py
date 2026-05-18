@@ -182,6 +182,8 @@ class PIReport(BaseModel):
     hospital_need_matches:  List[HospitalNeedMatch] = Field(default_factory=list)
     market_geography:       Optional[MarketGeography] = None
     recommended_next_steps: List[str] = Field(default_factory=list)
+    strategic_playbook:     List[dict] = Field(default_factory=list)
+    literature_citations:   List[dict] = Field(default_factory=list)
     limitations:            Optional[str] = None
     generated_at:           datetime = Field(default_factory=datetime.utcnow)
     signals_searched:       int = 0
