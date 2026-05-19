@@ -569,6 +569,21 @@ def format_aggregated_sources(data: Dict, disease_name: str) -> str:
             lines.append(f"  [{n['source']}] {n['title']}")
             lines.append(f"  {n['date']} | {n['url']}")
     
-    lines.append("\n[CRITICAL: Cite papers inline throughout the report using 'Author et al. (Journal, Year)' format. Do not create a separate citations section — weave citations into every factual claim.]")
+    lines.append("""
+MANDATORY CITATION INSTRUCTIONS:
+The papers above are REAL papers retrieved live from CrossRef, Semantic Scholar, and Europe PMC.
+You MUST cite at least 5 of these papers inline in your report using this format:
+"Author et al. (Journal, Year) found that [specific finding relevant to this report]"
+
+For EVERY factual claim about:
+- Disease burden/epidemiology -> cite a paper from the list above
+- Treatment landscape -> cite a paper from the list above  
+- Clinical trial design -> cite a paper from the list above
+- Market sizing inputs -> cite a paper from the list above
+
+Do NOT say "according to CDC" when a peer-reviewed paper above contains the same data.
+The peer-reviewed citation is ALWAYS preferred over a government website citation.
+Include these papers in your sources array with their exact URLs provided above.
+""")
     
     return "\n".join(lines)
