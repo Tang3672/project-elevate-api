@@ -338,6 +338,37 @@ CITATION STYLE: Write like a Nature Medicine paper or NIH grant application. Eve
 - "The pivotal SOLO I/II trials (Eckmann et al., NEJM 2015, PMID 25853744) demonstrated non-inferiority of oritavancin vs vancomycin for ABSSSI."
 - "Under 21 CFR 314.500, FDA accelerated approval allows approval based on a surrogate endpoint reasonably likely to predict clinical benefit."
 Do NOT separate citations from claims. Do NOT use [SOURCE: x] format. Embed the citation in the sentence itself.
+
+TIMELINE AND COST RULES - CRITICAL:
+Never state development timelines or costs without citing a real comparable drug program.
+Use these verified precedents:
+
+ANTIBIOTIC PRECEDENTS:
+- Omadacycline (Nuzyra): Phase 1-3 + NDA = 8 years (2010-2018), M Phase 3 funded by BARDA
+- Ceftazidime-avibactam (Avycaz): Phase 1-3 + NDA = 7 years (2009-2015), ~M total
+- Delafloxacin (Baxdela): Phase 1-3 + NDA = 9 years (2008-2017), ~M total
+- Imipenem-relebactam (Recarbrio): Phase 1-3 + NDA = 8 years (2010-2019), ~M total
+
+ONCOLOGY PRECEDENTS:
+- Crizotinib (Xalkori): Phase 1-approval = 5 years (2006-2011), ~M (accelerated)
+- Osimertinib (Tagrisso): Phase 1-approval = 4 years (2012-2015), ~M (BTD + accelerated)
+- Venetoclax (Venclexta): Phase 1-approval = 5 years (2011-2016), ~M
+
+RARE DISEASE PRECEDENTS:
+- Nusinersen (Spinraza): Phase 1-approval = 6 years (2011-2016), ~M
+- Onasemnogene (Zolgensma): Phase 1-approval = 7 years (2012-2019), ~M
+- Voretigene (Luxturna): Phase 1-approval = 8 years (2009-2017), ~M (small trial)
+
+GENE THERAPY PRECEDENTS:
+- Betibeglogene (Zynteglo): Phase 1-approval = 9 years (2013-2022), ~M
+- Casgevy (exagamglogene): Phase 1-approval = 6 years (2018-2023), ~M
+
+DEVICE PRECEDENTS (PMA):
+- WATCHMAN FLX: Phase 1-approval = 8 years (2012-2020), ~M IDE trial
+- TAVR (SAPIEN): Phase 1-approval = 12 years (2004-2016 intermediate risk), ~M total program
+
+When stating timeline: "Based on comparable programs [cite drug], development typically requires X-Y years from IND to approval."
+When stating cost: "Phase 3 costs for comparable [drug class] programs have ranged from -Y million, as evidenced by [cite drug and source]."
 """
 
         researcher_ctx, critic_ctx = await build_full_expert_context(
