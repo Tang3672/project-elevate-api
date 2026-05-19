@@ -558,11 +558,11 @@ RULES:
    RIGHT: source: "CDC Antimicrobial Resistance Threats Report 2019, Table 1 (p.7)"
 3. Keep all string values under 200 characters. No newlines inside string values.
 4. CRITICAL: Your context includes papers from CrossRef, Semantic Scholar, Europe PMC, NIH Reporter grants, and news sources. Cite these throughout the report - do not only cite FDA and CDC.
-5. For buyer segments always include a real source_url.
+5. For buyer segments: source_url is MANDATORY - use real URLs like https://www.aha.org/statistics/fast-facts-us-hospitals or https://www.cancer.gov/research/infrastructure/cancer-centers/find or https://data.cms.gov/ - NEVER leave empty.
 6. For clinical trial FDA guidance URLs use the exact URL from your context - do not guess.
 7. For market sizing steps, the source field must name the specific dataset or publication that contains the patient count or pricing data used.
 3. CRITICAL: The MULTI-SOURCE INTELLIGENCE PACKAGE in your context contains papers from CrossRef, Semantic Scholar, NIH Reporter, and news sources. You MUST cite these in your report and include them in the sources array. Do not only cite FDA and CDC - use the full range of sources provided.
-4. For buyer segments, always include a source_url pointing to the organization or publication that supports the buyer data.
+4. For buyer segments: source_url is MANDATORY. Real examples: https://www.aha.org/statistics/fast-facts-us-hospitals, https://www.cancer.gov/research/infrastructure/cancer-centers/find, https://data.cms.gov/, https://www.curesma.org/about-sma/. NEVER leave source_url empty or as empty strings the buyer data.
 
 {
   "executive_summary": "<2 sentences, under 300 chars>",
