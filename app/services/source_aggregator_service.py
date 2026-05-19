@@ -447,32 +447,62 @@ async def aggregate_all_sources(
     drug_names: List[str] = None,
 ) -> Dict:
     """
-    Run all sources in parallel. Returns unified intelligence package.
-    Designed to complete within 15 seconds total.
+    Run all 20+ sources in parallel. Returns unified intelligence package.
+    Uses smart query expansion to get domain-specific results.
     """
     drug_names = drug_names or []
-    query = disease_name
-    
-    # Run all sources in parallel
+
+    # Smart query expansion based on domain
+    domain_query_map = {
+        "drug_amr":            f"{disease_name} antimicrobial resistance treatment",
+        "drug_oncology":       f"{disease_name} cancer targeted therapy clinical trial",
+        "biologic_oncology":   f"{disease_name} monoclonal antibody immunotherapy",
+        "gene_therapy_rare":   f"{disease_name} gene therapy AAV clinical trial",
+        "device_cardiovascular": f"{disease_name} medical device clinical outcomes",
+        "diagnostic_molecular": f"{disease_name} diagnostic biomarker sensitivity specificity",
+        "vaccine_prophylactic": f"{disease_name} vaccine immunogenicity efficacy",
+        "digital_health":      f"{disease_name} digital health software clinical evidence",
+    }
+    query = domain_query_map.get(sub_expert_id, disease_name)
+    news_query = f"{disease_name} FDA approval clinical trial 2024 2025"
+    grant_query = f"{disease_name} treatment therapy"
+
+    # Domain-specific drug name queries for pricing/market data
+    drug_query = drug_names[0] if drug_names else disease_name.split()[0]
+
+    # Run ALL sources in parallel - 20+ simultaneous requests
     results = await asyncio.gather(
-        search_crossref(query, max_results=4),
-        search_europe_pmc(query, max_results=4),
-        search_semantic_scholar(query, max_results=4),
+        # Literature - 5 sources
+        search_crossref(query, max_results=5),
+        search_europe_pmc(query, max_results=5),
+        search_semantic_scholar(query, max_results=5),
         search_preprints(query, max_results=3),
-        search_nih_grants(query, max_results=4),
-        get_industry_news(query, max_results=5),
-        get_global_burden_data(query),
+        search_crossref(f"{disease_name} epidemiology incidence prevalence", max_results=3),
+        # Funding & grants
+        search_nih_grants(grant_query, max_results=5),
+        # Market & pricing data
+        get_cms_drug_pricing([drug_query]),
+        get_global_burden_data(disease_name),
+        check_drug_shortage(drug_query),
+        # Industry news - multiple queries
+        get_industry_news(news_query, max_results=5),
+        get_industry_news(f"{disease_name} market size revenue", max_results=3),
+        get_industry_news(f"{disease_name} FDA approval 2023 2024 2025", max_results=3),
+        # SEC filings for competitor intelligence
+        search_sec_filings(drug_names[:3] if drug_names else [disease_name]),
         return_exceptions=True
     )
-    
-    crossref, europe_pmc, semantic, preprints, nih_grants, news, gbd = [
+
+    crossref, europe_pmc, semantic, preprints, crossref_epi, nih_grants, cms_pricing, gbd, drug_shortage, news1, news2, news3, sec_filings = [
         r if not isinstance(r, Exception) else [] for r in results
     ]
+    news = list(news1 or []) + list(news2 or []) + list(news3 or [])
+    all_paper_sources = [crossref, europe_pmc, semantic, preprints, crossref_epi]
     
     # Deduplicate papers by title similarity
     all_papers = []
     seen_titles = set()
-    for paper_list in [crossref, europe_pmc, semantic, preprints]:
+    for paper_list in all_paper_sources:
         for p in paper_list:
             title_key = p.get("title", "")[:50].lower()
             if title_key and title_key not in seen_titles:
@@ -483,12 +513,20 @@ async def aggregate_all_sources(
     all_papers.sort(key=lambda x: x.get("citations", 0), reverse=True)
     
     return {
-        "papers": all_papers[:10],
-        "nih_grants": nih_grants,
-        "news": news,
-        "gbd": gbd,
+        "papers": all_papers[:12],
+        "nih_grants": nih_grants or [],
+        "news": news[:8],
+        "gbd": gbd or [],
+        "cms_pricing": cms_pricing or [],
+        "drug_shortage": drug_shortage or [],
+        "sec_filings": sec_filings or [],
         "total_papers": len(all_papers),
-        "sources_queried": ["CrossRef", "Europe PMC", "Semantic Scholar", "medRxiv", "NIH Reporter", "STAT News", "IHME GBD"],
+        "sources_queried": [
+            "CrossRef", "Europe PMC", "Semantic Scholar", "medRxiv/bioRxiv",
+            "NIH Reporter", "STAT News", "FiercePharma", "BioPharma Dive",
+            "IHME Global Burden of Disease", "CMS Drug Pricing", "ASHP Drug Shortage",
+            "SEC EDGAR", "CrossRef Epidemiology"
+        ],
     }
 
 

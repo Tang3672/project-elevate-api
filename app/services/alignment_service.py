@@ -108,6 +108,23 @@ async def generate_pi_report(
         report_dict = build_sources_from_report(report_dict)
         report.sources = report_dict.get("sources", [])
 
+        # Inject CrossRef/Semantic Scholar/NIH Reporter papers into sources
+        if _aggregated_sources:
+            from datetime import datetime as _dt
+            existing_urls = set(s.get('url','') for s in [dict(s) for s in report.sources] if s.get('url'))
+            next_num = max((s.number for s in report.sources), default=0) + 1
+            for paper in _aggregated_sources.get('papers', [])[:5]:
+                url = paper.get('url', '')
+                if url and url not in existing_urls:
+                    existing_urls.add(url)
+                    name = (paper.get('authors','') + ' (' + paper.get('year','') + '). ' +
+                            paper.get('title','')[:80] + '. ' + paper.get('journal',''))[:200]
+                    report.sources.append(type('S', (), {
+                        'number': next_num, 'name': name, 'url': url,
+                        'accessed': _dt.utcnow().strftime('%Y-%m-%d')
+                    })())
+                    next_num += 1
+
         # Always populate strategic_playbook from comprehensive strategy database
         from app.services.strategy_database import format_strategies_for_report
         _sub_id = getattr(expert, "sub_expert_id", getattr(expert, "domain_id", "drug_amr"))
@@ -448,6 +465,9 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
         if not isinstance(aggregated_sources, Exception):
             agg_context = format_aggregated_sources(aggregated_sources, disease_name)
             researcher_ctx = researcher_ctx + agg_context
+            _aggregated_sources = aggregated_sources
+        else:
+            _aggregated_sources = None
 
         if not isinstance(pub_data, Exception) and pub_data:
             pub_context = format_publications_for_expert(pub_data)
