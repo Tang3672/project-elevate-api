@@ -23,7 +23,7 @@ UNIVERSAL_STRATEGIES = [
         "example_drug": "Ivacaftor (Kalydeco) for cystic fibrosis",
         "what_they_did": "Vertex obtained Breakthrough Therapy + Fast Track + Priority Review + Orphan Drug simultaneously for ivacaftor. FDA approved in 4 months after NDA submission vs standard 10 months. First CF drug to target underlying cause rather than symptoms.",
         "how_to_apply": "At Phase 1 data readout, assess eligibility for all 4 designations simultaneously. File within 30 days of each other. Total incremental cost ~$200K; potential timeline savings 12-24 months.",
-        "source_url": "https://pubmed.ncbi.nlm.nih.gov/22083580/",
+        "source_url": "https://www.fda.gov/news-events/press-announcements/fda-approves-kalydeco-treat-rare-form-cystic-fibrosis",
         "applicability": "Any drug with serious/life-threatening indication and preliminary evidence of substantial improvement over available therapy."
     },
     {
@@ -34,7 +34,7 @@ UNIVERSAL_STRATEGIES = [
         "example_drug": "Humira (adalimumab)",
         "what_they_did": "AbbVie conducted pediatric studies for Humira as required by FDA Written Request. Received 6-month pediatric exclusivity extension on top of existing patent protection. At $20B/year revenue, each month of additional exclusivity was worth ~$1.7B.",
         "how_to_apply": "Request FDA Written Request (WR) for pediatric studies at NDA submission. Even if pediatric indication is not your target market, the exclusivity extension applies to adult indications. Budget $5-15M for pediatric PK and safety studies.",
-        "source_url": "https://www.fda.gov/drugs/development-resources/pediatric-drug-development",
+        "source_url": "https://www.fda.gov/science-research/pediatric-studies/pediatric-exclusivity-granted",
         "applicability": "Any drug that may have pediatric use. FDA issues Written Requests for ~100 drugs/year. Exclusivity extension value scales with adult market size."
     },
     {
@@ -45,7 +45,7 @@ UNIVERSAL_STRATEGIES = [
         "example_drug": "Remdesivir (Veklury)",
         "what_they_did": "Gilead held multiple Type A and B meetings with FDA during COVID development, pre-aligning on endpoints and data package. First IV antiviral for COVID approved via EUA in 10 weeks from first data, then traditional approval in 6 months from NDA submission — no CRL.",
         "how_to_apply": "Request Type B pre-NDA meeting at least 15 months before planned NDA submission. Submit detailed meeting package including proposed labeling, clinical summary, CMC overview. FDA must respond within 30 days and hold meeting within 90 days.",
-        "source_url": "https://www.fda.gov/drugs/guidance-documents-regulatory-information/formal-meetings-between-fda-and-sponsors-or-applicants-pdufa-products",
+        "source_url": "https://www.fda.gov/media/109951/download",
         "applicability": "All NDA/BLA submissions. Particularly critical for novel mechanisms, first-in-class drugs, and products with complex manufacturing."
     },
     {
@@ -67,7 +67,7 @@ UNIVERSAL_STRATEGIES = [
         "example_drug": "Brineura (cerliponase alfa) for CLN2 disease",
         "what_they_did": "BioMarin received Rare Pediatric Disease PRV upon Brineura approval in 2017. Sold the PRV to AbbVie for $125M. This single PRV sale covered a significant portion of the drug's development cost, making the program economically viable despite the tiny patient population.",
         "how_to_apply": "Apply for Rare Pediatric Disease designation if patient population <200,000 U.S. patients under 18. Designation is free. PRV is awarded automatically at approval. Engage investment bankers to run a competitive PRV sale process simultaneously with NDA approval — typical sale closes within 90 days of approval.",
-        "source_url": "https://www.fda.gov/industry/developing-products-rare-diseases-conditions/rare-pediatric-disease-priority-review-vouchers",
+        "source_url": "https://www.fda.gov/patients/rare-diseases-fda/pediatric-rare-disease-priority-review-vouchers",
         "applicability": "Any drug for rare disease with substantial pediatric patient population. PRV value is highest when large pharma has multiple large NDAs in pipeline."
     },
     {
@@ -89,7 +89,7 @@ UNIVERSAL_STRATEGIES = [
         "example_drug": "Crizotinib (Xalkori) with Vysis ALK FISH CDx",
         "what_they_did": "Pfizer identified ALK rearrangement biomarker in Phase 1, immediately partnered with Abbott for ALK FISH CDx, and ran enriched Phase 1/2 with 82 ALK+ patients showing 57% ORR. FDA granted accelerated approval based on this single-arm 82-patient trial in 2011 — 5 years faster than standard unselected trial.",
         "how_to_apply": "Identify predictive biomarker in Phase 1 pharmacodynamic studies. Lock companion diagnostic assay before Phase 2 enrollment begins. Co-develop CDx with LabCorp, Foundation Medicine, or Guardant. Submit CDx PMA simultaneously with drug NDA.",
-        "source_url": "https://pubmed.ncbi.nlm.nih.gov/20979469/",
+        "source_url": "https://www.fda.gov/news-events/press-announcements/fda-approves-xalkori-new-kind-lung-cancer-drug",
         "applicability": "Any targeted therapy where mechanism of action suggests a molecular subset will respond. Oncology, rare genetic diseases, autoimmune diseases with defined molecular subtypes."
     },
     {
@@ -318,16 +318,19 @@ DOMAIN_SPECIFIC_STRATEGIES = {
 
 # ── MASTER STRATEGY LOOKUP ─────────────────────────────────────────────────────
 
-def get_strategies_for_domain(sub_expert_id: str, max_strategies: int = 5) -> list:
+def get_strategies_for_domain(sub_expert_id: str, max_strategies: int = 4) -> list:
     """
-    Returns combined universal + domain-specific strategies for a given expert domain.
-    Always returns at least 3 universal strategies.
+    Returns domain-specific strategies first, then universal strategies as supplements.
+    Domain strategies are most relevant to the specific product type.
     """
-    universal = UNIVERSAL_STRATEGIES[:3]  # Always include top 3 universal
     domain = DOMAIN_SPECIFIC_STRATEGIES.get(sub_expert_id, [])
-
-    # Combine: domain-specific first (most relevant), then universal
-    combined = domain[:3] + universal
+    
+    if len(domain) >= max_strategies:
+        return domain[:max_strategies]
+    
+    # Fill remaining slots with universal strategies not already covered
+    universal = UNIVERSAL_STRATEGIES[:max_strategies]
+    combined = domain + universal
     return combined[:max_strategies]
 
 
