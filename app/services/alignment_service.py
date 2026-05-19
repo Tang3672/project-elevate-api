@@ -574,7 +574,7 @@ RULES:
   },
   "market_access": {
     "primary_channel": "<under 150 chars>",
-    "buyer_segments": [{"segment_name":"<>","buyer_count":"<>","decision_maker":"<>","price_per_unit":"<>","annual_spend_per_facility":"<>","access_mechanism":"<under 150 chars>","timeline_to_access":"<>","source":"<name>","source_url":"<URL or empty string>"}],
+    "buyer_segments": [{"segment_name":"<>","buyer_count":"<>","decision_maker":"<>","price_per_unit":"<>","annual_spend_per_facility":"<>","access_mechanism":"<under 150 chars>","timeline_to_access":"<>","source":"<specific org/publication with year>","source_url":"<REQUIRED: specific URL not a homepage>"}],
     "key_opinion_leaders": ["<Name, Institution - under 100 chars>"],
     "reimbursement_pathway": "<under 200 chars>",
     "first_commercial_step": "<under 150 chars>",
