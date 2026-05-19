@@ -108,21 +108,10 @@ async def generate_pi_report(
         report_dict = build_sources_from_report(report_dict)
         report.sources = report_dict.get("sources", [])
 
-        # Always populate strategic_playbook from curated domain knowledge
-        if not report.strategic_playbook:
-            from app.services.competitive_intelligence_service import DOMAIN_STRATEGIES, _DEFAULT_STRATEGIES
-            _sub_id = getattr(expert, "sub_expert_id", getattr(expert, "domain_id", "drug_amr"))
-            domain_strats = DOMAIN_STRATEGIES.get(_sub_id, _DEFAULT_STRATEGIES)
-            report.strategic_playbook = [
-                {
-                    "strategy": s["strategy"],
-                    "example": s["example_company"] + " - " + s["example_drug"],
-                    "what_they_did": s["what_they_did"],
-                    "how_to_apply": s["applicability"],
-                    "source_url": s["source_url"],
-                }
-                for s in domain_strats[:3]
-            ]
+        # Always populate strategic_playbook from comprehensive strategy database
+        from app.services.strategy_database import format_strategies_for_report
+        _sub_id = getattr(expert, "sub_expert_id", getattr(expert, "domain_id", "drug_amr"))
+        report.strategic_playbook = format_strategies_for_report(_sub_id)
     except Exception as e:
         logger.warning(f"Source building failed: {e}")
 
