@@ -525,8 +525,8 @@ RULES:
     "pathway_rationale": "<under 200 chars>",
     "designations": [{"name":"<>","description":"<under 150 chars>","benefit":"<under 150 chars>","eligibility":"<under 150 chars>","how_to_apply":"<under 150 chars>","timeline":"<under 100 chars>","source":"<name>","source_url":"<real FDA URL>","priority":"<recommended|consider|optional>"}],
     "clinical_trial_requirements": [{"phase":"<Phase 1|2|3>","patient_count":"<range>","duration":"<>","estimated_cost":"<>","key_endpoints":["<under 80 chars>"],"fda_guidance_document":"<name>","source_url":"<real FDA URL>","success_probability":"<>"}],
-    "total_timeline_estimate": "<>",
-    "total_cost_estimate": "<>",
+    "total_timeline_estimate": "<X-Y years IND to approval - cite a comparable approved drug and its actual timeline as evidence>",
+    "total_cost_estimate": "<$X-Y total development cost - cite a comparable drug program cost as evidence, e.g. Omadacycline Phase 3 cost $216M per BARDA contract>",
     "key_friction_points": ["<under 150 chars each, max 3>"],
     "loopholes_and_strategies": ["<under 150 chars each, max 3>"],
     "funding_programs": ["<under 150 chars each, max 3>"]
