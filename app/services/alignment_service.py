@@ -495,11 +495,21 @@ RIGHT: "Under the GAIN Act of 2012 (21 U.S.C. 355f), QIDP designation confers an
 For literature_citations entries, write the relevance field as a full sentence explaining exactly what the paper found and why it matters: "Murray et al. (Lancet, 2022) estimated 1.27 million deaths directly attributable to AMR globally in 2019, establishing the epidemiological basis for the unmet need calculation in this report."
 
 RULES:
-1. Every source_url must be a real URL. Use pubmed.ncbi.nlm.nih.gov for papers, fda.gov for regulatory docs, cdc.gov for epidemiology.
-2. Keep all string values under 200 characters. No newlines inside string values.
-3. CRITICAL: Your context includes papers from CrossRef, Semantic Scholar, Europe PMC, NIH Reporter grants, and news sources. Cite these throughout the report and include them in the sources array - do not only cite FDA and CDC.
-4. For buyer segments always include a real source_url for the organization or publication supporting the buyer data.
-5. For clinical trial FDA guidance URLs use the exact URL from the guidance document in your context - do not guess URLs.
+1. Every source_url must point to a SPECIFIC page, not a homepage. Examples:
+   WRONG: https://www.cdc.gov/antimicrobial-resistance/
+   RIGHT: https://www.cdc.gov/antimicrobial-resistance/data-research/threats/index.html
+   WRONG: https://www.fda.gov/drugs
+   RIGHT: https://www.fda.gov/drugs/development-resources/qualified-infectious-disease-product-qidp-designation
+   WRONG: https://pubmed.ncbi.nlm.nih.gov
+   RIGHT: https://pubmed.ncbi.nlm.nih.gov/35065702/
+2. Every data_point source must include the specific report name and year in the source field.
+   WRONG: source: "CDC"
+   RIGHT: source: "CDC Antimicrobial Resistance Threats Report 2019, Table 1 (p.7)"
+3. Keep all string values under 200 characters. No newlines inside string values.
+4. CRITICAL: Your context includes papers from CrossRef, Semantic Scholar, Europe PMC, NIH Reporter grants, and news sources. Cite these throughout the report - do not only cite FDA and CDC.
+5. For buyer segments always include a real source_url.
+6. For clinical trial FDA guidance URLs use the exact URL from your context - do not guess.
+7. For market sizing steps, the source field must name the specific dataset or publication that contains the patient count or pricing data used.
 3. CRITICAL: The MULTI-SOURCE INTELLIGENCE PACKAGE in your context contains papers from CrossRef, Semantic Scholar, NIH Reporter, and news sources. You MUST cite these in your report and include them in the sources array. Do not only cite FDA and CDC - use the full range of sources provided.
 4. For buyer segments, always include a source_url pointing to the organization or publication that supports the buyer data.
 
