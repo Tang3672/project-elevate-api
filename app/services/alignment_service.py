@@ -128,7 +128,24 @@ async def generate_pi_report(
         # Always populate strategic_playbook from comprehensive strategy database
         from app.services.strategy_database import format_strategies_for_report
         _sub_id = getattr(expert, "sub_expert_id", getattr(expert, "domain_id", "drug_amr"))
-        report.strategic_playbook = format_strategies_for_report(_sub_id)
+        logger.info(f"Strategic playbook: sub_expert_id={_sub_id}")
+        playbook = format_strategies_for_report(_sub_id)
+        if not playbook:
+            # Fallback: try common mappings
+            fallback_map = {
+                "drug_small_molecule": "drug_amr",
+                "drug_other": "drug_amr",
+                "biologic": "biologic_oncology",
+                "gene_cell_therapy": "gene_therapy_rare",
+                "medical_device": "device_cardiovascular",
+                "diagnostic": "diagnostic_molecular",
+                "vaccine": "vaccine_prophylactic",
+            }
+            fallback_id = fallback_map.get(_sub_id, "drug_amr")
+            playbook = format_strategies_for_report(fallback_id)
+            logger.info(f"Used fallback sub_expert_id={fallback_id}, got {len(playbook)} strategies")
+        report.strategic_playbook = playbook
+        logger.info(f"Strategic playbook populated: {len(report.strategic_playbook)} strategies")
     except Exception as e:
         logger.warning(f"Source building failed: {e}")
 
