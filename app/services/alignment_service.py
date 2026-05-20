@@ -125,6 +125,36 @@ async def generate_pi_report(
                     })())
                     next_num += 1
 
+        # Post-process buyer segments - add source_url if Claude left it empty
+        if report.market_access and report.market_access.buyer_segments:
+            BUYER_URL_LOOKUP = {
+                "academic": "https://www.aamc.org/data-reports/hospitals-health-systems/report/academic-medical-center-and-teaching-hospital-characteristics",
+                "cancer center": "https://www.cancer.gov/research/infrastructure/cancer-centers/find",
+                "hospital": "https://www.aha.org/statistics/fast-facts-us-hospitals",
+                "community hospital": "https://www.aha.org/statistics/fast-facts-us-hospitals",
+                "pharmacy": "https://www.nacds.org/about-nacds/chain-pharmacy-industry/",
+                "urgent care": "https://www.ucaoa.org/page/IndustryFacts",
+                "ltach": "https://www.ahca.org/quality/quality-initiatives/long-term-care",
+                "payer": "https://www.cms.gov/data-research/statistics-trends-and-reports",
+                "medicare": "https://www.cms.gov/data-research/statistics-trends-and-reports",
+                "medicaid": "https://www.medicaid.gov/medicaid/program-information/index.html",
+                "va ": "https://www.va.gov/health/aboutvha.asp",
+                "specialty": "https://www.ncpdp.org/Resources/Industry-Information",
+                "neurology": "https://www.aan.com/tools-and-resources/practicing-neurologists-administrators/aap-resources/",
+                "pediatric": "https://www.childrenshospitals.org/about-us/data-and-analytics",
+                "children": "https://www.childrenshospitals.org/about-us/data-and-analytics",
+                "idn": "https://www.healthsystemtracker.org/chart-collection/how-do-hospital-costs-compare-across-hospital-types/",
+            }
+            for seg in report.market_access.buyer_segments:
+                if not seg.source_url:
+                    seg_name_lower = (seg.segment_name or "").lower()
+                    for keyword, url in BUYER_URL_LOOKUP.items():
+                        if keyword in seg_name_lower:
+                            seg.source_url = url
+                            break
+                    if not seg.source_url:
+                        seg.source_url = "https://www.aha.org/statistics/fast-facts-us-hospitals"
+
         # Always populate strategic_playbook from comprehensive strategy database
         from app.services.strategy_database import format_strategies_for_report
         _sub_id = getattr(expert, "sub_expert_id", getattr(expert, "domain_id", "drug_amr"))
