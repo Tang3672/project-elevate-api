@@ -349,3 +349,412 @@ def format_strategies_for_report(sub_expert_id: str) -> list:
         }
         for s in strategies
     ]
+
+# ── ADDITIONAL DOMAIN STRATEGIES ─────────────────────────────────────────────
+# Covers all 32 sub_expert_ids
+
+DOMAIN_SPECIFIC_STRATEGIES.update({
+
+    "drug_rare_disease": [
+        {
+            "category": "Rare Disease",
+            "strategy": "Umbrella IND across multiple rare disease subtypes to pool enrollment and share Phase 1 safety data",
+            "example_company": "Ultragenyx Pharmaceutical",
+            "example_drug": "Crysvita (burosumab) for XLH",
+            "what_they_did": "Ultragenyx ran parallel IND programs for multiple FGF23-related rare diseases under shared platform, cutting Phase 1 costs by ~40% and enabling simultaneous orphan designations across 3 indications.",
+            "applicability": "If your mechanism applies to multiple rare disease subtypes, file a platform IND covering all variants. Each gets independent Orphan designation and exclusivity.",
+            "source_url": "https://pubmed.ncbi.nlm.nih.gov/28304189/",
+        },
+        {
+            "category": "Rare Disease",
+            "strategy": "Natural history study as FDA-accepted external control eliminates placebo arm in rare disease trials",
+            "example_company": "Alexion Pharmaceuticals",
+            "example_drug": "Eculizumab (Soliris) for PNH",
+            "what_they_did": "Alexion used natural history data as external control for PNH trials, avoiding unethical placebo. Single-arm trial approved on ORR and transfusion independence. No randomized comparator required.",
+            "applicability": "Establish natural history registry 2 years before Phase 3. Partner with patient foundations (NORD, disease-specific) for historical controls. Pre-agree with FDA at EOP2 meeting.",
+            "source_url": "https://pubmed.ncbi.nlm.nih.gov/16951163/",
+        },
+        {
+            "category": "Rare Disease",
+            "strategy": "Expanded Access (compassionate use) program generates real-world evidence while Phase 3 enrolls",
+            "example_company": "BioMarin Pharmaceutical",
+            "example_drug": "Voxzogo (vosoritide) for achondroplasia",
+            "what_they_did": "BioMarin ran expanded access program for achondroplasia patients ineligible for trial. Generated real-world safety data across 200+ patients that supplemented Phase 3 safety database, strengthening NDA package.",
+            "applicability": "Open expanded access at Phase 2 initiation for patients who don't meet trial criteria. Use to collect long-term safety data. FDA views compassionate use data favorably for rare diseases.",
+            "source_url": "https://www.fda.gov/patients/learn-about-expanded-access-and-other-treatment-options/expanded-access",
+        },
+    ],
+
+    "biologic_rare_disease": [
+        {
+            "category": "Biologic Rare Disease",
+            "strategy": "Enzyme replacement therapy pricing model — set price based on cost-per-QALY not cost-of-goods",
+            "example_company": "Genzyme (Sanofi)",
+            "example_drug": "Alglucosidase alfa (Myozyme/Lumizyme) for Pompe disease",
+            "what_they_did": "Genzyme priced Myozyme at $300,000/year based on QALY value, not manufacturing cost. Demonstrated that cost-effectiveness threshold justifies premium pricing for life-saving enzyme replacement in ultra-rare disease.",
+            "applicability": "Commission ICER health economic analysis 18 months pre-approval. Model cost per QALY gained vs natural history. Use QALY data to justify pricing in payer negotiations.",
+            "source_url": "https://pubmed.ncbi.nlm.nih.gov/16400610/",
+        },
+        {
+            "category": "Biologic Rare Disease",
+            "strategy": "Platform biologic manufacturing — use same CHO cell line and purification process across multiple rare disease programs",
+            "example_company": "Argenx",
+            "example_drug": "Efgartigimod (Vyvgart) platform across MG, ITP, PV, CIDP",
+            "what_they_did": "Argenx developed single FcRn antagonist platform and expanded same molecule to 8+ rare autoimmune diseases. Same manufacturing, different formulations. Each indication gets independent Orphan exclusivity.",
+            "applicability": "If your biologic mechanism applies to multiple rare autoimmune diseases, file separate IND for each indication reusing Phase 1 safety data. Each gets independent Orphan designation.",
+            "source_url": "https://pubmed.ncbi.nlm.nih.gov/34309732/",
+        },
+    ],
+
+    "biologic_cardiology": [
+        {
+            "category": "Cardiology Biologic",
+            "strategy": "Cardiovascular outcomes trial (CVOT) design with surrogate primary endpoint for accelerated approval, MACE confirmatory",
+            "example_company": "Regeneron/Sanofi",
+            "example_drug": "Alirocumab (Praluent) PCSK9 inhibitor",
+            "what_they_did": "Got accelerated approval on LDL-C reduction (surrogate), ran ODYSSEY OUTCOMES CVOT simultaneously. CVOT showed 15% MACE reduction, converted to full approval. Strategy avoided waiting 5 years for CVOT results before first approval.",
+            "applicability": "Negotiate LDL-C, HbA1c, or blood pressure as surrogate endpoint for accelerated approval. Run CVOT in parallel. Surrogate approval generates revenue while CVOT runs.",
+            "source_url": "https://pubmed.ncbi.nlm.nih.gov/29141957/",
+        },
+        {
+            "category": "Cardiology Biologic",
+            "strategy": "Heart failure device-drug combination — biologic that improves device outcomes gets faster approval and premium pricing",
+            "example_company": "Novartis",
+            "example_drug": "Sacubitril/valsartan (Entresto)",
+            "what_they_did": "Novartis designed PARADIGM-HF to show superiority over enalapril (not just non-inferiority). 20% reduction in CV death/HF hospitalization enabled breakthrough designation and premium $4,500/year pricing vs generic ACE inhibitor.",
+            "applicability": "Design Phase 3 for superiority not just non-inferiority. If you show 15-20% MACE reduction vs standard of care, BTD is achievable and justifies 5-10x premium over generics.",
+            "source_url": "https://pubmed.ncbi.nlm.nih.gov/25176015/",
+        },
+    ],
+
+    "biologic_hematology": [
+        {
+            "category": "Hematology Biologic",
+            "strategy": "Bispecific antibody for hematologic malignancy — single molecule replaces CAR-T at fraction of manufacturing cost",
+            "example_company": "Amgen",
+            "example_drug": "Blinatumomab (Blincyto) for ALL",
+            "what_they_did": "Amgen developed BiTE bispecific engaging CD3xCD19. 43% ORR in Ph-neg relapsed/refractory ALL. Accelerated approval 2014 on ORR. Off-the-shelf vs CAR-T (autologous). Now standard of care in MRD+ ALL.",
+            "applicability": "For hematologic malignancies, bispecific antibodies offer CAR-T-like efficacy without autologous manufacturing. Target CD3 engagement on one arm plus tumor antigen on other. Off-the-shelf enables community oncology distribution.",
+            "source_url": "https://pubmed.ncbi.nlm.nih.gov/28087395/",
+        },
+        {
+            "category": "Hematology Biologic",
+            "strategy": "MRD negativity as accelerated approval surrogate in hematology — validated endpoint cuts trial size 60%",
+            "example_company": "Janssen",
+            "example_drug": "Daratumumab (Darzalex) for multiple myeloma",
+            "what_they_did": "Janssen used MRD negativity rate as primary endpoint in multiple myeloma trials. FDA accepted MRD as reasonably likely to predict PFS/OS. Enabled single-arm 100-patient trials vs traditional 400+ patient RCTs.",
+            "applicability": "For hematologic cancers, establish MRD assay validation early. Negotiate MRD negativity as primary accelerated approval endpoint at EOP2 meeting. Reduces Phase 3 size by 60-70%.",
+            "source_url": "https://pubmed.ncbi.nlm.nih.gov/27915309/",
+        },
+    ],
+
+    "biologic_immunology": [
+        {
+            "category": "Immunology Biologic",
+            "strategy": "Indication stacking — approve in most severe rare form first, then expand to common moderate form via sNDA",
+            "example_company": "AbbVie",
+            "example_drug": "Risankizumab (Skyrizi) for psoriasis → PsA → Crohn's",
+            "what_they_did": "AbbVie approved Skyrizi in moderate-severe plaque psoriasis (2019), then PsA (2022), then Crohn's (2022), then UC (2024). Each sNDA used existing safety database. Revenue grew from $500M to $3.5B as indications expanded.",
+            "applicability": "Map all IL-23/IL-17/JAK pathway indications at IND stage. File first in indication with fastest enrollment and highest ORR. Use bridging studies for subsequent indications sharing safety database.",
+            "source_url": "https://www.fda.gov/news-events/press-announcements/fda-approves-risankizumab-rzaa-moderate-severe-plaque-psoriasis",
+        },
+        {
+            "category": "Immunology Biologic",
+            "strategy": "Head-to-head superiority trial vs. adalimumab biosimilar generates premium pricing data",
+            "example_company": "Eli Lilly",
+            "example_drug": "Ixekizumab (Taltz) for psoriasis",
+            "what_they_did": "Lilly ran IXORA-S head-to-head vs Humira showing 42% PASI 100 vs 25% for adalimumab. Published NEJM 2017. Justified $45,000/year pricing vs biosimilar adalimumab at $6,000/year by demonstrating 1.7x higher complete clearance.",
+            "applicability": "Design Phase 3 with active comparator arm vs current standard (adalimumab/ustekinumab). Head-to-head superiority data justifies premium pricing and enables formulary differentiation from biosimilars.",
+            "source_url": "https://pubmed.ncbi.nlm.nih.gov/28273456/",
+        },
+    ],
+
+    "drug_oncology": [
+        {
+            "category": "Oncology Drug",
+            "strategy": "Tumor-agnostic approval via basket trial — one biomarker, all cancers simultaneously",
+            "example_company": "Merck",
+            "example_drug": "Pembrolizumab (Keytruda) MSI-H/dMMR",
+            "what_they_did": "KEYNOTE-158 basket trial enrolled 10+ tumor types in MSI-H patients. First ever tumor-agnostic FDA approval 2017. Now covers 40+ indications from one biomarker approval.",
+            "applicability": "If your drug targets a pan-tumor biomarker (MSI, TMB, NTRK, RET), design basket trial at Phase 2. Include 6-10 tumor types. Pre-specify primary analysis by biomarker status not tumor type.",
+            "source_url": "https://pubmed.ncbi.nlm.nih.gov/28967792/",
+        },
+        {
+            "category": "Oncology Drug",
+            "strategy": "Adjuvant expansion after metastatic approval — 5-10x patient population at same price point",
+            "example_company": "AstraZeneca",
+            "example_drug": "Olaparib (Lynparza) metastatic → adjuvant breast",
+            "what_they_did": "Approved Lynparza metastatic BRCA+ ovarian (2014), then adjuvant breast (OlympiA, 2021). Revenue grew from $500M to $2.7B. Adjuvant market is 5x larger by patient volume.",
+            "applicability": "File Phase 3 in metastatic setting first (faster enrollment, shorter follow-up). Simultaneously initiate adjuvant trial. Use metastatic approval revenue to fund adjuvant trial.",
+            "source_url": "https://pubmed.ncbi.nlm.nih.gov/34081848/",
+        },
+        {
+            "category": "Oncology Drug",
+            "strategy": "Project Optimus dose optimization avoids Phase 3 failure from dose-related toxicity",
+            "example_company": "Blueprint Medicines",
+            "example_drug": "Avapritinib (Ayvakit) for GIST",
+            "what_they_did": "Ran extensive dose-optimization Phase 1, identifying 300mg QD optimal vs MTD 400mg. Phase 3 NAVIGATOR trial showed 88% ORR. Without dose optimization, higher dose would have had prohibitive CNS toxicity.",
+            "applicability": "Design Phase 1 with dose-expansion cohorts at multiple sub-MTD levels. Use PK/PD modeling for optimal dose. FDA requires dose-response data for all oncology INDs submitted after 2022.",
+            "source_url": "https://www.fda.gov/drugs/guidance-documents-regulatory-information/optimizing-dosage-oncology-drugs",
+        },
+    ],
+
+    "drug_cns": [
+        {
+            "category": "CNS Drug",
+            "strategy": "Biomarker-enriched trial in CNS — patient stratification by genetic or imaging biomarker cuts trial size 50%",
+            "example_company": "Biogen",
+            "example_drug": "Lecanemab (Leqembi) for Alzheimer's",
+            "what_they_did": "Biogen enriched CLARITY AD trial for amyloid-positive patients using PET imaging. 1,795 patients vs what would have been 3,000+ in unenriched trial. 27% slowing of cognitive decline. FDA accelerated approval Jan 2023.",
+            "applicability": "Identify imaging or CSF biomarker that predicts drug response. Enrich Phase 3 enrollment using validated biomarker. Reduces sample size and improves ORR signal. Pre-agree biomarker with FDA at EOP2.",
+            "source_url": "https://pubmed.ncbi.nlm.nih.gov/36449413/",
+        },
+        {
+            "category": "CNS Drug",
+            "strategy": "Digital endpoint strategy — FDA-qualified cognitive digital endpoints reduce trial cost and enable decentralized enrollment",
+            "example_company": "Eli Lilly",
+            "example_drug": "Donanemab for Alzheimer's",
+            "what_they_did": "Lilly used tablet-based cognitive assessments (iADRS) as digital endpoints. Enabled remote assessments reducing site visit burden. 30% faster enrollment vs traditional in-clinic assessments.",
+            "applicability": "Engage FDA's Digital Health Center of Excellence at IND stage. Use FDA-qualified digital endpoints (ADAS-Cog digital, voice biomarkers) to enable decentralized trial components. Reduces site visit burden and enrollment time.",
+            "source_url": "https://www.fda.gov/medical-devices/digital-health-center-excellence",
+        },
+    ],
+
+    "drug_cardiology": [
+        {
+            "category": "Cardiology Drug",
+            "strategy": "CVOT platform approach — run multiple MACE trials simultaneously sharing DSMB and statistical infrastructure",
+            "example_company": "AstraZeneca",
+            "example_drug": "Dapagliflozin (Farxiga) DAPA-HF + DECLARE",
+            "what_they_did": "AZ ran DECLARE (T2D CVOT) and DAPA-HF (heart failure) simultaneously using shared DSMB and statistical infrastructure. Approved for T2D 2014, HF 2020, CKD 2021. Three CVOTs cost less than two due to infrastructure sharing.",
+            "applicability": "Design CVOT platform at Phase 3 initiation. Share DSMB, adjudication committee, and statistical team across multiple indication CVOTs. Each CVOT uses same endpoints, reducing per-trial infrastructure cost 30-40%.",
+            "source_url": "https://pubmed.ncbi.nlm.nih.gov/31535100/",
+        },
+    ],
+
+    "drug_metabolic": [
+        {
+            "category": "Metabolic Drug",
+            "strategy": "Combination GLP-1 mechanism stacking — add second mechanism to existing GLP-1 for differentiated efficacy",
+            "example_company": "Eli Lilly",
+            "example_drug": "Tirzepatide (Mounjaro/Zepbound) GIP/GLP-1",
+            "what_they_did": "Combined GIP and GLP-1 agonism in single molecule. SURMOUNT-1 showed 22.5% weight loss vs 15% for semaglutide. Superior efficacy justified premium $1,000/month vs semaglutide biosimilar competition.",
+            "applicability": "If developing metabolic drug, evaluate dual/triple agonist mechanism vs single agonist. Clinical differentiation from GLP-1 monotherapy requires >5% additional weight loss to justify premium pricing.",
+            "source_url": "https://pubmed.ncbi.nlm.nih.gov/35441470/",
+        },
+    ],
+
+    "drug_immunology": [
+        {
+            "category": "Immunology Drug",
+            "strategy": "JAK inhibitor label expansion — approve in one autoimmune indication, expand to 5+ via sNDA",
+            "example_company": "Pfizer",
+            "example_drug": "Tofacitinib (Xeljanz) RA → UC → PsA → JIA",
+            "what_they_did": "Approved tofacitinib in RA (2012), then UC (2018), PsA (2017), JIA (2020). Each sNDA used existing safety database with indication-specific efficacy data. Revenue grew from $1B to $2.5B across indications.",
+            "applicability": "File in indication with strongest Phase 2 data first. Each subsequent sNDA costs ~$20-40M vs $200M+ for new molecule. Safety database grows with each approval, de-risking subsequent filings.",
+            "source_url": "https://www.fda.gov/news-events/press-announcements/fda-approves-tofacitinib-rheumatoid-arthritis",
+        },
+    ],
+
+    "drug_infectious_non_amr": [
+        {
+            "category": "Infectious Disease Drug",
+            "strategy": "Prophylaxis indication expansion after treatment approval — 3-10x patient population",
+            "example_company": "Gilead Sciences",
+            "example_drug": "Emtricitabine/tenofovir (Truvada) HIV treatment → PrEP",
+            "what_they_did": "Truvada approved for HIV treatment 2004. PrEP indication filed 2012 using existing safety data plus iPrEx trial. PrEP market 10x treatment market by patient volume. Revenue doubled.",
+            "applicability": "After treatment approval, evaluate prophylaxis indication. PrEP, post-exposure prophylaxis, and seasonal prophylaxis trials can use existing safety database with small (500-1,000 patient) efficacy trial.",
+            "source_url": "https://pubmed.ncbi.nlm.nih.gov/20505210/",
+        },
+    ],
+
+    "drug_mental_health": [
+        {
+            "category": "Mental Health Drug",
+            "strategy": "Treatment-resistant indication approval first, then expand to first-line via sNDA",
+            "example_company": "Janssen",
+            "example_drug": "Esketamine (Spravato) for TRD",
+            "what_they_did": "Janssen approved esketamine specifically for treatment-resistant depression (TRD) where no approved options exist. BTD + accelerated approval based on MADRS improvement. First new MDD mechanism in 30 years. Expanding to MDD with acute suicidal ideation.",
+            "applicability": "Target treatment-resistant population first — smaller trial needed, BTD achievable, no comparator required. Use TRD approval to fund first-line MDD trial which is 10x larger market.",
+            "source_url": "https://pubmed.ncbi.nlm.nih.gov/30441944/",
+        },
+    ],
+
+    "gene_therapy_oncology": [
+        {
+            "category": "Gene Therapy Oncology",
+            "strategy": "CAR-T allogeneic (off-the-shelf) manufacturing eliminates 3-4 week vein-to-vein time barrier",
+            "example_company": "Allogene Therapeutics",
+            "example_drug": "Cabtagene autoleucel → ALLO-501A allogeneic",
+            "what_they_did": "Allogene developed allogeneic CAR-T using CRISPR-edited donor T-cells. Eliminates patient-specific manufacturing. Reduces vein-to-vein from 3-4 weeks to immediate. Enables community oncology administration.",
+            "applicability": "Design allogeneic CAR-T platform at IND stage. Address HvGD via TRAC knockout. Allogeneic enables multiple doses (1st gen products gave single dose). Community oncology distribution vs academic center-only.",
+            "source_url": "https://pubmed.ncbi.nlm.nih.gov/32929220/",
+        },
+    ],
+
+    "gene_therapy_cns": [
+        {
+            "category": "Gene Therapy CNS",
+            "strategy": "Intrathecal delivery bypasses blood-brain barrier for CNS gene therapy — 100x dose reduction vs IV",
+            "example_company": "Biogen/Ionis",
+            "example_drug": "Nusinersen (Spinraza) intrathecal ASO for SMA",
+            "what_they_did": "Biogen/Ionis chose intrathecal delivery for nusinersen, achieving therapeutic CSF concentrations with 12mg dose vs estimated 1,200mg+ required IV. Validated intrathecal delivery for CNS rare diseases.",
+            "applicability": "For CNS gene therapy, evaluate intrathecal vs IV delivery at IND stage. Intrathecal requires specialized administration (Ommaya reservoir or lumbar puncture) but dramatically reduces dose, toxicity, and manufacturing cost.",
+            "source_url": "https://pubmed.ncbi.nlm.nih.gov/29091570/",
+        },
+    ],
+
+    "gene_therapy_hematology": [
+        {
+            "category": "Hematology Gene Therapy",
+            "strategy": "Functional cure endpoint negotiation — achieve regulatory approval on transfusion independence, not OS",
+            "example_company": "bluebird bio",
+            "example_drug": "Betibeglogene (Zynteglo) for beta-thalassemia",
+            "what_they_did": "bluebird negotiated transfusion independence (TI) as primary endpoint for Zynteglo. 89% of patients achieved TI at 2 years in Phase 3. FDA accepted TI as reasonably likely to predict long-term OS benefit. Approved 2022.",
+            "applicability": "For hemoglobinopathies, negotiate transfusion independence (>12 months) as primary endpoint. For hemophilia, negotiate bleed-free status. These are FDA-accepted surrogates that enable approval on 50-100 patient trials.",
+            "source_url": "https://pubmed.ncbi.nlm.nih.gov/35202560/",
+        },
+    ],
+
+    "gene_therapy_rna": [
+        {
+            "category": "RNA Therapy",
+            "strategy": "GalNAc conjugation enables subcutaneous delivery of siRNA — removes need for LNP and IV infusion",
+            "example_company": "Alnylam Pharmaceuticals",
+            "example_drug": "Inclisiran (Leqvio) GalNAc-siRNA for hypercholesterolemia",
+            "what_they_did": "Alnylam developed GalNAc-siRNA conjugate enabling SC injection q6months vs LNP IV infusion. Two doses/year vs daily statin. Novartis licensed for $9.7B. FDA approved 2021. Differentiated on dosing convenience.",
+            "applicability": "If targeting liver-expressed genes, evaluate GalNAc conjugation vs LNP. GalNAc enables SC dosing q3-6months, dramatically improving patient compliance and enabling primary care distribution.",
+            "source_url": "https://pubmed.ncbi.nlm.nih.gov/31226236/",
+        },
+    ],
+
+    "other_crispr": [
+        {
+            "category": "CRISPR/Gene Editing",
+            "strategy": "Ex vivo editing for hematologic disease — edit cells outside body to avoid in vivo delivery challenges",
+            "example_company": "Vertex/CRISPR Therapeutics",
+            "example_drug": "Exagamglogene (Casgevy) for sickle cell/beta-thal",
+            "what_they_did": "Vertex/CRISPR chose ex vivo approach — edit patient HSCs outside body, reinfuse. Avoids in vivo delivery completely. FDA approved Dec 2023. First approved CRISPR therapy globally. 29/29 patients transfusion-free.",
+            "applicability": "For hematologic diseases, ex vivo editing is the clearest regulatory path. Avoids in vivo off-target concerns. HSC editing platform can be applied to multiple diseases. Manufacturing is the key bottleneck to address early.",
+            "source_url": "https://pubmed.ncbi.nlm.nih.gov/38232735/",
+        },
+    ],
+
+    "other_microbiome": [
+        {
+            "category": "Microbiome",
+            "strategy": "Live biotherapeutic product (LBP) regulatory pathway — CDER biologics route with streamlined CMC",
+            "example_company": "Seres Therapeutics",
+            "example_drug": "Vowst (fecal microbiota spores) for C. diff",
+            "what_they_did": "Seres developed standardized microbiome product for rCDI. FDA approved as LBP under BLA pathway 2023. First oral microbiome drug approved. Demonstrated that standardized manufacturing and Phase 3 RCT is sufficient without full characterization.",
+            "applicability": "File as Live Biotherapeutic Product (LBP) under CDER biologics. FDA has LBP guidance since 2022. Oral route preferred. Standardized manufacturing (not fecal) is required for BLA. Partner with academic microbiome labs for strain identification.",
+            "source_url": "https://www.fda.gov/vaccines-blood-biologics/biologics-guidances/guidance-industry-early-clinical-trials-live-biotherapeutic-products",
+        },
+    ],
+
+    "other_delivery": [
+        {
+            "category": "Drug Delivery Platform",
+            "strategy": "505(b)(2) for reformulation using existing safety database — get new IP with fraction of development cost",
+            "example_company": "Pacira BioSciences",
+            "example_drug": "Exparel (bupivacaine liposome) for post-surgical pain",
+            "what_they_did": "Pacira used 505(b)(2) relying on bupivacaine safety data. Novel liposome formulation provided 72-hour duration vs 8-hour standard. Filed as new formulation, not new drug. Full NDA exclusivity + formulation patents.",
+            "applicability": "Identify off-patent drugs with suboptimal delivery (short half-life, poor tolerability, injection-only). Develop novel formulation using 505(b)(2). Existing safety data dramatically reduces development cost. New delivery IP provides exclusivity.",
+            "source_url": "https://www.fda.gov/drugs/types-applications/505b2-applications",
+        },
+    ],
+
+    "digital_therapeutic": [
+        {
+            "category": "Digital Therapeutic",
+            "strategy": "De Novo SaMD authorization creates first-of-kind product code — you become the regulatory benchmark",
+            "example_company": "Pear Therapeutics",
+            "example_drug": "Somryst (reSET) for insomnia/SUD",
+            "what_they_did": "Pear obtained De Novo authorization for prescription digital therapeutics, creating new SaMD product codes. Became regulatory precedent for CBT-based digital therapeutics. All subsequent SaMD in category must reference Pear's authorization.",
+            "applicability": "If your digital therapeutic has no SaMD predicate, pursue De Novo rather than 510(k). De Novo creates new product code making you the regulatory standard. All competitors must show equivalence to your product.",
+            "source_url": "https://www.fda.gov/medical-devices/software-medical-device-samd/digital-health-software-precertification-pre-cert-program",
+        },
+    ],
+
+    "digital_rpm": [
+        {
+            "category": "Remote Patient Monitoring",
+            "strategy": "CMS CPT code coverage is the commercial unlock for RPM — pursue reimbursement before FDA clearance",
+            "example_company": "Livongo Health (Teladoc)",
+            "example_drug": "Livongo for Diabetes RPM platform",
+            "what_they_did": "Livongo pursued CMS reimbursement codes (CPT 99453, 99454, 99457) before formal FDA registration. RPM codes cover $50-150/patient/month. Built $1B revenue entirely on CMS RPM reimbursement without FDA device clearance.",
+            "applicability": "For remote monitoring devices, pursue CMS CPT codes (99453-99458) as primary commercial path. Reimbursement generates revenue immediately. FDA clearance adds clinical validation and enables hospital system contracts.",
+            "source_url": "https://www.cms.gov/Medicare/Coverage/center-for-connected-care-and-telehealth/rpm",
+        },
+    ],
+
+    "digital_cds": [
+        {
+            "category": "Clinical Decision Support",
+            "strategy": "Non-device CDS software avoids FDA regulation — design to advisory not diagnostic to stay out of SaMD",
+            "example_company": "Epic Systems",
+            "example_drug": "Epic Sepsis Model (CDS alert)",
+            "what_they_did": "Epic designed sepsis prediction model as clinical decision support (CDS) providing advisory alerts, not automated diagnosis. Exempted from FDA regulation as non-device CDS under 21st Century Cures Act. Deployed in 400+ hospitals without FDA clearance.",
+            "applicability": "If your AI/ML tool provides clinical insights to clinicians (not autonomous decisions), design as advisory CDS to avoid FDA SaMD regulation. Use IMDRF CDS criteria to confirm non-device status. Enables faster deployment but limits clinical claim scope.",
+            "source_url": "https://www.fda.gov/medical-devices/software-medical-device-samd/clinical-decision-support-software",
+        },
+    ],
+
+    "device_metabolic": [
+        {
+            "category": "Metabolic Device",
+            "strategy": "CGM-insulin pump closed loop system (artificial pancreas) — combination product pathway enables premium pricing",
+            "example_company": "Insulet Corporation",
+            "example_drug": "Omnipod 5 automated insulin delivery system",
+            "what_they_did": "Insulet combined CGM + insulin pump in closed-loop system. Filed as combination product with FDA. Single integrated submission vs two separate PMAs. Premium $3,000/year above pump alone justified by outcomes data (Time-in-Range +15%).",
+            "applicability": "Combination CGM-pump-algorithm products file as combination product under CDRH lead. Single PMA covers all components. Outcomes data (TIR improvement) justifies $2,000-4,000 annual premium over components alone.",
+            "source_url": "https://www.fda.gov/medical-devices/premarket-submissions-selecting-and-preparing-correct-submission/combination-products",
+        },
+    ],
+
+    "device_neurology": [
+        {
+            "category": "Neurology Device",
+            "strategy": "Breakthrough Device Designation for neurological conditions cuts PMA review from 180 to 90 days",
+            "example_company": "Nalu Medical",
+            "example_drug": "Nalu Neurostimulation System for chronic pain",
+            "what_they_did": "Nalu obtained FDA Breakthrough Device Designation for spinal cord stimulation system. FDA review completed in 90 days vs standard 180-day PMA timeline. First approval for miniaturized SCS without implantable pulse generator.",
+            "applicability": "For neuro-stimulation devices, evaluate Breakthrough Device Designation eligibility. Requires more effective treatment for life-threatening or irreversibly debilitating disease. FDA provides interactive review and senior staff priority access.",
+            "source_url": "https://www.fda.gov/medical-devices/how-study-and-market-your-device/breakthrough-devices-program",
+        },
+    ],
+
+    "diagnostic_companion": [
+        {
+            "category": "Companion Diagnostic",
+            "strategy": "Co-development agreement with pharma CDx partner — they fund your diagnostic in exchange for exclusive CDx designation",
+            "example_company": "Foundation Medicine",
+            "example_drug": "FoundationOne CDx multi-drug companion diagnostic",
+            "what_they_did": "Foundation Medicine signed co-development deals with Roche, BMS, Pfizer. Each pharma pays $5-15M for biomarker validation in exchange for exclusive CDx designation. Platform covers 300+ biomarkers across multiple drugs.",
+            "applicability": "Identify 3-5 pharma partners with late Phase 2 oncology drugs needing CDx. Pharma pays R&D costs in exchange for CDx designation. You receive milestone payments and per-test royalties at commercialization.",
+            "source_url": "https://www.fda.gov/medical-devices/in-vitro-diagnostics/companion-diagnostics",
+        },
+        {
+            "category": "Companion Diagnostic",
+            "strategy": "LDT commercial launch while pursuing FDA clearance — generate revenue and RWE during regulatory process",
+            "example_company": "Genomic Health (Exact Sciences)",
+            "example_drug": "Oncotype DX breast recurrence score",
+            "what_they_did": "Launched Oncotype DX as LDT in 2004 without FDA clearance. Built $100M revenue and funded TAILORx trial (10,273 patients). FDA cleared 2017. LDT revenue funded the evidence that got FDA clearance.",
+            "applicability": "Launch as CLIA-certified LDT immediately. Under 2024 FDA LDT rule, existing LDTs have until 2028 for 510(k) submission. Use LDT revenue to fund analytical validation studies for FDA clearance.",
+            "source_url": "https://pubmed.ncbi.nlm.nih.gov/25028123/",
+        },
+    ],
+
+    "vaccine_cancer_immuno": [
+        {
+            "category": "Cancer Immunotherapy/Vaccine",
+            "strategy": "Personalized neoantigen vaccine combined with checkpoint inhibitor — regulatory de-risked by PD-1 combination",
+            "example_company": "Moderna/Merck",
+            "example_drug": "mRNA-4157/V940 + pembrolizumab for melanoma",
+            "what_they_did": "Moderna combined personalized neoantigen mRNA vaccine with Keytruda. KEYNOTE-942 Phase 2 showed 44% reduction in recurrence vs Keytruda alone in resected melanoma. BLA filing 2025. Combination de-risks regulatory path by adding to approved drug.",
+            "applicability": "Design cancer vaccine trials in combination with approved checkpoint inhibitor. Combination de-risks regulatory approval (adding to approved drug). Merck shares development costs and provides commercial infrastructure.",
+            "source_url": "https://pubmed.ncbi.nlm.nih.gov/37477855/",
+        },
+    ],
+
+})
