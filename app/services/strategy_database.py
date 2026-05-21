@@ -456,7 +456,7 @@ DOMAIN_SPECIFIC_STRATEGIES.update({
             "example_drug": "Risankizumab (Skyrizi) for psoriasis → PsA → Crohn's",
             "what_they_did": "AbbVie approved Skyrizi in moderate-severe plaque psoriasis (2019), then PsA (2022), then Crohn's (2022), then UC (2024). Each sNDA used existing safety database. Revenue grew from $500M to $3.5B as indications expanded.",
             "applicability": "Map all IL-23/IL-17/JAK pathway indications at IND stage. File first in indication with fastest enrollment and highest ORR. Use bridging studies for subsequent indications sharing safety database.",
-            "source_url": "https://www.fda.gov/news-events/press-announcements/fda-approves-risankizumab-rzaa-moderate-severe-plaque-psoriasis",
+            "source_url": "https://www.accessdata.fda.gov/scripts/cder/daf/index.cfm?event=overview.process&ApplNo=761105",
         },
         {
             "category": "Immunology Biologic",
@@ -552,7 +552,7 @@ DOMAIN_SPECIFIC_STRATEGIES.update({
             "example_drug": "Tofacitinib (Xeljanz) RA → UC → PsA → JIA",
             "what_they_did": "Approved tofacitinib in RA (2012), then UC (2018), PsA (2017), JIA (2020). Each sNDA used existing safety database with indication-specific efficacy data. Revenue grew from $1B to $2.5B across indications.",
             "applicability": "File in indication with strongest Phase 2 data first. Each subsequent sNDA costs ~$20-40M vs $200M+ for new molecule. Safety database grows with each approval, de-risking subsequent filings.",
-            "source_url": "https://www.fda.gov/news-events/press-announcements/fda-approves-tofacitinib-rheumatoid-arthritis",
+            "source_url": "https://www.accessdata.fda.gov/scripts/cder/daf/index.cfm?event=overview.process&ApplNo=203214",
         },
     ],
 
