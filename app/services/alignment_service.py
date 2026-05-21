@@ -182,11 +182,21 @@ async def generate_pi_report(
             fallback_map = {
                 "drug_small_molecule": "drug_amr",
                 "drug_other": "drug_amr",
+                "drug_oncology_small_molecule": "drug_oncology",
                 "biologic": "biologic_oncology",
+                "biologic_oncology": "biologic_oncology",
+                "antibody": "biologic_oncology",
+                "adc": "biologic_oncology",
                 "gene_cell_therapy": "gene_therapy_rare",
+                "gene_therapy": "gene_therapy_rare",
+                "cell_therapy": "gene_therapy_rare",
                 "medical_device": "device_cardiovascular",
+                "device": "device_cardiovascular",
                 "diagnostic": "diagnostic_molecular",
+                "molecular_diagnostic": "diagnostic_molecular",
                 "vaccine": "vaccine_prophylactic",
+                "immunotherapy": "biologic_oncology",
+                "oncology": "drug_oncology",
             }
             fallback_id = fallback_map.get(_sub_id, "drug_amr")
             playbook = format_strategies_for_report(fallback_id)
