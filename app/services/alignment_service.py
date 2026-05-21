@@ -646,7 +646,40 @@ RULES:
 3. Keep all string values under 200 characters. No newlines inside string values.
 4. CRITICAL: Your context includes papers from CrossRef, Semantic Scholar, Europe PMC, NIH Reporter grants, and news sources. Cite these throughout the report - do not only cite FDA and CDC.
 5. For buyer segments: source_url is MANDATORY - use real URLs like https://www.aha.org/statistics/fast-facts-us-hospitals or https://www.cancer.gov/research/infrastructure/cancer-centers/find or https://data.cms.gov/ - NEVER leave empty.
-6. For clinical trial FDA guidance URLs use the exact URL from your context - do not guess.
+6. For clinical trial FDA guidance URLs, ONLY use these verified working URLs — never guess:
+
+ANTIBIOTICS/AMR:
+  - ABSSSI: https://www.fda.gov/regulatory-information/search-fda-guidance-documents/acute-bacterial-skin-and-skin-structure-infections-developing-drugs-treatment
+  - HAP/VAP: https://www.fda.gov/regulatory-information/search-fda-guidance-documents/hospital-acquired-bacterial-pneumonia-and-ventilator-associated-bacterial-pneumonia
+  - cUTI: https://www.fda.gov/regulatory-information/search-fda-guidance-documents/complicated-urinary-tract-infections-developing-drugs-treatment
+  - General antibacterial: https://www.fda.gov/drugs/guidance-documents-regulatory-information/antibacterial-drugs
+
+ONCOLOGY:
+  - Cancer endpoints: https://www.fda.gov/regulatory-information/search-fda-guidance-documents/clinical-trial-endpoints-approval-cancer-drugs-and-biologics
+  - ADC: https://www.fda.gov/regulatory-information/search-fda-guidance-documents/clinical-pharmacology-considerations-antibody-drug-conjugates
+  - Pancreatic cancer: https://www.fda.gov/regulatory-information/search-fda-guidance-documents/pancreatic-adenocarcinoma-developing-drugs-treatment
+  - Master protocols: https://www.fda.gov/regulatory-information/search-fda-guidance-documents/master-protocols-efficient-clinical-trial-design-strategies-expedite-development-oncology-drugs
+
+RARE DISEASE / GENE THERAPY:
+  - Gene therapy: https://www.fda.gov/vaccines-blood-biologics/biologics-guidances/gene-therapy-guidances
+  - Neurodegenerative: https://www.fda.gov/regulatory-information/search-fda-guidance-documents/human-gene-therapy-neurodegenerative-diseases
+  - ALS: https://www.fda.gov/regulatory-information/search-fda-guidance-documents/amyotrophic-lateral-sclerosis-developing-drugs-treatment
+  - SMA: https://www.fda.gov/regulatory-information/search-fda-guidance-documents/spinal-muscular-atrophy-developing-drugs-treatment
+
+CELL THERAPY:
+  - CAR-T: https://www.fda.gov/regulatory-information/search-fda-guidance-documents/considerations-development-chimeric-antigen-receptor-car-t-cell-products
+  - RMAT: https://www.fda.gov/regulatory-information/search-fda-guidance-documents/expedited-programs-regenerative-medicine-therapies-serious-conditions
+
+DEVICES:
+  - IDE: https://www.fda.gov/regulatory-information/search-fda-guidance-documents/investigational-device-exemptions-ides-early-feasibility-medical-device-clinical-studies-including
+  - De Novo: https://www.fda.gov/medical-devices/premarket-submissions-selecting-and-preparing-correct-submission/de-novo-classification-request
+
+GENERAL:
+  - Phase 1 clinical pharmacology: https://www.fda.gov/regulatory-information/search-fda-guidance-documents/m3r2-nonclinical-safety-studies-conduct-human-clinical-trials-and-marketing-authorization
+  - Adaptive trials: https://www.fda.gov/regulatory-information/search-fda-guidance-documents/adaptive-designs-clinical-trials-drugs-and-biologics
+  - Accelerated approval: https://www.fda.gov/regulatory-information/search-fda-guidance-documents/accelerated-approval-serious-conditions
+
+If the exact guidance is not listed above, use the general FDA guidance search: https://www.fda.gov/regulatory-information/search-fda-guidance-documents — do NOT fabricate a URL.
 7. For market sizing steps, the source field must name the specific dataset or publication that contains the patient count or pricing data used.
 3. CRITICAL: The MULTI-SOURCE INTELLIGENCE PACKAGE in your context contains papers from CrossRef, Semantic Scholar, NIH Reporter, and news sources. You MUST cite these in your report and include them in the sources array. Do not only cite FDA and CDC - use the full range of sources provided.
 4. For buyer segments: source_url is MANDATORY. Real examples: https://www.aha.org/statistics/fast-facts-us-hospitals, https://www.cancer.gov/research/infrastructure/cancer-centers/find, https://data.cms.gov/, https://www.curesma.org/about-sma/. NEVER leave source_url empty or as empty strings the buyer data.
