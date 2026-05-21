@@ -685,7 +685,10 @@ DEVICES:
   - De Novo: https://www.fda.gov/medical-devices/premarket-submissions-selecting-and-preparing-correct-submission/de-novo-classification-request
 
 GENERAL:
-  - Phase 1 clinical pharmacology: https://www.fda.gov/regulatory-information/search-fda-guidance-documents/m3r2-nonclinical-safety-studies-conduct-human-clinical-trials-and-marketing-authorization
+  - Phase 1 general IND: https://www.fda.gov/drugs/guidance-documents-regulatory-information/clinical-pharmacology
+  - Phase 1 safety/PK: https://www.fda.gov/regulatory-information/search-fda-guidance-documents/clinical-pharmacology-considerations-antibody-drug-conjugates
+
+IMPORTANT: Use DIFFERENT guidance URLs for different phases. Phase 1 = IND/clinical pharmacology guidance. Phase 2/3 = indication-specific guidance. Never use the same URL for all 3 phases.
   - Adaptive trials: https://www.fda.gov/regulatory-information/search-fda-guidance-documents/adaptive-designs-clinical-trials-drugs-and-biologics
   - Accelerated approval: https://www.fda.gov/regulatory-information/search-fda-guidance-documents/accelerated-approval-serious-conditions
 
