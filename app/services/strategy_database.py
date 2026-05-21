@@ -23,7 +23,7 @@ UNIVERSAL_STRATEGIES = [
         "example_drug": "Ivacaftor (Kalydeco) for cystic fibrosis",
         "what_they_did": "Vertex obtained Breakthrough Therapy + Fast Track + Priority Review + Orphan Drug simultaneously for ivacaftor. FDA approved in 4 months after NDA submission vs standard 10 months. First CF drug to target underlying cause rather than symptoms.",
         "how_to_apply": "At Phase 1 data readout, assess eligibility for all 4 designations simultaneously. File within 30 days of each other. Total incremental cost ~$200K; potential timeline savings 12-24 months.",
-        "source_url": "https://www.fda.gov/news-events/press-announcements/fda-approves-kalydeco-treat-rare-form-cystic-fibrosis",
+        "source_url": "https://www.accessdata.fda.gov/scripts/cder/daf/index.cfm?event=overview.process&ApplNo=203188",
         "applicability": "Any drug with serious/life-threatening indication and preliminary evidence of substantial improvement over available therapy."
     },
     {
@@ -34,7 +34,7 @@ UNIVERSAL_STRATEGIES = [
         "example_drug": "Humira (adalimumab)",
         "what_they_did": "AbbVie conducted pediatric studies for Humira as required by FDA Written Request. Received 6-month pediatric exclusivity extension on top of existing patent protection. At $20B/year revenue, each month of additional exclusivity was worth ~$1.7B.",
         "how_to_apply": "Request FDA Written Request (WR) for pediatric studies at NDA submission. Even if pediatric indication is not your target market, the exclusivity extension applies to adult indications. Budget $5-15M for pediatric PK and safety studies.",
-        "source_url": "https://www.fda.gov/science-research/pediatric-studies/pediatric-exclusivity-granted",
+        "source_url": "https://www.fda.gov/drugs/development-resources/pediatric-exclusivity-granted",
         "applicability": "Any drug that may have pediatric use. FDA issues Written Requests for ~100 drugs/year. Exclusivity extension value scales with adult market size."
     },
     {
@@ -45,7 +45,7 @@ UNIVERSAL_STRATEGIES = [
         "example_drug": "Remdesivir (Veklury)",
         "what_they_did": "Gilead held multiple Type A and B meetings with FDA during COVID development, pre-aligning on endpoints and data package. First IV antiviral for COVID approved via EUA in 10 weeks from first data, then traditional approval in 6 months from NDA submission — no CRL.",
         "how_to_apply": "Request Type B pre-NDA meeting at least 15 months before planned NDA submission. Submit detailed meeting package including proposed labeling, clinical summary, CMC overview. FDA must respond within 30 days and hold meeting within 90 days.",
-        "source_url": "https://www.fda.gov/media/109951/download",
+        "source_url": "https://pubmed.ncbi.nlm.nih.gov/32445440/",
         "applicability": "All NDA/BLA submissions. Particularly critical for novel mechanisms, first-in-class drugs, and products with complex manufacturing."
     },
     {
@@ -758,3 +758,43 @@ DOMAIN_SPECIFIC_STRATEGIES.update({
     ],
 
 })
+
+# Override drug_cns with more specific rare neurological disease strategies
+DOMAIN_SPECIFIC_STRATEGIES["drug_cns"] = [
+    {
+        "category": "CNS Drug",
+        "strategy": "Use tofersen (Qalsody) natural history data as FDA-accepted external control — eliminates placebo arm",
+        "example_company": "Biogen",
+        "example_drug": "Tofersen (Qalsody) for SOD1-ALS",
+        "what_they_did": "Biogen used VALOR trial placebo arm and OLE data as external comparator for accelerated approval on plasma NfL reduction. FDA accepted single-arm design given rare disease ethics and established natural history data. Full approval granted April 2024.",
+        "applicability": "Request FDA acceptance of VALOR/OLE natural history data as external control at pre-IND meeting. This eliminates the need for a placebo arm, cutting Phase 3 size from 300+ to 100-150 patients. Precedent is established.",
+        "source_url": "https://pubmed.ncbi.nlm.nih.gov/36847528/",
+    },
+    {
+        "category": "CNS Drug",
+        "strategy": "Plasma neurofilament light chain (NfL) as FDA-validated surrogate endpoint — enables accelerated approval on 100-150 patients",
+        "example_company": "Biogen/Ionis",
+        "example_drug": "Tofersen (Qalsody) accelerated approval 2023",
+        "what_they_did": "FDA granted accelerated approval for tofersen based solely on plasma NfL reduction as surrogate endpoint reasonably likely to predict clinical benefit. This precedent means any SOD1-targeting drug can use plasma NfL as primary endpoint without waiting for ALSFRS-R clinical outcomes.",
+        "applicability": "Design Phase 2 primary endpoint around plasma NfL reduction (>40% is meaningful threshold per VALOR data). Pre-agree NfL threshold with FDA at Type B meeting. Accelerated approval possible at ~18 months Phase 2 completion.",
+        "source_url": "https://www.fda.gov/drugs/news-events-human-drugs/fda-approves-treatment-amyotrophic-lateral-sclerosis-associated-mutation-sod1-gene",
+    },
+    {
+        "category": "CNS Drug",
+        "strategy": "Enroll presymptomatic SOD1 carriers as prevention cohort — expands trial population 3-4x and enables prevention label",
+        "example_company": "Biogen",
+        "example_drug": "Tofersen ATLAS trial for presymptomatic SOD1-ALS",
+        "what_they_did": "Biogen initiated ATLAS trial enrolling presymptomatic SOD1 carriers (genetic test positive, no symptoms). Prevention trial population is 3-4x the symptomatic population. FDA accepted presymptomatic enrollment using time to onset as endpoint.",
+        "applicability": "Partner with Answer ALS consortium and CureSMA for presymptomatic carrier identification through genetic testing programs. Prevention cohort enrollment dramatically expands your addressable trial population beyond the ~640 symptomatic SOD1-ALS patients.",
+        "source_url": "https://clinicaltrials.gov/study/NCT04856982",
+    },
+    {
+        "category": "CNS Drug",
+        "strategy": "Biomarker enrichment using genetic stratification cuts Phase 3 size 60-80% in neurodegeneration",
+        "example_company": "Eli Lilly",
+        "example_drug": "Donanemab for Amyloid+ Alzheimer's",
+        "what_they_did": "Lilly enriched TRAILBLAZER-ALZ 2 for amyloid-positive, tau-intermediate patients using PET imaging. 1,736 patients vs estimated 4,000+ unenriched. 35% slowing of decline. FDA full approval 2024. Biomarker enrichment was critical to trial success.",
+        "applicability": "For any CNS neurodegeneration program, identify imaging or CSF/plasma biomarker that predicts drug response. Enrich Phase 3 enrollment. Pre-agree biomarker threshold with FDA at EOP2 meeting. Typically reduces Phase 3 size 50-70%.",
+        "source_url": "https://pubmed.ncbi.nlm.nih.gov/37459244/",
+    },
+]
