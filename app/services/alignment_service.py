@@ -110,7 +110,12 @@ async def generate_pi_report(
 
         # (aggregated sources injected later after aggregator runs)
 
-        # Post-process buyer segments - add source_url if Claude left it empty
+
+    except Exception as e:
+        logger.warning(f"Source building failed: {e}")
+
+    # Post-process buyer segments OUTSIDE source building try block
+    try:
         if report.market_access and report.market_access.buyer_segments:
             BUYER_URL_LOOKUP = {
                 "academic": "https://www.aamc.org/data-reports/hospitals-health-systems/report/academic-medical-center-and-teaching-hospital-characteristics",
@@ -123,30 +128,37 @@ async def generate_pi_report(
                 "payer": "https://www.cms.gov/data-research/statistics-trends-and-reports",
                 "medicare": "https://www.cms.gov/data-research/statistics-trends-and-reports",
                 "medicaid": "https://www.medicaid.gov/medicaid/program-information/index.html",
-                "va ": "https://www.va.gov/health/aboutvha.asp",
+                "va": "https://www.va.gov/health/aboutvha.asp",
                 "specialty": "https://www.ncpdp.org/Resources/Industry-Information",
                 "neurology": "https://www.aan.com/tools-and-resources/practicing-neurologists-administrators/aap-resources/",
                 "pediatric": "https://www.childrenshospitals.org/about-us/data-and-analytics",
                 "children": "https://www.childrenshospitals.org/about-us/data-and-analytics",
                 "idn": "https://www.healthsystemtracker.org/chart-collection/how-do-hospital-costs-compare-across-hospital-types/",
+                "retail": "https://www.nacds.org/about-nacds/chain-pharmacy-industry/",
+                "infectious disease": "https://www.idsociety.org/about-idsa/",
+                "oncology": "https://www.asco.org/practice-patients/cancer-care-initiatives/value-cancer-care",
+                "nci": "https://www.cancer.gov/research/infrastructure/cancer-centers/find",
             }
             for seg in report.market_access.buyer_segments:
-                if not seg.source_url:
-                    seg_name_lower = (seg.segment_name or "").lower()
+                if not getattr(seg, 'source_url', None):
+                    seg_name_lower = (getattr(seg, 'segment_name', '') or '').lower()
                     for keyword, url in BUYER_URL_LOOKUP.items():
                         if keyword in seg_name_lower:
                             seg.source_url = url
                             break
-                    if not seg.source_url:
+                    if not getattr(seg, 'source_url', None):
                         seg.source_url = "https://www.aha.org/statistics/fast-facts-us-hospitals"
+            logger.info(f"Buyer segment URLs populated")
+    except Exception as e:
+        logger.warning(f"Buyer segment post-process failed: {e}")
 
-        # Always populate strategic_playbook from comprehensive strategy database
+    # Strategic playbook OUTSIDE source building try block
+    try:
         from app.services.strategy_database import format_strategies_for_report
         _sub_id = getattr(expert, "sub_expert_id", getattr(expert, "domain_id", "drug_amr"))
         logger.info(f"Strategic playbook: sub_expert_id={_sub_id}")
         playbook = format_strategies_for_report(_sub_id)
         if not playbook:
-            # Fallback: try common mappings
             fallback_map = {
                 "drug_small_molecule": "drug_amr",
                 "drug_other": "drug_amr",
@@ -158,11 +170,13 @@ async def generate_pi_report(
             }
             fallback_id = fallback_map.get(_sub_id, "drug_amr")
             playbook = format_strategies_for_report(fallback_id)
-            logger.info(f"Used fallback sub_expert_id={fallback_id}, got {len(playbook)} strategies")
+            logger.info(f"Used fallback sub_expert_id={fallback_id}")
         report.strategic_playbook = playbook
-        logger.info(f"Strategic playbook populated: {len(report.strategic_playbook)} strategies")
+        logger.info(f"Strategic playbook: {len(report.strategic_playbook)} strategies")
     except Exception as e:
-        logger.warning(f"Source building failed: {e}")
+        logger.warning(f"Strategic playbook failed: {e}")
+        import traceback
+        logger.warning(traceback.format_exc())
 
     # Attach routing metadata
     report.expert_domain   = getattr(expert, "sub_expert_id", getattr(expert, "domain_id", "unknown"))
