@@ -103,6 +103,7 @@ class BuyerSegment(BaseModel):
     access_mechanism:           str
     timeline_to_access:         str
     source:                     str
+    source_url:                 Optional[str] = None
 
 
 class MarketAccessStrategy(BaseModel):
