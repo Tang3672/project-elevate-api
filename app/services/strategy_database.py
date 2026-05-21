@@ -344,7 +344,7 @@ def format_strategies_for_report(sub_expert_id: str) -> list:
             "strategy": s["strategy"][:100],
             "example": s["example_company"] + " - " + s["example_drug"],
             "what_they_did": s["what_they_did"][:150],
-            "how_to_apply": s["how_to_apply"][:150],
+            "how_to_apply": s.get("how_to_apply", s.get("applicability", ""))[:200],
             "source_url": s["source_url"],
         }
         for s in strategies
