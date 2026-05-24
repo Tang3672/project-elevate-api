@@ -343,51 +343,94 @@ async def search_sec_filings(company_names: List[str]) -> List[Dict]:
 # ── INDUSTRY NEWS (RSS) ───────────────────────────────────────────────────────
 
 async def get_industry_news(query: str, max_results: int = 5) -> List[Dict]:
-    """Fetch recent industry news from STAT News, FiercePharma, BioPharma Dive."""
+    """
+    Fetch recent industry news using Anthropic web_search tool.
+    Searches STAT News, FiercePharma, BioPharma Dive, Reuters, and general web.
+    Falls back to PubMed recent articles if web search unavailable.
+    """
     results = []
     
-    news_feeds = [
-        ("STAT News", f"https://www.statnews.com/feed/?s={query.replace(' ', '+')}"),
-        ("FiercePharma", f"https://www.fiercepharma.com/rss/xml"),
-        ("BioPharma Dive", f"https://www.biopharmadive.com/feeds/news/"),
-    ]
-    
+    # Try Anthropic API web search for recent news
     try:
-        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-            for source_name, url in news_feeds[:2]:
-                try:
-                    r = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
-                    if r.status_code != 200:
-                        continue
-                    
-                    root = ET.fromstring(r.text)
-                    channel = root.find("channel")
-                    if channel is None:
-                        continue
-                    
-                    items = channel.findall("item")
-                    for item in items[:3]:
-                        title = item.findtext("title", "")
-                        link = item.findtext("link", "")
-                        pub_date = item.findtext("pubDate", "")
-                        description = item.findtext("description", "")
-                        
-                        # Filter by query relevance
-                        query_words = query.lower().split()
-                        combined = (title + " " + description).lower()
-                        if any(w in combined for w in query_words):
-                            results.append({
-                                "source": source_name,
-                                "title": title,
-                                "url": link,
-                                "date": pub_date[:16] if pub_date else "",
-                                "summary": description[:200] if description else "",
-                                "type": "news",
-                            })
-                except Exception:
-                    continue
+        import httpx as _httpx
+        from app.core.config import settings as _settings
+        
+        search_queries = [
+            f"{query} site:statnews.com OR site:fiercepharma.com OR site:biopharmadive.com",
+            f"{query} FDA approval 2024 2025 clinical trial results",
+        ]
+        
+        for search_q in search_queries[:1]:
+            async with _httpx.AsyncClient(timeout=15) as client:
+                r = await client.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers={
+                        "x-api-key": _settings.ANTHROPIC_API_KEY,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json",
+                    },
+                    json={
+                        "model": "claude-haiku-4-5-20251001",
+                        "max_tokens": 500,
+                        "tools": [{"type": "web_search_20250305", "name": "web_search"}],
+                        "messages": [{
+                            "role": "user",
+                            "content": f"Search for recent news about: {query}. Return the top 3 most relevant recent articles as JSON array with fields: title, url, source, date, summary. Return ONLY the JSON array, no other text."
+                        }]
+                    }
+                )
+                if r.status_code == 200:
+                    data = r.json()
+                    # Extract text from response
+                    for block in data.get("content", []):
+                        if block.get("type") == "text":
+                            import json as _json, re as _re
+                            text = block.get("text", "")
+                            # Try to extract JSON array
+                            match = _re.search(r'\[.*?\]', text, _re.DOTALL)
+                            if match:
+                                try:
+                                    articles = _json.loads(match.group())
+                                    for a in articles[:max_results]:
+                                        results.append({
+                                            "source": a.get("source", "Web"),
+                                            "title": a.get("title", ""),
+                                            "url": a.get("url", ""),
+                                            "date": a.get("date", ""),
+                                            "summary": a.get("summary", ""),
+                                            "type": "news",
+                                        })
+                                except Exception:
+                                    pass
     except Exception as e:
-        logger.warning(f"News fetch failed: {e}")
+        logger.warning(f"Web search news failed: {e}")
+    
+    # Fallback: recent PubMed articles if web search returned nothing
+    if not results:
+        try:
+            async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+                r = await client.get(
+                    "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",
+                    params={
+                        "db": "pubmed", "term": query + "[Title/Abstract]",
+                        "retmax": max_results, "sort": "date",
+                        "datetype": "pdat", "mindate": "2024",
+                        "retmode": "json",
+                    }
+                )
+                if r.status_code == 200:
+                    ids = r.json().get("esearchresult", {}).get("idlist", [])
+                    for pmid in ids[:3]:
+                        results.append({
+                            "source": "PubMed Recent",
+                            "title": f"Recent publication on {query} (PMID {pmid})",
+                            "url": f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
+                            "date": "2024-2025",
+                            "summary": "",
+                            "type": "recent_publication",
+                        })
+        except Exception as e:
+            logger.warning(f"PubMed fallback failed: {e}")
     
     return results[:max_results]
 
