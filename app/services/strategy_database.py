@@ -798,3 +798,28 @@ DOMAIN_SPECIFIC_STRATEGIES["drug_cns"] = [
         "source_url": "https://pubmed.ncbi.nlm.nih.gov/37459244/",
     },
 ]
+
+# Aliases mapping expert_domain IDs to strategy database keys
+DOMAIN_ALIASES = {
+    "antibiotic_amr": "drug_amr",
+    "oncology_small_molecule": "drug_oncology",
+    "oncology_biologic": "biologic_oncology",
+    "biologic_rare": "biologic_rare_disease",
+    "gene_therapy": "gene_therapy_rare",
+    "cns_neurodegeneration": "drug_cns",
+    "rare_neurological": "drug_cns",
+    "infectious_non_amr": "drug_infectious_non_amr",
+    "cardiovascular_biologic": "biologic_cardiology",
+    "hematology_biologic": "biologic_hematology",
+    "autoimmune_biologic": "biologic_immunology",
+    "device_cgm": "device_metabolic",
+    "device_wearable": "device_metabolic",
+    "cancer_immunotherapy": "vaccine_cancer_immuno",
+    "digital_samd": "digital_therapeutic",
+    "companion_diagnostic": "diagnostic_companion",
+}
+
+# Apply aliases to DOMAIN_SPECIFIC_STRATEGIES
+for alias, target in DOMAIN_ALIASES.items():
+    if target in DOMAIN_SPECIFIC_STRATEGIES and alias not in DOMAIN_SPECIFIC_STRATEGIES:
+        DOMAIN_SPECIFIC_STRATEGIES[alias] = DOMAIN_SPECIFIC_STRATEGIES[target]
