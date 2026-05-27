@@ -261,3 +261,51 @@ async def mock_pi_report():
         ],
         "limitations": "Market sizing based on 2019 CDC surveillance data; actual MRSA SSTI incidence may vary. Pricing assumptions derived from delafloxacin comparator and subject to payer negotiation."
     }
+
+
+# ── Discovery Engine Endpoints ────────────────────────────────────────────────
+
+@router.get("/discovery/opportunities")
+async def get_opportunities(
+    top_n: int = 20,
+    current_user = Depends(get_current_user),
+):
+    """
+    Return ranked biomedical opportunities scored by the MCDA algorithm.
+    Cached weekly; refreshed by scheduler.
+    """
+    from app.services.opportunity_scorer import run_discovery_engine
+    try:
+        opportunities = await run_discovery_engine(top_n=top_n)
+        return {
+            "opportunities": opportunities,
+            "generated_at": datetime.utcnow().isoformat(),
+            "algorithm": "MCDA v1.0 (EVIDEM/PII/AIFA/LENZ consensus weights)",
+            "total_scored": len(opportunities),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/discovery/score")
+async def score_custom_opportunity(
+    body: dict,
+    current_user = Depends(get_current_user),
+):
+    """Score a custom opportunity provided by the user."""
+    from app.services.opportunity_scorer import score_opportunity
+    try:
+        result = await score_opportunity(
+            disease_name=body.get("disease_name", ""),
+            therapeutic_area=body.get("therapeutic_area", "default"),
+            development_phase=body.get("development_phase", "preclinical"),
+            approved_treatments_count=body.get("approved_treatments_count"),
+            competitor_trial_count=body.get("competitor_trial_count"),
+            annual_treatment_cost_usd=body.get("annual_treatment_cost_usd"),
+            us_patient_population=body.get("us_patient_population"),
+            designations=body.get("designations", []),
+            order_of_entry=body.get("order_of_entry"),
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
