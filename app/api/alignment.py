@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from typing import Optional
 
 from app.services.alignment_service import generate_alignment_report, generate_pi_report
+from app.api.auth import get_current_user
 from app.models.alignment import AlignmentReport, PIReport
 
 logger = logging.getLogger(__name__)
