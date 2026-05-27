@@ -1,3 +1,4 @@
+from datetime import datetime
 """
 Alignment API v2
 ================
@@ -8,7 +9,7 @@ GET  /api/v1/alignment/examples     — example ideas
 """
 
 import logging
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 from typing import Optional
 
