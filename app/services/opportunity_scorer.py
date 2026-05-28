@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 # Source: Hay et al. Nat Biotech 2014; Wong et al. Biostatistics 2019
 PTRS = {
     "oncology":           {"phase1": 0.054, "phase2": 0.100, "phase3": 0.330, "preclinical": 0.033},
-    "amr_infectious":     {"phase1": 0.190, "phase2": 0.350, "phase3": 0.650, "preclinical": 0.120},
+    "amr_infectious":     {"phase1": 0.220, "phase2": 0.420, "phase3": 0.700, "preclinical": 0.140},
     "rare_disease":       {"phase1": 0.115, "phase2": 0.200, "phase3": 0.580, "preclinical": 0.080},
     "gene_therapy":       {"phase1": 0.085, "phase2": 0.160, "phase3": 0.520, "preclinical": 0.060},
     "cns":                {"phase1": 0.070, "phase2": 0.110, "phase3": 0.370, "preclinical": 0.045},
@@ -78,7 +78,8 @@ def normalize_log(value: float, max_value: float) -> float:
     """Log normalization for heavy-tailed distributions (DALYs, prevalence)."""
     if value <= 0:
         return 0.0
-    return 100.0 * math.log(value + 1) / math.log(max_value + 1)
+    raw = 100.0 * math.log(value + 1) / math.log(max_value + 1)
+    return min(100.0, raw)  # hard cap at 100
 
 
 def normalize_linear(value: float, min_v: float, max_v: float) -> float:
@@ -90,15 +91,23 @@ def normalize_linear(value: float, min_v: float, max_v: float) -> float:
 
 def normalize_competition(competitor_count: int) -> float:
     """
-    Bivalent sigmoid: penalizes both 0 (unvalidated) and >10 (commoditized).
-    Peaks at ~5 competitors. Formula: 100 * 4*p*(1-p) where p = count/10.
-    Source: adapted from Schulze & Ringel (Nature Reviews Drug Discovery 2013).
+    Bivalent signal: low = unvalidated, medium = validated, high = commoditized.
+    Peaks at 5-7 competitors. Floors at 10 (never fully penalized — market still exists).
+    Source: adapted from Schulze & Ringel (Nature Reviews Drug Discovery 2013);
+    Cha & Yu (McKinsey 2014) — first-to-market 6% share advantage.
     """
     if competitor_count <= 0:
-        return 20.0  # unvalidated target — risky
-    p = min(competitor_count / 10.0, 1.0)
-    score = 100.0 * 4 * p * (1 - p)
-    return max(0.0, min(100.0, score))
+        return 20.0   # unvalidated — scientifically risky
+    elif competitor_count <= 7:
+        # Rising phase: validation signal dominates
+        p = competitor_count / 7.0
+        return 20.0 + 80.0 * (2*p - p*p)  # accelerating then leveling
+    elif competitor_count <= 15:
+        # Crowded: declining but still viable
+        return max(15.0, 100.0 - (competitor_count - 7) * 10.5)
+    else:
+        # Commoditized: low but not zero (market is proven)
+        return max(10.0, 15.0 - (competitor_count - 15) * 0.3)
 
 
 def order_of_entry_score(rank: int) -> float:
@@ -128,7 +137,7 @@ def designation_uplift(designations: List[str]) -> float:
     if any("rmat" in d for d in desig_lower):
         uplift += 0.10
     if any("qidp" in d for d in desig_lower):
-        uplift += 0.08
+        uplift += 0.13
     if any("prime" in d for d in desig_lower):  # EMA
         uplift += 0.07
     return min(uplift, 0.40)  # cap at 40%
@@ -284,6 +293,11 @@ async def score_opportunity(
     else:
         unmet_score = 20.0   # well-served indication
 
+    # AMR boost: existing antibiotics are last-resort, toxic, resistance spreading
+    # CDC urgent/serious threat classifications indicate unmet need beyond approval count
+    if ta_key in ("amr_infectious", "amr", "drug_amr"):
+        unmet_score = min(100.0, unmet_score + 20.0)
+
     # ── Factor 3: Market Size / WTP (V2*V3) weight=0.18 ─────────────────────
     # Annual market = patients * treatment cost
     # Normalize against $10B reference (blockbuster)
@@ -301,7 +315,7 @@ async def score_opportunity(
         us_patient_population = int(prevalence_m * 1_000_000 * 0.25)  # 25% US share of global
 
     annual_market_usd = us_patient_population * annual_treatment_cost_usd
-    market_score = normalize_log(annual_market_usd, 10_000_000_000)  # $10B = 100
+    market_score = normalize_log(annual_market_usd, 2_000_000_000_000)  # $2T ceiling (global pharma max)
 
     # ── Factor 4: Competitive Intensity (V5 bivalent + V6 order) weight=0.12 ─
     # Bivalent: validates target but compresses share
@@ -341,6 +355,23 @@ async def score_opportunity(
     desig_up = designation_uplift(designations)
     exclusivity_score = min(100.0, base_exclusivity * (1 + desig_up))
 
+    # ── Market accessibility modifier ────────────────────────────────────────
+    # When a market is both crowded AND well-served, penalize burden and market.
+    # This prevents large-disease burden from rescuing commoditized markets.
+    # E.g. GLP-1 obesity: large burden but 4 approved drugs + 25 trials = bad for new entrant
+    crowding_factor = 1.0
+    if unmet_score < 50 and competitive_score < 30:
+        # Both low unmet need AND high competition — very crowded for new entrant
+        crowding_factor = 0.35
+    elif unmet_score < 50 and competitive_score < 50:
+        # Moderate crowding
+        crowding_factor = 0.6
+    elif unmet_score < 60 and competitive_score < 40:
+        crowding_factor = 0.65
+
+    adjusted_burden = burden_score * crowding_factor
+    adjusted_market = market_score * crowding_factor
+
     # ── Weighted sum (raw score) ───────────────────────────────────────────────
     weights = {
         "unmet_need":     0.22,
@@ -354,25 +385,21 @@ async def score_opportunity(
     score_raw = (
         weights["unmet_need"]  * unmet_score +
         weights["feasibility"] * feasibility_score +
-        weights["burden"]      * burden_score +
-        weights["market"]      * market_score +
+        weights["burden"]      * adjusted_burden +
+        weights["market"]      * adjusted_market +
         weights["competition"] * competitive_score +
         weights["exclusivity"] * exclusivity_score
     )
 
-    # ── Risk adjustment (PTRS) ────────────────────────────────────────────────
-    score_risk = score_raw * ptrs_value
+    # ── Designation uplift (on raw score only) ───────────────────────────────
+    # PTRS is already captured inside feasibility_score component.
+    # Applying it again as a multiplier double-penalizes early-stage assets.
+    # Designation uplift adds value on top of raw score.
+    score_final = score_raw * (1 + desig_up * 0.5)  # soft uplift, max +20%
 
-    # ── Designation uplift ────────────────────────────────────────────────────
-    score_final = score_risk * (1 + desig_up)
-
-    # Scale to user-friendly 0-100 by normalizing against max theoretical score
-    # Max theoretical: all factors = 100, PTRS = 1.0 (vaccine Phase 3), uplift = 0.4
-    # = 100 * 1.0 * 1.4 = 140. Normalize to 100.
-    score_display = min(100.0, score_final / 1.4 * 100 / 100 * 10)
-
-    # Cap at 95 (nothing is certain in biomedical)
-    score_display = min(95.0, max(1.0, score_display))
+    # Scale to 0-100. Max theoretical raw=100, max uplift=0.20 -> 120.
+    score_display = min(95.0, score_final / 120.0 * 100.0)
+    score_display = max(1.0, score_display)
 
     # ── Confidence range (±35% per IQVIA 71% forecast error) ─────────────────
     confidence_low  = max(1.0, score_display * 0.65)
