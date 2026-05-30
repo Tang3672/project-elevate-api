@@ -30,6 +30,8 @@ class PIReportRequest(BaseModel):
         description="Description of the product — what it does, who it's for, what it solves")
     product_type: str = Field(default="other",
         description="antibiotic | medical_device | software | diagnostic | other")
+    funding_pathway: Optional[str] = Field(default="commercial",
+        description="commercial | sbir | basic_science — controls report framing")
     target_pathogen: Optional[str] = Field(default=None,
         description="For antibiotics: primary target pathogen (e.g. MRSA, CRE, C. difficile)")
     disease_domain: str = Field(default="auto",
@@ -70,7 +72,7 @@ async def get_pi_report(payload: PIReportRequest):
         idea = payload.idea
         if payload.target_pathogen:
             idea = f"{idea}\n\nTarget pathogen: {payload.target_pathogen}"
-        report = await generate_pi_report(idea, payload.product_type, payload.disease_domain, getattr(payload, "tier1_category", "drug_small_molecule"))
+        report = await generate_pi_report(idea, payload.product_type, payload.disease_domain, getattr(payload, "tier1_category", "drug_small_molecule"), funding_pathway=getattr(payload, "funding_pathway", "commercial"))
         # Increment free report counter if not subscribed
         try:
             if current_user:
@@ -309,5 +311,69 @@ async def score_custom_opportunity(
             order_of_entry=body.get("order_of_entry"),
         )
         return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+@router.post("/clarify")
+async def generate_clarifying_questions(
+    body: dict,
+    current_user = Depends(get_current_user),
+):
+    """
+    Generate 5-10 targeted clarifying questions based on the user's idea and
+    funding pathway. Mirrors the ChatGPT Deep Research pattern: ask smart
+    questions before generating the report to get structured, descriptive input.
+    """
+    import anthropic
+    from app.core.config import settings
+
+    idea = body.get("idea", "")
+    pathway = body.get("pathway", "commercial")
+    product_type = body.get("product_type", "")
+
+    if not idea or len(idea) < 20:
+        raise HTTPException(status_code=400, detail="Idea too short")
+
+    pathway_context = {
+        "commercial": "a commercial product seeking go-to-market strategy (TAM/SAM, FDA pathway, buyers, pricing, competitive landscape)",
+        "sbir": "an SBIR/STTR grant application needing BOTH commercialization potential AND scientific significance",
+        "basic_science": "a basic science grant (NIH R01/R21) focused on significance, innovation, and scientific impact rather than commercial market",
+    }.get(pathway, "a commercial product")
+
+    prompt = f"""A researcher submitted this innovation for analysis as {pathway_context}:
+
+"{idea}"
+
+Product type: {product_type}
+
+Generate 5-8 specific clarifying questions that would make the resulting intelligence report dramatically more accurate and useful. The questions should fill in gaps in the description that matter for {pathway} analysis.
+
+Rules:
+- Questions must be SPECIFIC to this innovation, not generic
+- For commercial/SBIR: ask about target patient population, development stage, differentiation, existing competition the user knows about, pricing assumptions
+- For basic_science: ask about the scientific gap, mechanism novelty, prior work, what funded grants might overlap
+- Each question should be answerable in 1-2 sentences
+- Provide a short helpful placeholder/hint for each
+
+Return ONLY a JSON array, no other text:
+[{{"question": "...", "hint": "...", "field": "short_snake_case_key"}}]"""
+
+    try:
+        client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+        msg = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=1500,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = msg.content[0].text if msg.content else "[]"
+        # Extract JSON array
+        import json, re
+        match = re.search(r'\[.*\]', text, re.DOTALL)
+        if match:
+            questions = json.loads(match.group())
+            return {"questions": questions[:8], "pathway": pathway}
+        return {"questions": [], "pathway": pathway}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

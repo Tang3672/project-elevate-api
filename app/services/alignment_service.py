@@ -54,6 +54,7 @@ async def generate_pi_report(
     product_type:   str = "other",
     disease_domain: str = "auto",
     tier1_category: str = "drug_small_molecule",
+    funding_pathway: str = "commercial",
     user_id:        int = None,
 ) -> PIReport:
     """
@@ -99,7 +100,7 @@ async def generate_pi_report(
     #  Generate with Expert context 
     report = await _generate_expert_report(
         idea, pt, expert, demand_results, hospital_matches_raw, total_signals,
-        pi_memory_context=pi_memory_context)
+        pi_memory_context=pi_memory_context, funding_pathway=funding_pathway)
 
     # Build sources from structured data
     try:
@@ -430,7 +431,7 @@ You must respond with ONLY a valid JSON object. No markdown, no preamble. Use th
 
 
 
-async def _generate_expert_report(idea, product_type, expert, demand_results, hospital_matches_raw, total_signals, pi_memory_context=""):
+async def _generate_expert_report(idea, product_type, expert, demand_results, hospital_matches_raw, total_signals, pi_memory_context="", funding_pathway="commercial"):
     """
     Generates a PI report using the selected Expert's domain knowledge.
     Injects expert system_prompt + knowledge_base into the researcher context.
@@ -451,6 +452,33 @@ async def _generate_expert_report(idea, product_type, expert, demand_results, ho
     # Uses sub_expert_id from router (v2) or domain_id (v1 fallback)
     sub_expert_id = getattr(expert, "sub_expert_id", getattr(expert, "domain_id", "drug_amr"))
     expert_system_prompt = getattr(expert, "system_prompt", "")
+
+    # ── Funding pathway framing injection ─────────────────────────────────────
+    # Appended to expert system prompt to change report structure based on
+    # whether user is building a commercial product, SBIR grant, or basic science grant
+    _pathway = funding_pathway or "commercial"
+    _pathway_framing = {
+        "sbir": """
+
+FUNDING PATHWAY: SBIR/STTR FEDERAL GRANT
+This report MUST address BOTH commercial AND scientific dimensions:
+COMMERCIAL (60%): TAM/SAM market sizing, FDA regulatory pathway, buyer segments, competitive landscape, pricing
+SCIENTIFIC SIGNIFICANCE (40%): Unmet medical need framed for NIH reviewers, innovation over current standard of care, potential impact statement, cite overlapping funded NIH grants via NIH Reporter
+Use language appropriate for SBIR reviewers — balance business case with scientific merit.""",
+        "basic_science": """
+
+FUNDING PATHWAY: BASIC SCIENCE GRANT (NIH R01/R21/R03)
+CRITICAL CHANGES TO REPORT STRUCTURE:
+- REPLACE the TAM/SAM market sizing section with: NIH funding levels in this disease area, number of active research groups, overlapping funded grants from NIH Reporter
+- REPLACE buyer segments / market access with: key journals, study sections, and funding mechanisms relevant to this research area
+- ADD: Significance section (what scientific gap does this fill?), Innovation section (what is novel vs existing approaches?), Rigor section (what controls/validation are needed?)
+- Use NIH review criteria language throughout: Significance, Innovation, Approach, Environment, Investigators
+Do NOT include commercial pricing, sales channels, or go-to-market strategy.""",
+        "commercial": "",
+    }.get(_pathway, "")
+    if _pathway_framing:
+        expert_system_prompt = expert_system_prompt + _pathway_framing
+
     expert_critic_rules  = getattr(expert, "critic_rules", "")
     domain_static        = getattr(expert, "knowledge_base", "")
 

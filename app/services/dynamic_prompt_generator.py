@@ -427,19 +427,36 @@ async def generate_expert_system_prompt(
     sub_expert_id: str,
     disease_name: str,
     idea: str,
+    funding_pathway: str = "commercial",
 ) -> str:
     """
     Generate a prescriptive, disease-specific system prompt for a sub-expert.
     Falls back to a generic domain prompt if generation fails.
+    funding_pathway: commercial | sbir | basic_science
     """
     profile = DOMAIN_PROFILES.get(sub_expert_id)
     if not profile:
         return _fallback_prompt(sub_expert_id, disease_name)
 
+    pathway_instruction = {
+        "commercial": """FUNDING PATHWAY: COMMERCIAL PRODUCT
+Focus on: TAM/SAM market sizing, FDA regulatory pathway, buyer segments, pricing strategy, competitive landscape, go-to-market. This is a commercial product seeking market entry.""",
+        "sbir": """FUNDING PATHWAY: SBIR/STTR FEDERAL GRANT
+DUAL FOCUS required - the report MUST address BOTH:
+(A) COMMERCIAL POTENTIAL: TAM/SAM, regulatory pathway, market access, competitive landscape
+(B) SCIENTIFIC SIGNIFICANCE: unmet medical need framed for NIH reviewers, innovation over current approaches, impact statement, overlapping funded grants via NIH Reporter
+Weight sections ~60% commercial / 40% significance. Use language appropriate for SBIR reviewers.""",
+        "basic_science": """FUNDING PATHWAY: BASIC SCIENCE GRANT (NIH R01/R21/R03)
+Focus on: scientific significance (what gap does this fill?), innovation over existing approaches, overlapping funded NIH grants in this area, approach rigor, potential impact on the field.
+DO NOT include TAM/SAM market sizing - replace with: number of researchers/labs working in this area, NIH funding levels in this disease area, and what grants might compete or complement.
+Use NIH review criteria language: Significance, Innovation, Approach, Environment.""",
+    }.get(funding_pathway, "")
+
     prompt = f"""You are building a system prompt for an AI expert called "{profile['title']}".
 
 The PI's specific disease/condition is: {disease_name}
 The PI's idea: {idea[:300]}
+{pathway_instruction}
 
 Using the domain profile below, write a PRESCRIPTIVE system prompt that:
 1. Opens with: "You are the {profile['title']} for Project Elevate."
