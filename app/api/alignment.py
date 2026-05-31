@@ -278,17 +278,22 @@ async def get_opportunities(
     Return ranked biomedical opportunities scored by the MCDA algorithm.
     Cached weekly; refreshed by scheduler.
     """
-    from app.services.opportunity_scorer import run_discovery_engine
     try:
+        from app.services.opportunity_scorer_v2 import run_discovery_engine_v2
+        opportunities = await run_discovery_engine_v2(top_n=top_n)
+        algo = "Opportunity Engine v2 (geometric: Opportunity x Probability x Value; PTRS + rNPV)"
+    except Exception as e_v2:
+        import logging
+        logging.getLogger(__name__).error(f"v2 engine failed, falling back to v1: {e_v2}")
+        from app.services.opportunity_scorer import run_discovery_engine
         opportunities = await run_discovery_engine(top_n=top_n)
-        return {
-            "opportunities": opportunities,
-            "generated_at": datetime.utcnow().isoformat(),
-            "algorithm": "MCDA v1.0 (EVIDEM/PII/AIFA/LENZ consensus weights)",
-            "total_scored": len(opportunities),
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        algo = "MCDA v1.0 (fallback)"
+    return {
+        "opportunities": opportunities,
+        "generated_at": datetime.utcnow().isoformat(),
+        "algorithm": algo,
+        "total_scored": len(opportunities),
+    }
 
 
 @router.post("/discovery/score")
