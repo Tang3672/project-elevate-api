@@ -38,10 +38,6 @@ class PIReportRequest(BaseModel):
         description="auto | antibiotic_amr | oncology | cardiology | neurology_cns | metabolic_diabetes | mental_health")
     tier1_category: str = Field(default="drug_small_molecule",
         description="drug_small_molecule | biologic | gene_cell_therapy | medical_device | diagnostic | digital_health | vaccine_immunotherapy | other_platform")
-    disease_domain: str = Field(default="auto",
-        description="auto | antibiotic_amr | oncology | cardiology | neurology_cns | metabolic_diabetes | mental_health")
-    tier1_category: str = Field(default="drug_small_molecule",
-        description="drug_small_molecule | biologic | gene_cell_therapy | medical_device | diagnostic | digital_health | vaccine_immunotherapy | other_platform")
 
 
 @router.post("/check", response_model=AlignmentReport)
@@ -57,7 +53,7 @@ async def check_alignment(payload: AlignmentRequest):
 
 
 @router.post("/pi-report", response_model=PIReport)
-async def get_pi_report(payload: PIReportRequest):
+async def get_pi_report(payload: PIReportRequest, current_user = Depends(get_current_user)):
     """
     Full PI go-to-market intelligence report.
 
@@ -72,7 +68,10 @@ async def get_pi_report(payload: PIReportRequest):
         idea = payload.idea
         if payload.target_pathogen:
             idea = f"{idea}\n\nTarget pathogen: {payload.target_pathogen}"
-        report = await generate_pi_report(idea, payload.product_type, payload.disease_domain, getattr(payload, "tier1_category", "drug_small_molecule"), funding_pathway=getattr(payload, "funding_pathway", "commercial"))
+        report = await generate_pi_report(
+            idea, payload.product_type, payload.disease_domain,
+            payload.tier1_category, funding_pathway=payload.funding_pathway,
+        )
         # Increment free report counter if not subscribed
         try:
             if current_user:
@@ -83,7 +82,7 @@ async def get_pi_report(payload: PIReportRequest):
                 if status not in ("active", "trialing") and current_user.get("email") not in dev_emails:
                     await increment_free_report_count(current_user["id"])
         except Exception as inc_e:
-            import logging; logging.getLogger(__name__).warning(f"Failed to increment free report count: {inc_e}")
+            logger.warning(f"Failed to increment free report count: {inc_e}")
         return report
     except ValueError as e:
         raise HTTPException(status_code=503, detail=str(e))

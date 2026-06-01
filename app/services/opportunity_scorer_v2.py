@@ -21,8 +21,13 @@ Stewart 2001 / Alacrita / standard healthcare-IB practice.
 """
 
 from __future__ import annotations
+import asyncio as _asyncio
+import logging as _logging
 import math
+import time as _time
 from typing import Optional
+
+import requests as _requests
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -424,6 +429,80 @@ def _phase_default_designations(ta, approved):
     return desig
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# LIVE TRIAL COUNT — ClinicalTrials.gov v2 with 24h in-memory cache
+# ──────────────────────────────────────────────────────────────────────────────
+
+_TRIAL_COUNT_CACHE: dict[str, tuple[int, float]] = {}  # disease → (count, fetched_at)
+_CACHE_TTL = 86_400  # 24 hours
+_logger = _logging.getLogger(__name__)
+
+# Disease names in OPPORTUNITY_UNIVERSE that don't match CT.gov search well —
+# map to a cleaner search term for the API query.
+_CT_SEARCH_ALIASES: dict[str, str] = {
+    "ALS (SOD1-mutant)":                    "amyotrophic lateral sclerosis",
+    "NASH/MASH":                            "nonalcoholic steatohepatitis",
+    "Alzheimer Disease (early/MCI)":        "Alzheimer Disease",
+    "C. difficile Infection":               "Clostridioides difficile",
+    "Sickle Cell Disease (gene therapy)":   "Sickle Cell Disease",
+    "Sepsis (AI early detection)":          "Sepsis",
+    "Geographic Atrophy (dry AMD)":         "geographic atrophy",
+    "KRAS G12C NSCLC":                      "KRAS non-small cell lung",
+    "MRSA Skin Infections":                 "MRSA",
+    "Type 1 Diabetes (CGM/automated insulin)": "Type 1 Diabetes",
+    "Carbapenem-resistant Enterobacterales": "carbapenem resistant Enterobacterales",
+    "Acinetobacter baumannii MDR":          "Acinetobacter baumannii",
+    "RSV in elderly/immunocompromised":     "respiratory syncytial virus",
+    "Prostate Cancer (PSMA-targeted)":      "Prostate Cancer",
+    "Myelofibrosis JAK-resistant":          "myelofibrosis",
+    "Bipolar Depression":                   "bipolar disorder",
+    "Rare Pediatric Epilepsy (SCN1A)":      "Dravet syndrome",
+    "HER2-low Breast Cancer":              "HER2 breast cancer",
+}
+
+
+async def _fetch_live_trial_count(disease: str, ta: str) -> int:
+    """
+    Query ClinicalTrials.gov v2 for the number of active/recruiting trials for
+    this condition. Results are cached for 24h. Falls back to the static
+    _DISEASE_OVERRIDES value on timeout or API error.
+    """
+    now = _time.monotonic()
+    cached = _TRIAL_COUNT_CACHE.get(disease)
+    if cached and (now - cached[1]) < _CACHE_TTL:
+        return cached[0]
+
+    fallback = _DISEASE_OVERRIDES.get(disease, _TA_DEFAULTS.get(ta, _TA_DEFAULTS["other"]))[0]
+    search_term = _CT_SEARCH_ALIASES.get(disease, disease)
+
+    def _sync_fetch() -> int:
+        r = _requests.get(
+            "https://clinicaltrials.gov/api/v2/studies",
+            params={
+                "query.cond": search_term,
+                "filter.overallStatus": "RECRUITING,NOT_YET_RECRUITING,ACTIVE_NOT_RECRUITING",
+                "countTotal": "true",
+                "pageSize": "1",
+                "format": "json",
+            },
+            timeout=8.0,
+        )
+        r.raise_for_status()
+        return int(r.json().get("totalCount", fallback))
+
+    try:
+        loop = _asyncio.get_event_loop()
+        count = await loop.run_in_executor(None, _sync_fetch)
+        _TRIAL_COUNT_CACHE[disease] = (count, now)
+        _logger.debug("CT.gov '%s' → %d trials", disease, count)
+        return count
+    except Exception as e:
+        _logger.warning("CT.gov fetch failed for '%s', using static fallback: %s", disease, e)
+
+    _TRIAL_COUNT_CACHE[disease] = (fallback, now)
+    return fallback
+
+
 async def run_discovery_engine_v2(top_n: int = 25, funding_pathway: str = "commercial"):
     """
     Score the curated OPPORTUNITY_UNIVERSE (imported from v1) through the v2 engine.
@@ -433,9 +512,10 @@ async def run_discovery_engine_v2(top_n: int = 25, funding_pathway: str = "comme
 
     async def score_one(opp):
         disease, ta, phase, approved, cost, notes = opp
-        trials, pop, biomarker, modality, dalys = _DISEASE_OVERRIDES.get(
+        _, pop, biomarker, modality, dalys = _DISEASE_OVERRIDES.get(
             disease, _TA_DEFAULTS.get(ta, _TA_DEFAULTS["other"])
         )
+        trials = await _fetch_live_trial_count(disease, ta)
         try:
             r = await score_opportunity_v2(
                 disease_name=disease,
