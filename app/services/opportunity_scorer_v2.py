@@ -260,6 +260,7 @@ def value_score(
     overlapping_grants: Optional[int] = None,
     competitor_trial_count: int = 5,
     approved_treatments_count: int = 0,
+    tam_peak_revenue: Optional[float] = None,
 ) -> tuple[float, dict]:
     """
     Commercial pathway: epidemiology-anchored peak-sales proxy.
@@ -283,11 +284,14 @@ def value_score(
         breakdown = {"nih_fund": round(fund, 1), "whitespace": round(whitespace, 1)}
         return _clamp(val), breakdown
 
-    # Commercial / SBIR: peak-sales proxy = population × penetration × net price.
-    # Use a conservative blended penetration (discovery-stage, not a full forecast).
-    penetration = 0.10 if us_patient_population < 200_000 else 0.03  # rare drugs penetrate deeper
-    net_price_factor = 0.55   # net-to-WAC haircut (rebates/GTN)
-    peak_sales = us_patient_population * penetration * annual_treatment_cost_usd * net_price_factor
+    # Commercial / SBIR: use disease-specific TAM calculator output when available;
+    # fall back to generic penetration formula for unlisted diseases.
+    if tam_peak_revenue and tam_peak_revenue > 0:
+        peak_sales = tam_peak_revenue
+    else:
+        penetration = 0.10 if us_patient_population < 200_000 else 0.03
+        net_price_factor = 0.55
+        peak_sales = us_patient_population * penetration * annual_treatment_cost_usd * net_price_factor
 
     # LOE decay by modality affects durable value (biologics hold value better)
     durability = 1.10 if modality in ("biologic", "gene_cell_therapy", "vaccine_immunotherapy") else 1.0
@@ -347,6 +351,7 @@ async def score_opportunity_v2(
     dalys: Optional[float] = None,
     nih_funding_density: Optional[float] = None,
     overlapping_grants: Optional[int] = None,
+    tam_peak_revenue: Optional[float] = None,
 ) -> dict:
     opp, opp_b = opportunity_score(
         approved_treatments_count=approved_treatments_count,
@@ -372,6 +377,7 @@ async def score_opportunity_v2(
         overlapping_grants=overlapping_grants,
         competitor_trial_count=competitor_trial_count,
         approved_treatments_count=approved_treatments_count,
+        tam_peak_revenue=tam_peak_revenue,
     )
 
     # Geometric combination — a near-zero in any factor crushes the score.
@@ -642,6 +648,10 @@ async def run_discovery_engine_v2(top_n: int = 25, funding_pathway: str = "comme
         dalys = _GBD_DISEASE_DALYS.get(disease) or _GBD_TA_DALYS.get(ta) or _old_dalys
         # Real US prevalence — prefer data file over old hardcoded estimates
         pop = _PREVALENCE_DISEASE.get(disease) or _PREVALENCE_TA.get(ta) or pop
+        # Bottom-up TAM from disease-specific expert parameters
+        from app.services.tam_calculator import calculate_tam, format_tam
+        tam = calculate_tam(disease, fallback_population=pop, fallback_price=cost)
+
         # Fetch live data in parallel
         trials, approved = await _asyncio.gather(
             _fetch_live_trial_count(disease, ta),
@@ -661,7 +671,16 @@ async def run_discovery_engine_v2(top_n: int = 25, funding_pathway: str = "comme
                 modality=modality,
                 funding_pathway=funding_pathway,
                 dalys=dalys if dalys > 0 else None,
+                tam_peak_revenue=tam["peak_revenue_usd"] if tam else None,
             )
+            # TAM fields for the frontend
+            if tam:
+                r["us_tam_usd"]       = round(tam["us_tam_usd"])
+                r["peak_revenue_usd"] = round(tam["peak_revenue_usd"])
+                r["us_tam_fmt"]       = format_tam(tam["us_tam_usd"])
+                r["peak_revenue_fmt"] = format_tam(tam["peak_revenue_usd"])
+                r["tam_formula"]      = tam["formula"]
+                r["pricing_rationale"] = tam.get("pricing_rationale", "")
             # Flatten subscores into components for the existing frontend bars
             r["notes"] = notes
             r["phase"] = phase

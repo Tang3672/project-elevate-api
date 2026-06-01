@@ -1,0 +1,268 @@
+{
+  "_meta": {
+    "notes": "Expert-calibrated TAM parameters for each disease in OPPORTUNITY_UNIVERSE. Each disease uses a formula appropriate to its product category. Pricing anchored to the closest approved comparator drug/device WAC. All TAM values in USD.",
+    "formulas": {
+      "drug_prevalence": "TAM = prevalent_patients × diagnosis_rate × treatment_rate × novel_eligible_fraction × price_per_year_usd × net_price_factor",
+      "drug_incidence":  "TAM = annual_incidence × treatment_rate × novel_eligible_fraction × price_per_course_usd × net_price_factor",
+      "gene_therapy":    "TAM = annual_eligible_cohort × price_per_treatment_usd × net_price_factor  (steady-state annual demand)",
+      "amr_antibiotic":  "TAM = annual_incidence × novel_eligible_fraction × price_per_course_usd × net_price_factor",
+      "device":          "TAM = target_facilities × adoption_rate × annual_contract_usd  OR  addressable_patients × adoption_rate × annual_cost_per_patient_usd × net_price_factor",
+      "vaccine":         "TAM = target_population × vaccination_rate × doses_per_series × price_per_dose_usd × net_price_factor"
+    }
+  },
+  "diseases": {
+    "Glioblastoma Multiforme": {
+      "formula": "drug_incidence",
+      "annual_incidence": 13500,
+      "treatment_rate": 0.85,
+      "novel_eligible_fraction": 0.65,
+      "price_per_course_usd": 150000,
+      "net_price_factor": 0.65,
+      "peak_penetration": 0.30,
+      "pricing_rationale": "Bevacizumab/temozolomide combination ~$80-120K; novel immunotherapy commands 25% premium. 65% of GBM patients progress to a treatment line where novel agent is eligible."
+    },
+    "Pancreatic Ductal Adenocarcinoma": {
+      "formula": "drug_incidence",
+      "annual_incidence": 65000,
+      "treatment_rate": 0.80,
+      "novel_eligible_fraction": 0.55,
+      "price_per_course_usd": 200000,
+      "net_price_factor": 0.65,
+      "peak_penetration": 0.25,
+      "pricing_rationale": "mFOLFIRINOX + nab-paclitaxel ~$100K; novel KRAS G12D or stroma-targeting agent would command 2x premium. 55% eligible = resectable/locally advanced + 2L+ metastatic."
+    },
+    "ALS (SOD1-mutant)": {
+      "formula": "drug_prevalence",
+      "prevalent_patients": 32000,
+      "diagnosis_rate": 0.85,
+      "treatment_rate": 0.78,
+      "novel_eligible_fraction": 0.55,
+      "price_per_year_usd": 178000,
+      "net_price_factor": 0.65,
+      "peak_penetration": 0.40,
+      "pricing_rationale": "Tofersen (Qalsody) WAC $178K/yr is the comparator anchor. Next-gen oral/broader-coverage agent targets all ALS (not just SOD1), but discovery is SOD1-informed."
+    },
+    "Carbapenem-resistant Enterobacterales": {
+      "formula": "amr_antibiotic",
+      "annual_incidence": 900000,
+      "novel_eligible_fraction": 0.18,
+      "price_per_course_usd": 18000,
+      "net_price_factor": 0.70,
+      "peak_penetration": 0.25,
+      "pricing_rationale": "Avycaz WAC ~$15K/course; next novel last-resort agent targets $18-25K. Only 18% of CRE cases require a novel antibiotic (remainder respond to polymyxin/ceftazidime combinations)."
+    },
+    "Acinetobacter baumannii MDR": {
+      "formula": "amr_antibiotic",
+      "annual_incidence": 8500,
+      "novel_eligible_fraction": 0.75,
+      "price_per_course_usd": 16000,
+      "net_price_factor": 0.70,
+      "peak_penetration": 0.50,
+      "pricing_rationale": "Sulbactam-durlobactam (Xacduro) WAC ~$15-16K/course. 75% of MDR A. baumannii cases have no adequate alternative, making novel agent highly eligible."
+    },
+    "Spinal Muscular Atrophy Type 2": {
+      "formula": "drug_prevalence",
+      "prevalent_patients": 9000,
+      "diagnosis_rate": 0.90,
+      "treatment_rate": 0.85,
+      "novel_eligible_fraction": 0.60,
+      "price_per_year_usd": 340000,
+      "net_price_factor": 0.60,
+      "peak_penetration": 0.40,
+      "pricing_rationale": "Risdiplam (Evrysdi) WAC $340K/yr; Spinraza (nusinersen) $750K yr-1, $375K/yr maintenance. Novel mechanism for Type 2 beyond-neonatal gap targets those ineligible for Zolgensma by age."
+    },
+    "HER2-low Breast Cancer": {
+      "formula": "drug_incidence",
+      "annual_incidence": 50000,
+      "treatment_rate": 0.90,
+      "novel_eligible_fraction": 0.65,
+      "price_per_course_usd": 180000,
+      "net_price_factor": 0.65,
+      "peak_penetration": 0.35,
+      "pricing_rationale": "Enhertu (T-DXd) WAC $180K/yr. Annual_incidence = ~50K metastatic HER2-low BC cases (not all 185K new HER2-low diagnoses; most are early-stage). 65% eligible = those progressing on prior HER2-targeting or eligible for 1L ADC."
+    },
+    "KRAS G12C NSCLC": {
+      "formula": "drug_incidence",
+      "annual_incidence": 26000,
+      "treatment_rate": 0.85,
+      "novel_eligible_fraction": 0.55,
+      "price_per_course_usd": 180000,
+      "net_price_factor": 0.65,
+      "peak_penetration": 0.35,
+      "pricing_rationale": "Sotorasib (Lumakras) WAC $180K/yr; adagrasib (Krazati) $200K/yr. Novel combination or 2nd-gen G12C inhibitor targets those who progressed on 1L or are combination-eligible."
+    },
+    "Huntington Disease": {
+      "formula": "drug_prevalence",
+      "prevalent_patients": 35000,
+      "diagnosis_rate": 0.85,
+      "treatment_rate": 0.78,
+      "novel_eligible_fraction": 0.65,
+      "price_per_year_usd": 120000,
+      "net_price_factor": 0.65,
+      "peak_penetration": 0.45,
+      "pricing_rationale": "No approved DMT (tetrabenazine/deutetrabenazine are symptomatic only). First disease-modifying agent commands orphan drug premium. Benchmark: riluzole $10K/yr (generic ALS) vs tofersen $178K. HD DMT likely $100-150K given rarity."
+    },
+    "Friedreich Ataxia": {
+      "formula": "drug_prevalence",
+      "prevalent_patients": 15000,
+      "diagnosis_rate": 0.80,
+      "treatment_rate": 0.70,
+      "novel_eligible_fraction": 0.70,
+      "price_per_year_usd": 340000,
+      "net_price_factor": 0.60,
+      "peak_penetration": 0.50,
+      "pricing_rationale": "Skyclarys (omaveloxolone) WAC $340K/yr. Second-mechanism agent (e.g., frataxin stabilizer, epigenetic) targets those with inadequate Nrf2 pathway response or as combination."
+    },
+    "C. difficile Infection": {
+      "formula": "amr_antibiotic",
+      "annual_incidence": 462000,
+      "novel_eligible_fraction": 0.25,
+      "price_per_course_usd": 8000,
+      "net_price_factor": 0.72,
+      "peak_penetration": 0.30,
+      "pricing_rationale": "Fidaxomicin (Dificid) WAC ~$4K; bezlotoxumab (Zinplava) prophylaxis ~$4K. Novel microbiome/phage approach targets recurrent CDI (25% of all CDI cases), where standard therapy fails."
+    },
+    "MRSA Skin Infections": {
+      "formula": "amr_antibiotic",
+      "annual_incidence": 870000,
+      "novel_eligible_fraction": 0.12,
+      "price_per_course_usd": 1500,
+      "net_price_factor": 0.72,
+      "peak_penetration": 0.25,
+      "pricing_rationale": "Generic TMP-SMX $4/course creates price ceiling pressure. Novel oral MRSA agent targets TMP-SMX-resistant/intolerant fraction (~12%). Delafloxacin (Baxdela) $1,200/course is the relevant comparator for outpatient premium oral."
+    },
+    "Type 1 Diabetes (CGM/automated insulin)": {
+      "formula": "device",
+      "addressable_patients": 1900000,
+      "adoption_rate": 0.55,
+      "annual_cost_per_patient_usd": 12000,
+      "net_price_factor": 0.70,
+      "peak_penetration": 0.30,
+      "pricing_rationale": "Tandem Control-IQ system + Dexcom G7: ~$10-14K/yr all-in. Omnipod 5 + CGM: ~$9-12K/yr. Net price after insurance reimbursement ~70% of list. 55% of T1D patients are AID-eligible (exclude very young, very old, contraindicated)."
+    },
+    "Alzheimer Disease (early/MCI)": {
+      "formula": "drug_prevalence",
+      "prevalent_patients": 1500000,
+      "diagnosis_rate": 1.0,
+      "treatment_rate": 0.70,
+      "novel_eligible_fraction": 0.80,
+      "price_per_year_usd": 28000,
+      "net_price_factor": 0.65,
+      "peak_penetration": 0.25,
+      "pricing_rationale": "Leqembi WAC $26,500/yr; Kisunla $32K/yr. Prevalent_patients = 1.5M amyloid-positive early-stage/MCI (biomarker-confirmed eligible subset of 6.7M total). 80% eligible for a next-gen anti-amyloid or tau-targeting agent."
+    },
+    "Pulmonary Arterial Hypertension": {
+      "formula": "drug_prevalence",
+      "prevalent_patients": 200000,
+      "diagnosis_rate": 0.70,
+      "treatment_rate": 0.80,
+      "novel_eligible_fraction": 0.45,
+      "price_per_year_usd": 80000,
+      "net_price_factor": 0.65,
+      "peak_penetration": 0.30,
+      "pricing_rationale": "Sotatercept (Winrevair) WAC $168K/yr; selexipag (Uptravi) $80K/yr. Novel mechanism targets patients inadequate on background ERA+PDE5i therapy (~45% of prevalent PAH)."
+    },
+    "Duchenne Muscular Dystrophy": {
+      "formula": "drug_prevalence",
+      "prevalent_patients": 21000,
+      "diagnosis_rate": 0.90,
+      "treatment_rate": 0.80,
+      "novel_eligible_fraction": 0.55,
+      "price_per_year_usd": 1200000,
+      "net_price_factor": 0.55,
+      "peak_penetration": 0.30,
+      "pricing_rationale": "Elevidys WAC $3.2M one-time (~$1.2M/yr amortized over 3-yr treatment benefit). Exon-skipping drugs (Vyondys, Amondys) $1-1.3M/yr. Gene therapy wave targets the 55% who are exon-amenable or mutation-agnostic eligible."
+    },
+    "Myelofibrosis JAK-resistant": {
+      "formula": "drug_prevalence",
+      "prevalent_patients": 21000,
+      "diagnosis_rate": 0.85,
+      "treatment_rate": 0.82,
+      "novel_eligible_fraction": 0.40,
+      "price_per_year_usd": 200000,
+      "net_price_factor": 0.65,
+      "peak_penetration": 0.40,
+      "pricing_rationale": "Ruxolitinib WAC $170K/yr; pacritinib (Vonjo) $181K/yr; momelotinib (Ojjaara) $209K/yr. JAK-resistant patients (~40% of MF after 12 months) are the unmet 2nd/3rd-line opportunity."
+    },
+    "Geographic Atrophy (dry AMD)": {
+      "formula": "drug_prevalence",
+      "prevalent_patients": 1200000,
+      "diagnosis_rate": 0.60,
+      "treatment_rate": 0.45,
+      "novel_eligible_fraction": 0.70,
+      "price_per_year_usd": 20000,
+      "net_price_factor": 0.70,
+      "peak_penetration": 0.30,
+      "pricing_rationale": "Syfovre (pegcetacoplan) WAC $2,190/injection × 8/yr = $17.5K; Izervay (avacincaptad) $3,500 × 6/yr = $21K. Novel intravitreal agent (different mechanism) prices within this range. 70% of GA patients not yet on a complement inhibitor."
+    },
+    "Sickle Cell Disease (gene therapy)": {
+      "formula": "gene_therapy",
+      "annual_eligible_cohort": 5000,
+      "price_per_treatment_usd": 2200000,
+      "net_price_factor": 0.65,
+      "peak_penetration": 0.35,
+      "pricing_rationale": "Casgevy WAC $2.2M; Lyfgenia $3.1M. Annual_eligible_cohort = steady-state demand after backlog cleared: ~5K severe SCD (HbSS) aged 12-35 meeting eligibility criteria per year. Peak penetration 35% reflects competition between gene therapies and next-gen hydroxyurea/voxelotor combinations."
+    },
+    "RSV in elderly/immunocompromised": {
+      "formula": "vaccine",
+      "target_population": 60000000,
+      "vaccination_rate": 0.65,
+      "doses_per_series": 1,
+      "price_per_dose_usd": 200,
+      "net_price_factor": 0.75,
+      "peak_penetration": 0.30,
+      "pricing_rationale": "Arexvy/Abrysvo WAC $200/dose. Novel longer-acting (2+ year) or combination RSV+influenza vaccine would target 60M adults 65+ in the US. Annual booster fraction (~50%) drives recurring revenue."
+    },
+    "Sepsis (AI early detection)": {
+      "formula": "device",
+      "target_facilities": 5800,
+      "adoption_rate": 0.65,
+      "annual_contract_per_facility_usd": 300000,
+      "peak_penetration": 0.40,
+      "pricing_rationale": "Hospital AI subscription benchmark: Epic-integrated monitoring ~$200-500K/yr per facility. 5,800 US hospitals with ICU. Premium positioning requires demonstrated mortality reduction vs Epic Sepsis Model baseline."
+    },
+    "NASH/MASH": {
+      "formula": "drug_prevalence",
+      "prevalent_patients": 3000000,
+      "diagnosis_rate": 0.35,
+      "treatment_rate": 0.55,
+      "novel_eligible_fraction": 0.65,
+      "price_per_year_usd": 50000,
+      "net_price_factor": 0.65,
+      "peak_penetration": 0.20,
+      "pricing_rationale": "Rezdiffra WAC $47,400/yr. Novel_eligible = 65% of diagnosed+treated patients not on or inadequately responding to resmetirom. 35% formal diagnosis rate reflects NASH underdiagnosis (most detected incidentally via elevated ALT)."
+    },
+    "Prostate Cancer (PSMA-targeted)": {
+      "formula": "drug_incidence",
+      "annual_incidence": 80000,
+      "treatment_rate": 0.85,
+      "novel_eligible_fraction": 0.55,
+      "price_per_course_usd": 180000,
+      "net_price_factor": 0.65,
+      "peak_penetration": 0.30,
+      "pricing_rationale": "Pluvicto (lutetium PSMA-617) WAC $174K/course. Annual_incidence = mCRPC new cases/yr. 55% PSMA-positive and eligible for novel PSMA-targeted ADC or combo vs Pluvicto alone."
+    },
+    "Bipolar Depression": {
+      "formula": "drug_prevalence",
+      "prevalent_patients": 5700000,
+      "diagnosis_rate": 0.55,
+      "treatment_rate": 0.65,
+      "novel_eligible_fraction": 0.30,
+      "price_per_year_usd": 15000,
+      "net_price_factor": 0.65,
+      "peak_penetration": 0.15,
+      "pricing_rationale": "Caplyta (lumateperone) WAC $15K/yr. 30% novel-eligible = those with treatment-resistant bipolar depression (inadequate on lithium + quetiapine + lamotrigine). Low penetration reflects crowded CNS market and long switching cycles."
+    },
+    "Rare Pediatric Epilepsy (SCN1A)": {
+      "formula": "drug_prevalence",
+      "prevalent_patients": 25000,
+      "diagnosis_rate": 0.80,
+      "treatment_rate": 0.78,
+      "novel_eligible_fraction": 0.60,
+      "price_per_year_usd": 180000,
+      "net_price_factor": 0.65,
+      "peak_penetration": 0.40,
+      "pricing_rationale": "Fintepla (fenfluramine) WAC $180K/yr. Novel SCN1A gene therapy or next-gen sodium channel modulator targets 60% who are inadequately controlled on fenfluramine + clobazam combination."
+    }
+  }
+}
