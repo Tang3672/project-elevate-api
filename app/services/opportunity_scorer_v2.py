@@ -22,12 +22,29 @@ Stewart 2001 / Alacrita / standard healthcare-IB practice.
 
 from __future__ import annotations
 import asyncio as _asyncio
+import json as _json
 import logging as _logging
 import math
+import pathlib as _pathlib
 import time as _time
 from typing import Optional
 
 import requests as _requests
+
+# ── GBD 2021 US DALYs — loaded once at import ────────────────────────────────
+_GBD_DATA_PATH = _pathlib.Path(__file__).parent.parent / "data" / "gbd_us_dalys.json"
+
+def _load_gbd() -> tuple[dict[str, int], dict[str, int]]:
+    try:
+        raw = _json.loads(_GBD_DATA_PATH.read_text())
+        disease_dalys = {k: v["us_dalys"] for k, v in raw["diseases"].items()}
+        ta_dalys = raw["ta_defaults"]
+        return disease_dalys, ta_dalys
+    except Exception as e:
+        _logging.getLogger(__name__).warning("GBD data file not loaded: %s", e)
+        return {}, {}
+
+_GBD_DISEASE_DALYS, _GBD_TA_DALYS = _load_gbd()
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -512,9 +529,11 @@ async def run_discovery_engine_v2(top_n: int = 25, funding_pathway: str = "comme
 
     async def score_one(opp):
         disease, ta, phase, approved, cost, notes = opp
-        _, pop, biomarker, modality, dalys = _DISEASE_OVERRIDES.get(
+        _, pop, biomarker, modality, _old_dalys = _DISEASE_OVERRIDES.get(
             disease, _TA_DEFAULTS.get(ta, _TA_DEFAULTS["other"])
         )
+        # GBD 2021 US DALYs — prefer file over old hardcoded estimates
+        dalys = _GBD_DISEASE_DALYS.get(disease) or _GBD_TA_DALYS.get(ta) or _old_dalys
         trials = await _fetch_live_trial_count(disease, ta)
         try:
             r = await score_opportunity_v2(

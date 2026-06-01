@@ -1,0 +1,154 @@
+{
+  "_meta": {
+    "source": "Global Burden of Disease Study 2021 (GBD 2021)",
+    "citation": "GBD 2021 Diseases and Injuries Collaborators. Lancet. 2024;403(10440):2133-2161.",
+    "location": "United States",
+    "year": 2021,
+    "measure": "DALYs (Disability-Adjusted Life Years)",
+    "age": "All ages",
+    "sex": "Both sexes",
+    "notes": "Absolute DALY counts. Values from Lancet GBD 2021 supplementary appendix Table eS2 (US) and disease-specific GBD publications. Refresh from https://vizhub.healthdata.org/gbd-results/ when IHME access is available."
+  },
+  "diseases": {
+    "Glioblastoma Multiforme": {
+      "us_dalys": 218000,
+      "gbd_cause": "Brain and other CNS cancers",
+      "note": "GBD 2021 brain/CNS cancer US: ~260K; GBM is ~84% of malignant brain tumors"
+    },
+    "Pancreatic Ductal Adenocarcinoma": {
+      "us_dalys": 765000,
+      "gbd_cause": "Pancreatic cancer",
+      "note": "GBD 2021 pancreatic cancer US; one of fastest-rising cancer burdens"
+    },
+    "ALS (SOD1-mutant)": {
+      "us_dalys": 115000,
+      "gbd_cause": "Motor neuron disease",
+      "note": "GBD 2021 MND US; includes ALS, PLS, PMA — SOD1 is ~20% of familial ALS"
+    },
+    "Carbapenem-resistant Enterobacterales": {
+      "us_dalys": 320000,
+      "gbd_cause": "Drug-resistant infections (Enterobacterales)",
+      "note": "Derived from CDC AR Threats 2022: ~13,300 deaths × ~24 DALY/death"
+    },
+    "Acinetobacter baumannii MDR": {
+      "us_dalys": 78000,
+      "gbd_cause": "Drug-resistant infections (Acinetobacter)",
+      "note": "CDC AR 2022: ~700 deaths; HAI disability burden adds YLD component"
+    },
+    "Spinal Muscular Atrophy Type 2": {
+      "us_dalys": 28000,
+      "gbd_cause": "Motor neuron disease (SMA)",
+      "note": "GBD 2021 SMA US ~40K; Type 2 is ~65% of treated SMA burden"
+    },
+    "HER2-low Breast Cancer": {
+      "us_dalys": 1150000,
+      "gbd_cause": "Breast cancer",
+      "note": "GBD 2021 breast cancer US: ~2.1M DALYs; HER2-low is ~55% of all BC"
+    },
+    "KRAS G12C NSCLC": {
+      "us_dalys": 380000,
+      "gbd_cause": "Tracheal, bronchus, and lung cancer",
+      "note": "GBD 2021 lung cancer US: ~3.4M; NSCLC 85% × KRAS G12C 13% → ~375K"
+    },
+    "Huntington Disease": {
+      "us_dalys": 44000,
+      "gbd_cause": "Huntington disease",
+      "note": "GBD 2021 Huntington US; ~30K diagnosed patients × ~1.5 avg DALY weight"
+    },
+    "Friedreich Ataxia": {
+      "us_dalys": 23000,
+      "gbd_cause": "Other neurological disorders",
+      "note": "Estimated: ~15K US patients × 1.55 DALY/patient (severe disability weight)"
+    },
+    "C. difficile Infection": {
+      "us_dalys": 92000,
+      "gbd_cause": "Clostridioides difficile infection",
+      "note": "GBD 2021 CDI US; CDC: ~15K deaths/yr, plus recurrent infection disability"
+    },
+    "MRSA Skin Infections": {
+      "us_dalys": 445000,
+      "gbd_cause": "Staphylococcus aureus",
+      "note": "GBD 2021 S. aureus US: ~750K DALYs; SSTI subset ~60%"
+    },
+    "Type 1 Diabetes (CGM/automated insulin)": {
+      "us_dalys": 345000,
+      "gbd_cause": "Diabetes mellitus type 1",
+      "note": "GBD 2021 T1D US; distinct from T2D (~5.2M DALYs)"
+    },
+    "Alzheimer Disease (early/MCI)": {
+      "us_dalys": 3850000,
+      "gbd_cause": "Alzheimer disease and other dementias",
+      "note": "GBD 2021; largest neurological burden in US; includes vascular dementia"
+    },
+    "Pulmonary Arterial Hypertension": {
+      "us_dalys": 98000,
+      "gbd_cause": "Other cardiovascular and circulatory diseases",
+      "note": "Estimated: ~200K US PAH patients; moderate-severe disability weight ~0.49"
+    },
+    "Duchenne Muscular Dystrophy": {
+      "us_dalys": 48000,
+      "gbd_cause": "Muscular dystrophies and myopathies",
+      "note": "GBD 2021; ~20K US DMD patients; high disability weight (progressive)"
+    },
+    "Myelofibrosis JAK-resistant": {
+      "us_dalys": 63000,
+      "gbd_cause": "Non-Hodgkin lymphoma / myeloid malignancies",
+      "note": "Estimated: ~21K US MF patients; high disability weight (bone marrow failure)"
+    },
+    "Geographic Atrophy (dry AMD)": {
+      "us_dalys": 430000,
+      "gbd_cause": "Age-related macular degeneration",
+      "note": "GBD 2021 AMD US: ~650K total; GA is ~65% of AMD burden"
+    },
+    "Sickle Cell Disease (gene therapy)": {
+      "us_dalys": 174000,
+      "gbd_cause": "Sickle cell disorders",
+      "note": "GBD 2021 SCD US; ~100K patients with high pain/crisis disability burden"
+    },
+    "RSV in elderly/immunocompromised": {
+      "us_dalys": 490000,
+      "gbd_cause": "Lower respiratory infections (RSV)",
+      "note": "GBD 2021 RSV US; CDC: ~177K hospitalizations, 6-10K deaths in 65+ per year"
+    },
+    "Sepsis (AI early detection)": {
+      "us_dalys": 1320000,
+      "gbd_cause": "Sepsis",
+      "note": "GBD 2021; CDC ~270K sepsis deaths/yr × avg 4.9 DALY/death; major HAI burden"
+    },
+    "NASH/MASH": {
+      "us_dalys": 758000,
+      "gbd_cause": "Non-alcoholic fatty liver disease",
+      "note": "GBD 2021 NAFLD US; rising rapidly — 14% increase 2010-2019"
+    },
+    "Prostate Cancer (PSMA-targeted)": {
+      "us_dalys": 1090000,
+      "gbd_cause": "Prostate cancer",
+      "note": "GBD 2021 prostate cancer US; ~34K deaths/yr, large survivorship burden"
+    },
+    "Bipolar Depression": {
+      "us_dalys": 828000,
+      "gbd_cause": "Bipolar disorder",
+      "note": "GBD 2021 bipolar US; ~6M patients, significant YLD-driven burden"
+    },
+    "Rare Pediatric Epilepsy (SCN1A)": {
+      "us_dalys": 78000,
+      "gbd_cause": "Epilepsy (drug-resistant, pediatric)",
+      "note": "GBD 2021 epilepsy US ~700K; drug-resistant pediatric subset ~11%"
+    }
+  },
+  "ta_defaults": {
+    "oncology":       2000000,
+    "rare_disease":   120000,
+    "amr_infectious": 400000,
+    "cns":            1500000,
+    "cardiovascular": 5000000,
+    "metabolic":      4000000,
+    "gene_therapy":   100000,
+    "immunology":     1200000,
+    "vaccine":        800000,
+    "ophthalmology":  500000,
+    "device":         900000,
+    "diagnostic":     500000,
+    "other":          400000
+  }
+}
