@@ -520,6 +520,97 @@ async def _fetch_live_trial_count(disease: str, ta: str) -> int:
     return fallback
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# LIVE APPROVAL COUNT — openFDA drug label API with 24h in-memory cache
+# ──────────────────────────────────────────────────────────────────────────────
+
+_APPROVAL_COUNT_CACHE: dict[str, tuple[int, float]] = {}
+
+# For these diseases the indication text is too broad (all NSCLC drugs get counted
+# for a KRAS G12C-specific opportunity, etc.). Keep the curated static value.
+_FDA_USE_STATIC: frozenset[str] = frozenset({
+    "KRAS G12C NSCLC",                        # "non-small cell lung cancer" → 64 drugs (all NSCLC)
+    "HER2-low Breast Cancer",                 # "HER2" → 40 drugs (all HER2+ drugs)
+    "Prostate Cancer (PSMA-targeted)",        # "prostate cancer" → 41 drugs
+    "Type 1 Diabetes (CGM/automated insulin)", # "type 1 diabetes" → 37 (all insulins)
+    "Bipolar Depression",                      # "bipolar" → 36 (all mood stabilizers)
+    "Sepsis (AI early detection)",             # device/diagnostic; drug count irrelevant
+    "Carbapenem-resistant Enterobacterales",  # FDA labels lack phrase; newer drugs absent
+    "Acinetobacter baumannii MDR",            # "acinetobacter" → 35 (old broad-spectrum ABx)
+})
+
+# Map disease names to the indication phrase used in FDA drug labels.
+_FDA_INDICATION_ALIASES: dict[str, str] = {
+    "Huntington Disease":                    "chorea",
+    "Alzheimer Disease (early/MCI)":         "Alzheimer's",
+    "Friedreich Ataxia":                     "friedreich's",
+    "ALS (SOD1-mutant)":                     "amyotrophic lateral sclerosis",
+    "Spinal Muscular Atrophy Type 2":        "spinal muscular atrophy",
+    "Duchenne Muscular Dystrophy":           "duchenne",
+    "Sickle Cell Disease (gene therapy)":   "sickle cell",
+    "Glioblastoma Multiforme":              "glioblastoma",
+    "Pancreatic Ductal Adenocarcinoma":     "pancreatic cancer",
+    "Myelofibrosis JAK-resistant":          "myelofibrosis",
+    "Carbapenem-resistant Enterobacterales": "carbapenem-resistant Enterobacteriaceae",
+    "Acinetobacter baumannii MDR":          "acinetobacter baumannii",
+    "C. difficile Infection":               "Clostridioides difficile",
+    "MRSA Skin Infections":                 "MRSA",
+    "Geographic Atrophy (dry AMD)":         "geographic atrophy",
+    "NASH/MASH":                            "nonalcoholic steatohepatitis",
+    "Pulmonary Arterial Hypertension":      "pulmonary arterial hypertension",
+    "RSV in elderly/immunocompromised":     "respiratory syncytial virus",
+    "Rare Pediatric Epilepsy (SCN1A)":      "Dravet syndrome",
+    "Prostate Cancer (PSMA-targeted)":      "prostate cancer",
+}
+
+
+async def _fetch_live_approval_count(disease: str, static_fallback: int) -> int:
+    """
+    Count distinct approved drugs for this indication via the openFDA drug label API.
+    Skips diseases where the indication text is too broad for meaningful counting.
+    Caches results 24h. Falls back to static_fallback on error or skip.
+    """
+    if disease in _FDA_USE_STATIC:
+        return static_fallback
+
+    now = _time.monotonic()
+    cached = _APPROVAL_COUNT_CACHE.get(disease)
+    if cached and (now - cached[1]) < _CACHE_TTL:
+        return cached[0]
+
+    indication = _FDA_INDICATION_ALIASES.get(disease, disease)
+
+    def _sync_fetch() -> int:
+        r = _requests.get(
+            "https://api.fda.gov/drug/label.json",
+            params={
+                "search": f'indications_and_usage:"{indication}"',
+                "count": "openfda.generic_name.exact",
+                "limit": "100",
+            },
+            timeout=8.0,
+        )
+        r.raise_for_status()
+        results = r.json().get("results", [])
+        # Cap at 20 — scoring model only distinguishes 0/1/2-3/4-6/7+ tiers
+        return min(len(results), 20)
+
+    try:
+        loop = _asyncio.get_event_loop()
+        count = await loop.run_in_executor(None, _sync_fetch)
+        # If FDA returns 0 it usually means the search term needs refinement — keep static
+        if count == 0:
+            count = static_fallback
+        _APPROVAL_COUNT_CACHE[disease] = (count, now)
+        _logger.debug("FDA approvals '%s' → %d", disease, count)
+        return count
+    except Exception as e:
+        _logger.warning("FDA approval fetch failed for '%s', using static: %s", disease, e)
+
+    _APPROVAL_COUNT_CACHE[disease] = (static_fallback, now)
+    return static_fallback
+
+
 async def run_discovery_engine_v2(top_n: int = 25, funding_pathway: str = "commercial"):
     """
     Score the curated OPPORTUNITY_UNIVERSE (imported from v1) through the v2 engine.
@@ -534,7 +625,11 @@ async def run_discovery_engine_v2(top_n: int = 25, funding_pathway: str = "comme
         )
         # GBD 2021 US DALYs — prefer file over old hardcoded estimates
         dalys = _GBD_DISEASE_DALYS.get(disease) or _GBD_TA_DALYS.get(ta) or _old_dalys
-        trials = await _fetch_live_trial_count(disease, ta)
+        # Fetch live data in parallel
+        trials, approved = await _asyncio.gather(
+            _fetch_live_trial_count(disease, ta),
+            _fetch_live_approval_count(disease, approved),
+        )
         try:
             r = await score_opportunity_v2(
                 disease_name=disease,
