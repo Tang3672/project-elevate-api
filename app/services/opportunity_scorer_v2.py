@@ -46,6 +46,21 @@ def _load_gbd() -> tuple[dict[str, int], dict[str, int]]:
 
 _GBD_DISEASE_DALYS, _GBD_TA_DALYS = _load_gbd()
 
+# ── US Prevalence — loaded once at import ────────────────────────────────────
+_PREVALENCE_DATA_PATH = _pathlib.Path(__file__).parent.parent / "data" / "us_prevalence.json"
+
+def _load_prevalence() -> tuple[dict[str, int], dict[str, int]]:
+    try:
+        raw = _json.loads(_PREVALENCE_DATA_PATH.read_text())
+        disease_pop = {k: v["us_population"] for k, v in raw["diseases"].items()}
+        ta_pop = raw["ta_defaults"]
+        return disease_pop, ta_pop
+    except Exception as e:
+        _logging.getLogger(__name__).warning("Prevalence data file not loaded: %s", e)
+        return {}, {}
+
+_PREVALENCE_DISEASE, _PREVALENCE_TA = _load_prevalence()
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # PTRS TABLES — phase transition probabilities by therapeutic area
@@ -623,8 +638,10 @@ async def run_discovery_engine_v2(top_n: int = 25, funding_pathway: str = "comme
         _, pop, biomarker, modality, _old_dalys = _DISEASE_OVERRIDES.get(
             disease, _TA_DEFAULTS.get(ta, _TA_DEFAULTS["other"])
         )
-        # GBD 2021 US DALYs — prefer file over old hardcoded estimates
+        # GBD 2021 US DALYs — prefer data file over old hardcoded estimates
         dalys = _GBD_DISEASE_DALYS.get(disease) or _GBD_TA_DALYS.get(ta) or _old_dalys
+        # Real US prevalence — prefer data file over old hardcoded estimates
+        pop = _PREVALENCE_DISEASE.get(disease) or _PREVALENCE_TA.get(ta) or pop
         # Fetch live data in parallel
         trials, approved = await _asyncio.gather(
             _fetch_live_trial_count(disease, ta),

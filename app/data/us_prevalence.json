@@ -1,0 +1,157 @@
+{
+  "_meta": {
+    "notes": "US patient population (prevalent/annual treated) for each disease in OPPORTUNITY_UNIVERSE. For acute/infectious diseases this is annual incidence (= annual treatment population). For chronic diseases this is point prevalence. Sources listed per entry. Refresh annually — these change slowly.",
+    "sources": [
+      "NCI SEER Cancer Statistics, November 2024 submission",
+      "CDC AR Threats Report 2022",
+      "Alzheimer's Association Facts & Figures 2023",
+      "ALS Association Epidemiology Report 2023",
+      "NORD Rare Disease Database",
+      "American Diabetes Association Statistics 2023",
+      "Crohn's & Colitis Foundation, NAMI, MPN Research Foundation disease reports",
+      "CDC National Center for Health Statistics"
+    ]
+  },
+  "diseases": {
+    "Glioblastoma Multiforme": {
+      "us_population": 15000,
+      "measure": "prevalence",
+      "note": "NCI SEER: ~13,500 new GBM cases/yr; median survival ~15 months → ~15-17K prevalent"
+    },
+    "Pancreatic Ductal Adenocarcinoma": {
+      "us_population": 65000,
+      "measure": "prevalence",
+      "note": "NCI SEER 2024: ~64,500 new pancreatic cancer cases/yr; ~95% are PDAC; median survival ~12 months"
+    },
+    "ALS (SOD1-mutant)": {
+      "us_population": 32000,
+      "measure": "prevalence",
+      "note": "ALS Association 2023: ~32,000 US ALS patients. SOD1 is ~2% of familial ALS but therapy targets all progressive ALS"
+    },
+    "Carbapenem-resistant Enterobacterales": {
+      "us_population": 900000,
+      "measure": "annual_incidence",
+      "note": "CDC AR Threats 2022: ~900,000 CRE infections/yr in US healthcare settings"
+    },
+    "Acinetobacter baumannii MDR": {
+      "us_population": 8500,
+      "measure": "annual_incidence",
+      "note": "CDC AR Threats 2022: ~8,500 MDR A. baumannii infections/yr; ~700 attributable deaths"
+    },
+    "Spinal Muscular Atrophy Type 2": {
+      "us_population": 9000,
+      "measure": "prevalence",
+      "note": "Cure SMA: ~10,000-14,000 US SMA patients (all types); Type 2 ~65% of treated burden → ~9,000"
+    },
+    "HER2-low Breast Cancer": {
+      "us_population": 185000,
+      "measure": "annual_incidence",
+      "note": "NCI SEER: ~315,000 new BC/yr; HER2-low defined as IHC 1+ or 2+/ISH-negative → ~55-60% → ~185,000 new HER2-low cases/yr"
+    },
+    "KRAS G12C NSCLC": {
+      "us_population": 55000,
+      "measure": "prevalent_on_treatment",
+      "note": "NSCLC incidence ~200,000/yr; KRAS G12C ~13% → ~26,000 new/yr; 2-yr treatment window → ~52,000 prevalent"
+    },
+    "Huntington Disease": {
+      "us_population": 35000,
+      "measure": "prevalence",
+      "note": "HDSA 2022: ~30,000 symptomatic US HD patients; ~200,000 at 50% genetic risk"
+    },
+    "Friedreich Ataxia": {
+      "us_population": 15000,
+      "measure": "prevalence",
+      "note": "NORD / FARA: ~1 in 50,000 US prevalence → ~6,600; broader estimates 15,000 including undiagnosed"
+    },
+    "C. difficile Infection": {
+      "us_population": 462000,
+      "measure": "annual_incidence",
+      "note": "CDC 2021: ~462,000 CDI cases/yr in US; ~30,000 deaths; recurrence rate ~20%"
+    },
+    "MRSA Skin Infections": {
+      "us_population": 870000,
+      "measure": "annual_incidence",
+      "note": "CDC AR Threats 2022: ~119,000 invasive MRSA + ~750,000 community SSTI/yr; outpatient SSTI dominates"
+    },
+    "Type 1 Diabetes (CGM/automated insulin)": {
+      "us_population": 1900000,
+      "measure": "prevalence",
+      "note": "ADA 2023: ~1.9M US T1D patients; distinct from T2D (~37M). CGM penetration ~50% and rising"
+    },
+    "Alzheimer Disease (early/MCI)": {
+      "us_population": 6700000,
+      "measure": "prevalence",
+      "note": "Alzheimer's Association Facts & Figures 2023: 6.7M Americans 65+ with Alzheimer's/dementia"
+    },
+    "Pulmonary Arterial Hypertension": {
+      "us_population": 200000,
+      "measure": "prevalence",
+      "note": "AHA/WHO: PAH prevalence ~15-52/million → ~200,000 US; distinct from broader PH (~3M)"
+    },
+    "Duchenne Muscular Dystrophy": {
+      "us_population": 21000,
+      "measure": "prevalence",
+      "note": "Parent Project MD / CDC: ~20,000-23,000 US DMD patients; almost exclusively male"
+    },
+    "Myelofibrosis JAK-resistant": {
+      "us_population": 21000,
+      "measure": "prevalence",
+      "note": "MPN Research Foundation: ~21,000 US MF patients total; JAK-resistant subset ~8,000-10,000 (key commercial target)"
+    },
+    "Geographic Atrophy (dry AMD)": {
+      "us_population": 1200000,
+      "measure": "prevalence",
+      "note": "AMD Alliance / Apellis Pharma: ~8M US AMD patients; GA (advanced dry AMD) ~1-1.5M requiring treatment"
+    },
+    "Sickle Cell Disease (gene therapy)": {
+      "us_population": 100000,
+      "measure": "prevalence",
+      "note": "CDC: ~100,000 Americans with SCD; gene therapy target is severe SCD (HbSS) ~75,000"
+    },
+    "RSV in elderly/immunocompromised": {
+      "us_population": 1500000,
+      "measure": "annual_incidence",
+      "note": "CDC: ~177,000 RSV hospitalizations + ~6-10K deaths in adults 65+/yr; ~1.5M symptomatic cases annually"
+    },
+    "Sepsis (AI early detection)": {
+      "us_population": 1700000,
+      "measure": "annual_incidence",
+      "note": "CDC: ~1.7M sepsis cases/yr in US hospitals; ~270,000 deaths. AI detection targets all hospitalized sepsis"
+    },
+    "NASH/MASH": {
+      "us_population": 3000000,
+      "measure": "prevalence",
+      "note": "Clin Liver Dis 2021 / Madrigal data: ~16M US NASH; clinically significant (F2-F4 fibrosis, drug-eligible) ~3M"
+    },
+    "Prostate Cancer (PSMA-targeted)": {
+      "us_population": 350000,
+      "measure": "prevalence",
+      "note": "NCI SEER: ~3.1M prostate cancer survivors; mCRPC (PSMA-targeted opportunity) ~300,000-400,000"
+    },
+    "Bipolar Depression": {
+      "us_population": 5700000,
+      "measure": "prevalence",
+      "note": "NAMI 2023: ~5.7M US adults with bipolar disorder; bipolar depression (depressive phase) ~4M at any time"
+    },
+    "Rare Pediatric Epilepsy (SCN1A)": {
+      "us_population": 25000,
+      "measure": "prevalence",
+      "note": "Dravet Syndrome Foundation: ~20,000-25,000 US Dravet/SCN1A patients; broader drug-resistant pediatric epilepsy ~50,000"
+    }
+  },
+  "ta_defaults": {
+    "oncology":       200000,
+    "rare_disease":   20000,
+    "amr_infectious": 150000,
+    "cns":            500000,
+    "cardiovascular": 800000,
+    "metabolic":      2000000,
+    "gene_therapy":   50000,
+    "immunology":     600000,
+    "vaccine":        1000000,
+    "ophthalmology":  400000,
+    "device":         700000,
+    "diagnostic":     500000,
+    "other":          200000
+  }
+}
