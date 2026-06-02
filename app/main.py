@@ -9,6 +9,7 @@ from app.api.features import trial_router, portfolio_router, grant_router
 from app.api.billing import router as billing_router
 from app.api.tracker import router as tracker_router
 from app.api.etl import router as etl_router
+from app.api.timeline import router as timeline_router
 from app.db.database import init_db
 from app.db.demand_repository import ensure_demand_signals_table
 from app.core.config import settings
@@ -98,7 +99,8 @@ app.include_router(trial_router,     prefix="/api/v1", tags=["clinical-roadmap"]
 app.include_router(portfolio_router, prefix="/api/v1", tags=["portfolio"])
 app.include_router(grant_router,     prefix="/api/v1", tags=["grant"])
 app.include_router(billing_router,   prefix="/api/v1", tags=["billing"])
-app.include_router(etl_router,       prefix="/api/v1/etl", tags=["etl"])
+app.include_router(etl_router,       prefix="/api/v1/etl",      tags=["etl"])
+app.include_router(timeline_router,  prefix="/api/v1/timeline", tags=["timeline"])
 app.include_router(tracker_router,   prefix="/api/v1", tags=["tracker"])
 
 @app.get("/health")
