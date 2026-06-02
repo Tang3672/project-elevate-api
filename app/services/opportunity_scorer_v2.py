@@ -290,9 +290,11 @@ def probability_score(
     loa = min(loa, 0.78)   # nothing is certain; cap stacked multipliers
     ptrs_pct = round(loa * 100, 1)
 
-    # Map cumulative LOA → 0..100 sub-score. LOA of ~0.5 (a strong Phase 3) ≈ 85.
-    # Use a curve that rewards high PoS without making early-stage assets worthless.
-    score = 100.0 * (loa ** 0.62)   # gentler: 0.04→15, 0.16→33, 0.25→43, 0.49→63, 0.78→85
+    # Log-scaled curve: spreads the 6–78% LOA range across the full 0-100 band.
+    # k=99 chosen so targets hit: 0.07→42, 0.15→60, 0.30→75, 0.50→85, 0.78→95.
+    # Normalization denominator is log1p(1.0 * 99) so loa=1.0 would → 100.
+    _LOG_K = 99.0
+    score = min(100.0, 100.0 * math.log1p(loa * _LOG_K) / math.log1p(_LOG_K))
     return _clamp(score), {"ptrs_pct": ptrs_pct, "loa": round(loa, 4)}
 
 
@@ -360,14 +362,11 @@ def value_score(
 
     market = _normalize_log(peak_sales * durability, 35_000_000_000)  # $35B peak ~ ceiling (Keytruda-scale)
 
-    # New-entrant crowding haircut: a huge market you can't capture is low VALUE.
-    # Two independent signals (approved drugs, pipeline density) combine multiplicatively
-    # so a market that is BOTH well-served AND crowded (GLP-1) is hit hardest.
-    appr_factor = max(0.30, 1.0 - approved_treatments_count * 0.11)   # 5 approved -> 0.45
-    trial_factor = 1.0
-    if competitor_trial_count > 10:
-        trial_factor = max(0.30, 1.0 - (competitor_trial_count - 10) * 0.011)  # 60 -> 0.45
-    crowd = appr_factor * trial_factor
+    # Market captureability haircut — only approvals matter here; trial count
+    # competition is already captured in opportunity_score (don't double-penalize).
+    # Many trials = validated market; fewer approvals = more room to capture share.
+    appr_factor = max(0.40, 1.0 - approved_treatments_count * 0.08)  # 8 approved → 0.40
+    crowd = appr_factor
     market = market * crowd
 
     # Exclusivity premium
@@ -384,16 +383,65 @@ def value_score(
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# SUB-SCORE D: INNOVATION  (first-in-class / biomarker / regulatory designation)
+# ──────────────────────────────────────────────────────────────────────────────
+def innovation_score(
+    *,
+    is_first_in_class: bool = False,
+    has_biomarker: bool = False,
+    designations: Optional[list] = None,
+) -> tuple[float, dict]:
+    """
+    0..100 innovation premium.
+    - First-in-class / novel unvalidated target: +40 pts (BIO: FIC drugs have ~2× LOA)
+    - Patient-selection biomarker present: +25 pts (BIO: 3× LOA improvement)
+    - Regulatory designation uplift: +10 pts each (Orphan, Breakthrough, QIDP, Fast Track), capped at 30
+    """
+    designations_raw = [d.lower() for d in (designations or [])]
+    # Normalize designation strings to canonical tokens
+    _DESIG_MAP = {
+        "breakthrough therapy": "breakthrough", "breakthrough designation": "breakthrough",
+        "fast track designation": "fast track", "fast-track": "fast track",
+        "orphan drug designation": "orphan", "orphan drug": "orphan",
+        "accelerated approval": "accelerated", "priority review designation": "priority review",
+        "qualified infectious disease product": "qidp",
+        "regenerative medicine advanced therapy": "rmat",
+    }
+    designations = [_DESIG_MAP.get(d, d) for d in designations_raw]
+    _COUNTED_DESIGNATIONS = {"orphan", "breakthrough", "qidp", "fast track", "rmat",
+                              "accelerated", "priority review"}
+
+    pts = 0.0
+    if is_first_in_class:
+        pts += 40.0
+    if has_biomarker:
+        pts += 25.0
+    desig_count = sum(1 for d in designations if d in _COUNTED_DESIGNATIONS)
+    pts += min(30.0, desig_count * 10.0)
+
+    score = _clamp(min(pts, 100.0))
+    return score, {
+        "first_in_class": is_first_in_class,
+        "biomarker_uplift": has_biomarker,
+        "designation_count": desig_count,
+    }
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # MAIN ENTRY — geometric combination
 # ──────────────────────────────────────────────────────────────────────────────
-_W_OPP, _W_PROB, _W_VAL = 0.35, 0.40, 0.25
+# Weights: Opportunity^0.35 × Probability^0.28 × Value^0.25 × Innovation^0.12
+# Probability weight reduced from 0.40 → 0.28 to avoid dragging all scores down
+# at realistic LOA of 6.7-15%.  Innovation added as the 4th factor.
+_W_OPP, _W_PROB, _W_VAL, _W_INN = 0.35, 0.28, 0.25, 0.12
 
 
 def _tier(score: float) -> tuple[str, str]:
-    if score >= 70:  return "EXCEPTIONAL", "#059669"
-    if score >= 55:  return "HIGH", "#0891b2"
-    if score >= 40:  return "MODERATE", "#d97706"
-    if score >= 25:  return "LOW", "#dc2626"
+    # Thresholds calibrated to the geometric formula's natural output range.
+    if score >= 68:  return "EXCEPTIONAL", "#059669"
+    if score >= 52:  return "HIGH", "#0891b2"
+    if score >= 36:  return "MODERATE", "#d97706"
+    if score >= 20:  return "LOW", "#dc2626"
     return "VERY LOW", "#991b1b"
 
 
@@ -414,6 +462,7 @@ async def score_opportunity_v2(
     nih_funding_density: Optional[float] = None,
     overlapping_grants: Optional[int] = None,
     tam_peak_revenue: Optional[float] = None,
+    is_first_in_class: bool = False,
 ) -> dict:
     opp, opp_b = opportunity_score(
         approved_treatments_count=approved_treatments_count,
@@ -441,18 +490,19 @@ async def score_opportunity_v2(
         approved_treatments_count=approved_treatments_count,
         tam_peak_revenue=tam_peak_revenue,
     )
+    inn, inn_b = innovation_score(
+        is_first_in_class=is_first_in_class,
+        has_biomarker=has_biomarker,
+        designations=designations,
+    )
 
     # Geometric combination — a near-zero in any factor crushes the score.
-    score_raw = (opp ** _W_OPP) * (prob ** _W_PROB) * (val ** _W_VAL)
-    # score_raw is already on a 0..100-ish scale because each factor is 0..100
-    # and weights sum to 1. Light normalization to use the full range.
+    # Innovation floored at 1 so diseases with no innovation signal don't zero out.
+    score_raw = (opp ** _W_OPP) * (prob ** _W_PROB) * (val ** _W_VAL) * (max(inn, 1.0) ** _W_INN)
     score_display = _clamp(score_raw)
 
     tier, color = _tier(score_display)
 
-    # Confidence band — width from input uncertainty + forecast error.
-    # Wider when we had to assume DALYs/biomarker/etc. Base ±18%, +error.
-    assumed = sum([dalys is None, not has_biomarker is True and not has_biomarker is False])
     band = 0.18 + (0.05 if dalys is None else 0.0)
     lo = round(max(1, score_display * (1 - band)), 1)
     hi = round(min(99, score_display * (1 + band)), 1)
@@ -468,13 +518,21 @@ async def score_opportunity_v2(
         "confidence_low": lo,
         "confidence_high": hi,
         "funding_pathway": funding_pathway,
+        "us_patient_population": us_patient_population,
+        "annual_cost_usd": annual_treatment_cost_usd,
         "subscores": {
             "opportunity": round(opp, 1),
             "probability": round(prob, 1),
             "value": round(val, 1),
+            "innovation": round(inn, 1),
         },
-        "components": {**opp_b, **prob_b, **val_b},
-        "weights": {"opportunity": _W_OPP, "probability": _W_PROB, "value": _W_VAL},
+        "components": {**opp_b, **prob_b, **val_b, **inn_b},
+        "weights": {
+            "opportunity": _W_OPP,
+            "probability": _W_PROB,
+            "value": _W_VAL,
+            "innovation": _W_INN,
+        },
     }
 
 
@@ -724,10 +782,16 @@ async def _fetch_live_approval_count(disease: str, static_fallback: int) -> int:
 
 async def run_discovery_engine_v2(top_n: int = 25, funding_pathway: str = "commercial"):
     """
-    Score the curated OPPORTUNITY_UNIVERSE (imported from v1) through the v2 engine.
+    Score the full disease universe through the v2 engine.
+    Universe comes from universe_builder (500+ diseases); falls back to the v1
+    OPPORTUNITY_UNIVERSE if the builder import fails (backward compatibility).
     Returns the same dict shape the frontend expects, with v2 subscores in components.
     """
-    from app.services.opportunity_scorer import OPPORTUNITY_UNIVERSE
+    try:
+        from app.services.universe_builder import get_universe
+        OPPORTUNITY_UNIVERSE = get_universe()
+    except Exception:
+        from app.services.opportunity_scorer import OPPORTUNITY_UNIVERSE
 
     async def score_one(opp):
         disease, ta, phase, approved, cost, notes = opp
@@ -739,8 +803,13 @@ async def run_discovery_engine_v2(top_n: int = 25, funding_pathway: str = "comme
         if dalys is None:
             dalys = _old_dalys  # last resort: hardcoded estimate from _DISEASE_OVERRIDES
             daly_source = "hardcoded"
-        # Real US prevalence — prefer data file over old hardcoded estimates
-        pop = _PREVALENCE_DISEASE.get(disease) or _PREVALENCE_TA.get(ta) or pop
+        # Real US prevalence: universe_builder per-disease dict → static file → TA default
+        try:
+            from app.services.universe_builder import get_disease_population
+            known_pop = get_disease_population(disease)
+        except Exception:
+            known_pop = None
+        pop = known_pop or _PREVALENCE_DISEASE.get(disease) or _PREVALENCE_TA.get(ta) or pop
         # Bottom-up TAM from disease-specific expert parameters
         from app.services.tam_calculator import calculate_tam, format_tam
         tam = calculate_tam(disease, fallback_population=pop, fallback_price=cost)
@@ -751,6 +820,8 @@ async def run_discovery_engine_v2(top_n: int = 25, funding_pathway: str = "comme
             _fetch_live_approval_count(disease, approved),
         )
         try:
+            # Infer first-in-class: no approved therapies AND early/no validated target signal
+            first_in_class = (approved == 0 and phase in ("preclinical", "phase1", "phase2"))
             r = await score_opportunity_v2(
                 disease_name=disease,
                 therapeutic_area=ta,
@@ -765,6 +836,7 @@ async def run_discovery_engine_v2(top_n: int = 25, funding_pathway: str = "comme
                 funding_pathway=funding_pathway,
                 dalys=dalys if dalys and dalys > 0 else None,
                 tam_peak_revenue=tam["peak_revenue_usd"] if tam else None,
+                is_first_in_class=first_in_class,
             )
             r["daly_source"] = daly_source
             # TAM fields for the frontend
@@ -783,6 +855,7 @@ async def run_discovery_engine_v2(top_n: int = 25, funding_pathway: str = "comme
                 "opportunity": s["opportunity"],
                 "probability": s["probability"],
                 "value": s["value"],
+                "innovation": s.get("innovation", 0),
             }
             return r
         except Exception as e:
@@ -793,17 +866,31 @@ async def run_discovery_engine_v2(top_n: int = 25, funding_pathway: str = "comme
     results = await _asyncio.gather(*[score_one(o) for o in OPPORTUNITY_UNIVERSE])
     scored = [r for r in results if r is not None]
 
-    # Soft population floor: diseases with <30k US patients get a market-size
-    # penalty that prevents them from dominating the top-N list. They still
-    # appear but score realistically relative to larger-market opportunities.
-    _POP_FLOOR = 30_000
+    # Market-size scaling: prevent ultra-rare diseases from dominating the
+    # leaderboard on innovation+unmet-need alone. Tiered penalty by patient count:
+    #   >500k: 1.00×  (large markets, no penalty)
+    #   100k-500k: 0.92×  (mid markets, slight haircut)
+    #   30k-100k: 0.78×
+    #   10k-30k: 0.60×
+    #   3k-10k: 0.45×
+    #   <3k: 0.32×   (ultra-orphan, still visible but ranked realistically)
+    def _pop_scale(pop: int) -> float:
+        if pop >= 500_000: return 1.00
+        if pop >= 100_000: return 0.92
+        if pop >=  30_000: return 0.78
+        if pop >=  10_000: return 0.60
+        if pop >=   3_000: return 0.45
+        return 0.32
+
     for r in scored:
         pop_val = r.get("us_patient_population") or 0
-        if 0 < pop_val < _POP_FLOOR:
-            penalty = 0.75 + 0.25 * (pop_val / _POP_FLOOR)  # 0.75→1.0 as pop grows
-            r["score"] = round(r["score"] * penalty, 1)
-            r["score_raw"] = round(r.get("score_raw", r["score"]) * penalty, 2)
+        scale = _pop_scale(pop_val)
+        if scale < 1.0:
+            r["score"]     = round(r["score"] * scale, 1)
+            r["score_raw"] = round(r.get("score_raw", r["score"]) * scale, 2)
             r["rare_disease_penalty"] = True
+        # Re-tier after scaling
+        r["tier"], r["tier_color"] = _tier(r["score"])
 
     scored.sort(key=lambda x: x["score"], reverse=True)
     # Add rank field
