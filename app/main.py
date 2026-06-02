@@ -8,6 +8,7 @@ from app.api.watchlist import router as watchlist_router, admin_router as watchl
 from app.api.features import trial_router, portfolio_router, grant_router
 from app.api.billing import router as billing_router
 from app.api.tracker import router as tracker_router
+from app.api.etl import router as etl_router
 from app.db.database import init_db
 from app.db.demand_repository import ensure_demand_signals_table
 from app.core.config import settings
@@ -39,6 +40,12 @@ async def startup():
     # Canonical entity tables (MONDO/RxNorm/WHO GHO backbone)
     from app.db.schema_ontology import init_ontology_tables
     await init_ontology_tables()
+    # LOA success-rate priors (BIO 2021 + Wong 2019)
+    from app.db.schema_priors import init_priors_tables
+    await init_priors_tables()
+    # Disease aggregate table
+    from app.db.disease_aggregate import ensure_aggregate_table
+    await ensure_aggregate_table()
 
     # Start the ingestion scheduler if enabled
     if settings.ENABLE_SCHEDULER:
@@ -74,6 +81,7 @@ app.include_router(trial_router,     prefix="/api/v1", tags=["clinical-roadmap"]
 app.include_router(portfolio_router, prefix="/api/v1", tags=["portfolio"])
 app.include_router(grant_router,     prefix="/api/v1", tags=["grant"])
 app.include_router(billing_router,   prefix="/api/v1", tags=["billing"])
+app.include_router(etl_router,       prefix="/api/v1/etl", tags=["etl"])
 app.include_router(tracker_router,   prefix="/api/v1", tags=["tracker"])
 
 @app.get("/health")

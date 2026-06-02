@@ -46,6 +46,26 @@ def init_scheduler():
         misfire_grace_time=3600,
     )
 
+    # ── Weekly Sunday 2am: canonical data pipeline (FDA/NIH/WHO GHO/OpenAlex) ─
+    scheduler.add_job(
+        _run_weekly_canonical,
+        CronTrigger(day_of_week="sun", hour=2, minute=0),
+        id="weekly_canonical",
+        name="Weekly canonical ETL (FDA approvals, NIH grants, WHO GHO, OpenAlex, Open Targets)",
+        replace_existing=True,
+        misfire_grace_time=7200,
+    )
+
+    # ── Monthly 1st 3am: ontology refresh ────────────────────────────────────
+    scheduler.add_job(
+        _run_monthly_ontology,
+        CronTrigger(day=1, hour=3, minute=0),
+        id="monthly_ontology",
+        name="Monthly MONDO + RxNorm ontology refresh",
+        replace_existing=True,
+        misfire_grace_time=14400,
+    )
+
     # ── Monthly: safety and quality signals ──────────────────────────────────
     scheduler.add_job(
         _run_monthly_safety,
@@ -95,6 +115,19 @@ async def _run_monthly_safety():
         "cms_hospital_quality",
         "hrsa_shortage",
     ])
+
+
+async def _run_weekly_canonical():
+    logger.info("⏰ Running weekly canonical ETL pipeline")
+    from app.ingestion.etl_orchestrator import run_weekly_etl
+    from app.core.config import settings
+    await run_weekly_etl(api_key_fda=getattr(settings, "FDA_API_KEY", ""))
+
+
+async def _run_monthly_ontology():
+    logger.info("⏰ Running monthly ontology refresh")
+    from app.ingestion.etl_orchestrator import run_ontology_etl
+    await run_ontology_etl(bulk=False)
 
 
 async def _run_quarterly_baseline():
