@@ -320,6 +320,47 @@ async def score_custom_opportunity(
 
 
 
+@router.post("/competitive-sweep")
+async def competitive_sweep(
+    body: dict,
+    current_user = Depends(get_current_user),
+):
+    """
+    Sweep openFDA, ClinicalTrials.gov, and OpenAlex for named competitors.
+    Returns structured competitive landscape: named products, advantages,
+    white space gaps, and differentiation levers.
+    """
+    import asyncio
+    from app.services.competitor_sweep_service import sweep_competitors, to_dict
+
+    disease    = body.get("disease_name", body.get("idea", "")[:80])
+    keywords   = body.get("keywords", [])
+    ta         = body.get("therapeutic_area", "other")
+    pt         = body.get("product_type", "drug_small_molecule")
+
+    if not disease:
+        raise HTTPException(status_code=400, detail="disease_name or idea required")
+
+    if not keywords:
+        keywords = [w for w in disease.split() if len(w) > 4][:5]
+
+    try:
+        loop = asyncio.get_event_loop()
+        landscape = await loop.run_in_executor(
+            None,
+            lambda: sweep_competitors(
+                disease_name=disease,
+                indication_keywords=keywords,
+                therapeutic_area=ta,
+                product_type=pt,
+            )
+        )
+        return to_dict(landscape)
+    except Exception as e:
+        logger.error("Competitive sweep failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/clarify")
 async def generate_clarifying_questions(
     body: dict,
@@ -336,9 +377,31 @@ async def generate_clarifying_questions(
     idea = body.get("idea", "")
     pathway = body.get("pathway", "commercial")
     product_type = body.get("product_type", "")
+    disease_hint = body.get("disease_name", "")
 
     if not idea or len(idea) < 20:
         raise HTTPException(status_code=400, detail="Idea too short")
+
+    # Run live competitive sweep in parallel so the questions can reference real named competitors
+    competitive_context = ""
+    try:
+        import asyncio
+        from app.services.competitor_sweep_service import sweep_competitors, format_for_prompt
+        # Extract keywords from idea + disease hint
+        keywords = [w for w in (disease_hint or idea).split() if len(w) > 4][:4]
+        loop = asyncio.get_event_loop()
+        landscape = await loop.run_in_executor(
+            None,
+            lambda: sweep_competitors(
+                disease_name=disease_hint or idea[:60],
+                indication_keywords=keywords,
+                therapeutic_area="other",
+            )
+        )
+        if landscape.competitors:
+            competitive_context = format_for_prompt(landscape)
+    except Exception as ce:
+        logger.warning("Competitor sweep for clarify failed: %s", ce)
 
     pathway_context = {
         "commercial": "a commercial product seeking go-to-market strategy (TAM/SAM, FDA pathway, buyers, pricing, competitive landscape)",
@@ -351,15 +414,19 @@ async def generate_clarifying_questions(
 "{idea}"
 
 Product type: {product_type}
+{competitive_context}
 
-Generate 5-8 specific clarifying questions that would make the resulting intelligence report dramatically more accurate and useful. The questions should fill in gaps in the description that matter for {pathway} analysis.
+Generate 5-8 specific clarifying questions that would make the resulting intelligence report dramatically more accurate and useful. The questions should fill in gaps that matter for {pathway} analysis.
 
 Rules:
 - Questions must be SPECIFIC to this innovation, not generic
-- For commercial/SBIR: ask about target patient population, development stage, differentiation, existing competition the user knows about, pricing assumptions
-- For basic_science: ask about the scientific gap, mechanism novelty, prior work, what funded grants might overlap
-- Each question should be answerable in 1-2 sentences
-- Provide a short helpful placeholder/hint for each
+- If competitor data is shown above, ask at least 2 questions about SPECIFIC named competitors:
+  e.g. "How does your mechanism differ from [CompetitorDrug]'s approach to [mechanism]?"
+  e.g. "What advantages do you have over [CompetitorDrug] for [PatientSegment]?"
+- Ask about competitive white space identified above — what unmet need you capture that competitors miss
+- For commercial/SBIR: ask about patient population, development stage, differentiation vs named competitors, pricing
+- For basic_science: ask about scientific gap, mechanism novelty, prior work, funded grant overlap
+- Each question answerable in 1-2 sentences; provide a helpful placeholder/hint
 
 Return ONLY a JSON array, no other text:
 [{{"question": "...", "hint": "...", "field": "short_snake_case_key"}}]"""
