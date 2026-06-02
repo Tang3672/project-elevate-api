@@ -863,6 +863,7 @@ def compute_market_size(
         "bass": {
             "p": round(p, 4), "q": round(q, 4),
             "total_market_penetration_y5": round(bass_total_y5, 3),
+            "capturable_y5": round(combined_penetration, 3),   # alias for scorer compatibility
             "peak_adoption_year": round(t_peak_bass, 1),
         },
         "ucrcd": ucrcd_meta,

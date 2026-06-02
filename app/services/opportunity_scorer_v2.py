@@ -890,16 +890,21 @@ async def run_discovery_engine_v2(top_n: int = 25, funding_pathway: str = "comme
                 r["tam_formula"]       = tam["formula"]
                 r["pricing_rationale"] = tam.get("pricing_rationale", "")
                 # Engine-specific enrichment (always from new engine)
-                r["market_sizing"]     = {
-                    "dot_years":         engine_tam["dot"]["years"],
-                    "dot_category":      engine_tam["dot"]["category"],
-                    "bass_penetration_y5": engine_tam["bass"]["capturable_y5"],
-                    "peak_adoption_year":engine_tam["bass"]["peak_adoption_year"],
-                    "diagnostic_yield":  engine_tam["cascade"]["diagnostic_yield"],
-                    "eligible_patients": engine_tam["cascade"]["eligible"],
-                    "net_price_pct_wac": engine_tam["pricing"]["gross_to_net_pct"],
-                    "bia_concern":       engine_tam["bia"]["affordability_concern"],
-                    "bia_dampening":     engine_tam["bia"]["revenue_dampening"],
+                bass_meta = engine_tam.get("bass", {})
+                r["market_sizing"] = {
+                    "dot_years":         engine_tam.get("dot", {}).get("years", 5.0),
+                    "dot_category":      engine_tam.get("dot", {}).get("category", "chronic"),
+                    "bass_penetration_y5": (
+                        bass_meta.get("capturable_y5")
+                        or engine_tam.get("combined_penetration")
+                        or bass_meta.get("total_market_penetration_y5", 0.1)
+                    ),
+                    "peak_adoption_year":bass_meta.get("peak_adoption_year", 5.0),
+                    "diagnostic_yield":  engine_tam.get("cascade", {}).get("diagnostic_yield", 0.65),
+                    "eligible_patients": engine_tam.get("cascade", {}).get("eligible", pop),
+                    "net_price_pct_wac": engine_tam.get("pricing", {}).get("gross_to_net_pct", 0.65),
+                    "bia_concern":       engine_tam.get("bia", {}).get("affordability_concern", False),
+                    "bia_dampening":     engine_tam.get("bia", {}).get("revenue_dampening", 1.0),
                 }
             # Flatten subscores into components for the existing frontend bars
             r["notes"] = notes
