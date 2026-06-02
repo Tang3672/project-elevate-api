@@ -7,6 +7,10 @@
     "measure": "DALYs (Disability-Adjusted Life Years)",
     "age": "All ages",
     "sex": "Both sexes",
+    "commercial_use_restricted": true,
+    "license": "IHME Free-of-Charge Non-Commercial User Agreement — NOT for use in commercial product without a paid IHME license. R&D/prototyping only.",
+    "license_url": "https://www.healthdata.org/data-tools-practices/data-access/ihme-free-charge-non-commercial-user-agreement",
+    "replace_with": "WHO GHO OData API (ghoapi.azureedge.net) or CDC WONDER for commercial-safe burden.",
     "notes": "Absolute DALY counts. Values from Lancet GBD 2021 supplementary appendix Table eS2 (US) and disease-specific GBD publications. Refresh from https://vizhub.healthdata.org/gbd-results/ when IHME access is available."
   },
   "diseases": {

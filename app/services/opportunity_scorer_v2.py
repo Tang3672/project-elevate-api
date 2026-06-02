@@ -31,20 +31,82 @@ from typing import Optional
 
 import requests as _requests
 
-# ── GBD 2021 US DALYs — loaded once at import ────────────────────────────────
+# ── GBD 2021 US DALYs — R&D/prototyping ONLY (non-commercial license) ────────
+# LICENSE: IHME Free-of-Charge Non-Commercial User Agreement.
+# DO NOT use _GBD_DISEASE_DALYS in production commercial queries.
+# Use _get_commercial_safe_dalys() instead (WHO GHO → falls back to GBD dev-only).
 _GBD_DATA_PATH = _pathlib.Path(__file__).parent.parent / "data" / "gbd_us_dalys.json"
 
-def _load_gbd() -> tuple[dict[str, int], dict[str, int]]:
+def _load_gbd() -> tuple[dict[str, int], dict[str, int], bool]:
+    """Returns (disease_dalys, ta_dalys, commercial_restricted)."""
     try:
         raw = _json.loads(_GBD_DATA_PATH.read_text())
+        restricted = raw.get("_meta", {}).get("commercial_use_restricted", True)
         disease_dalys = {k: v["us_dalys"] for k, v in raw["diseases"].items()}
         ta_dalys = raw["ta_defaults"]
-        return disease_dalys, ta_dalys
+        return disease_dalys, ta_dalys, restricted
     except Exception as e:
         _logging.getLogger(__name__).warning("GBD data file not loaded: %s", e)
-        return {}, {}
+        return {}, {}, True
 
-_GBD_DISEASE_DALYS, _GBD_TA_DALYS = _load_gbd()
+_GBD_DISEASE_DALYS, _GBD_TA_DALYS, _GBD_COMMERCIAL_RESTRICTED = _load_gbd()
+
+# WHO GHO DALY cache — populated lazily from DB (commercial_safe=TRUE)
+_WHO_DALY_CACHE: dict[str, float] = {}
+
+
+async def _get_commercial_safe_dalys(disease: str, ta: str) -> tuple[float | None, str]:
+    """
+    Return (daly_value, source_label) using only commercially-safe sources.
+    Priority: WHO GHO (DB cache) → WHO GHO (live API) → GBD (dev-only, flagged).
+    Never returns GBD data without a warning in production.
+    """
+    # 1. Check in-memory WHO GHO cache first
+    if disease in _WHO_DALY_CACHE:
+        return _WHO_DALY_CACHE[disease], "who_gho"
+
+    # 2. Try DB (disease_burden table, commercial_safe=TRUE)
+    try:
+        from app.db.database import get_pool
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT value FROM disease_burden
+                WHERE disease_label  = $1
+                  AND source_name    = 'who_gho'
+                  AND metric         = 'dalys_absolute'
+                  AND location       = 'United States'
+                  AND commercial_safe = TRUE
+                ORDER BY year DESC LIMIT 1
+            """, disease)
+            if row:
+                val = float(row["value"])
+                _WHO_DALY_CACHE[disease] = val
+                return val, "who_gho"
+    except Exception:
+        pass  # DB not available in test environments
+
+    # 3. Live WHO GHO fetch (commercial-safe)
+    try:
+        from app.ingestion.connectors.who_gho import get_us_dalys
+        val = await get_us_dalys(disease)
+        if val is not None:
+            _WHO_DALY_CACHE[disease] = val
+            return val, "who_gho"
+    except Exception:
+        pass
+
+    # 4. GBD fallback — R&D/prototyping only; log warning so it's visible
+    gbd_val = _GBD_DISEASE_DALYS.get(disease) or _GBD_TA_DALYS.get(ta)
+    if gbd_val:
+        if _GBD_COMMERCIAL_RESTRICTED:
+            _logging.getLogger(__name__).warning(
+                "DALY source: GBD (NON-COMMERCIAL) for '%s' — replace with WHO GHO before monetizing",
+                disease
+            )
+        return float(gbd_val), "gbd_rdonly"
+
+    return None, "none"
 
 # ── US Prevalence — loaded once at import ────────────────────────────────────
 _PREVALENCE_DATA_PATH = _pathlib.Path(__file__).parent.parent / "data" / "us_prevalence.json"
@@ -644,8 +706,11 @@ async def run_discovery_engine_v2(top_n: int = 25, funding_pathway: str = "comme
         _, pop, biomarker, modality, _old_dalys = _DISEASE_OVERRIDES.get(
             disease, _TA_DEFAULTS.get(ta, _TA_DEFAULTS["other"])
         )
-        # GBD 2021 US DALYs — prefer data file over old hardcoded estimates
-        dalys = _GBD_DISEASE_DALYS.get(disease) or _GBD_TA_DALYS.get(ta) or _old_dalys
+        # DALYs — commercial-safe first (WHO GHO/DB), GBD only as R&D fallback
+        dalys, daly_source = await _get_commercial_safe_dalys(disease, ta)
+        if dalys is None:
+            dalys = _old_dalys  # last resort: hardcoded estimate from _DISEASE_OVERRIDES
+            daly_source = "hardcoded"
         # Real US prevalence — prefer data file over old hardcoded estimates
         pop = _PREVALENCE_DISEASE.get(disease) or _PREVALENCE_TA.get(ta) or pop
         # Bottom-up TAM from disease-specific expert parameters
@@ -670,9 +735,10 @@ async def run_discovery_engine_v2(top_n: int = 25, funding_pathway: str = "comme
                 has_biomarker=biomarker,
                 modality=modality,
                 funding_pathway=funding_pathway,
-                dalys=dalys if dalys > 0 else None,
+                dalys=dalys if dalys and dalys > 0 else None,
                 tam_peak_revenue=tam["peak_revenue_usd"] if tam else None,
             )
+            r["daly_source"] = daly_source
             # TAM fields for the frontend
             if tam:
                 r["us_tam_usd"]       = round(tam["us_tam_usd"])

@@ -28,7 +28,6 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup():
-    # Initialize DB tables (hospital_needs from Step 1, demand_signals new)
     await init_db()
     await ensure_demand_signals_table()
     from app.db.user_repository import init_user_tables
@@ -37,6 +36,9 @@ async def startup():
     await init_watchlist_tables()
     from app.services.pi_memory_service import init_pi_memory_table
     await init_pi_memory_table()
+    # Canonical entity tables (MONDO/RxNorm/WHO GHO backbone)
+    from app.db.schema_ontology import init_ontology_tables
+    await init_ontology_tables()
 
     # Start the ingestion scheduler if enabled
     if settings.ENABLE_SCHEDULER:
