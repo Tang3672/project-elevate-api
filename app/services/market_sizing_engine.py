@@ -744,10 +744,13 @@ def compute_market_size(
         has_biomarker=has_biomarker,
     )
 
-    # Synthesise penetration: geometric mean of UCRCD + BLP
+    # Synthesise penetration: weighted geometric mean of UCRCD + BLP
     # UCRCD captures time dynamics; BLP captures patient heterogeneity.
-    # Combined penetration = weighted geometric mean (UCRCD 60%, BLP 40%)
-    combined_penetration = (ucrcd_share ** 0.60) * (blp_share ** 0.40)
+    # Clamp both to [0,1] — UCRCD ODE can return small negative values near t=0
+    ucrcd_share = max(0.0, min(1.0, ucrcd_share))
+    blp_share   = max(0.0, min(1.0, blp_share))
+    # Geometric mean requires positive base; floor at 0.001 to avoid 0^0.6 = 0
+    combined_penetration = (max(ucrcd_share, 0.001) ** 0.60) * (max(blp_share, 0.001) ** 0.40)
 
     # ── Stage 5: Pricing + BIA ────────────────────────────────────────────────
     net_price, gtn_pct = gross_to_net_price(wac_annual_usd, ta, has_orphan)
