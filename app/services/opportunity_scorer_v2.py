@@ -540,6 +540,7 @@ _logger = _logging.getLogger(__name__)
 # Disease names in OPPORTUNITY_UNIVERSE that don't match CT.gov search well —
 # map to a cleaner search term for the API query.
 _CT_SEARCH_ALIASES: dict[str, str] = {
+    # Original 25
     "ALS (SOD1-mutant)":                    "amyotrophic lateral sclerosis",
     "NASH/MASH":                            "nonalcoholic steatohepatitis",
     "Alzheimer Disease (early/MCI)":        "Alzheimer Disease",
@@ -558,6 +559,33 @@ _CT_SEARCH_ALIASES: dict[str, str] = {
     "Bipolar Depression":                   "bipolar disorder",
     "Rare Pediatric Epilepsy (SCN1A)":      "Dravet syndrome",
     "HER2-low Breast Cancer":              "HER2 breast cancer",
+    # New 26
+    "Heart Failure (HFpEF)":               "heart failure preserved ejection fraction",
+    "Type 2 Diabetes (GLP-1 resistant)":   "Type 2 Diabetes",
+    "Obesity (CNS/metabolic)":             "obesity",
+    "Lung Cancer (NSCLC, IO-resistant)":   "non-small cell lung cancer",
+    "Colorectal Cancer (MSS)":             "colorectal cancer",
+    "Multiple Myeloma (triple-refractory)": "multiple myeloma",
+    "Chronic Kidney Disease (DKD)":        "diabetic kidney disease",
+    "Atrial Fibrillation":                 "atrial fibrillation",
+    "Major Depression (TRD)":              "treatment-resistant depression",
+    "Schizophrenia":                       "schizophrenia",
+    "COPD (advanced emphysema)":           "COPD emphysema",
+    "Rheumatoid Arthritis (JAK-refractory)": "rheumatoid arthritis",
+    "Psoriasis / PsA (IL-17/23 refractory)": "psoriasis",
+    "Inflammatory Bowel Disease (UC/CD)":  "inflammatory bowel disease",
+    "Breast Cancer (HR+, CDK4/6 resistant)": "breast cancer CDK4",
+    "Ovarian Cancer (BRCA-wild type)":     "ovarian cancer",
+    "Wet AMD / Diabetic Macular Edema":    "macular degeneration",
+    "Asthma (severe eosinophilic)":        "severe asthma eosinophilic",
+    "Heart Failure (HFrEF, device-refractory)": "heart failure reduced ejection",
+    "Stroke (acute ischemic, neuroprotection)": "ischemic stroke",
+    "Parkinson Disease (early stage)":     "Parkinson disease",
+    "Multiple Sclerosis (progressive)":    "progressive multiple sclerosis",
+    "Influenza (universal vaccine)":       "influenza universal vaccine",
+    "HIV (long-acting ART / cure)":        "HIV long-acting",
+    "PTSD":                                "post-traumatic stress disorder",
+    "Opioid Use Disorder":                 "opioid use disorder",
 }
 
 
@@ -764,5 +792,21 @@ async def run_discovery_engine_v2(top_n: int = 25, funding_pathway: str = "comme
 
     results = await _asyncio.gather(*[score_one(o) for o in OPPORTUNITY_UNIVERSE])
     scored = [r for r in results if r is not None]
+
+    # Soft population floor: diseases with <30k US patients get a market-size
+    # penalty that prevents them from dominating the top-N list. They still
+    # appear but score realistically relative to larger-market opportunities.
+    _POP_FLOOR = 30_000
+    for r in scored:
+        pop_val = r.get("us_patient_population") or 0
+        if 0 < pop_val < _POP_FLOOR:
+            penalty = 0.75 + 0.25 * (pop_val / _POP_FLOOR)  # 0.75→1.0 as pop grows
+            r["score"] = round(r["score"] * penalty, 1)
+            r["score_raw"] = round(r.get("score_raw", r["score"]) * penalty, 2)
+            r["rare_disease_penalty"] = True
+
     scored.sort(key=lambda x: x["score"], reverse=True)
+    # Add rank field
+    for i, r in enumerate(scored, 1):
+        r["rank"] = i
     return scored[:top_n]
