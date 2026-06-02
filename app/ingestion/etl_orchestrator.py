@@ -93,12 +93,47 @@ async def run_weekly_etl(api_key_fda: str = "") -> dict:
     ok, _ = await _run_job("chembl_indications", load_chembl_indications())
     summary["chembl_indications"] = ok
 
-    # 7. Refresh aggregate table (must run last)
+    # 7. PubMed publication counts + 5-year trend
+    from app.ingestion.connectors.pubmed_canonical import load_pubmed_signals
+    ok, _ = await _run_job("pubmed_canonical", load_pubmed_signals())
+    summary["pubmed_canonical"] = ok
+
+    # 8. bioRxiv/medRxiv preprint pipeline signal
+    from app.ingestion.connectors.biorxiv import load_preprint_signals
+    ok, _ = await _run_job("biorxiv", load_preprint_signals())
+    summary["biorxiv"] = ok
+
+    # 9. CMS Medicare Part D drug spending (real pricing ground truth)
+    from app.ingestion.connectors.cms_spending import load_cms_drug_spending
+    ok, _ = await _run_job("cms_spending", load_cms_drug_spending())
+    summary["cms_spending"] = ok
+
+    # 10. PatentsView IP landscape
+    from app.ingestion.connectors.patents import load_patent_landscape
+    ok, _ = await _run_job("patents", load_patent_landscape())
+    summary["patents"] = ok
+
+    # 11. SEC EDGAR pipeline disclosures
+    from app.ingestion.connectors.sec_edgar import load_edgar_signals
+    ok, _ = await _run_job("sec_edgar", load_edgar_signals())
+    summary["sec_edgar"] = ok
+
+    # 12. RSS feeds (FDA, journals, STAT News, BioPharma Dive)
+    from app.ingestion.connectors.rss_feeds import load_rss_signals
+    ok, _ = await _run_job("rss_feeds", load_rss_signals())
+    summary["rss_feeds"] = ok
+
+    # 13. GDELT news signal (last — rate-limited, can fail without blocking)
+    from app.ingestion.connectors.gdelt import load_gdelt_signals
+    ok, _ = await _run_job("gdelt", load_gdelt_signals())
+    summary["gdelt"] = ok
+
+    # 14. Refresh aggregate table (must run last)
     from app.db.disease_aggregate import refresh_disease_aggregate
     ok, _ = await _run_job("disease_aggregate", refresh_disease_aggregate())
     summary["disease_aggregate"] = ok
 
-    # 8. Embed new publications (async — don't block weekly ETL)
+    # 15. Embed new publications (async — don't block weekly ETL)
     asyncio.create_task(_embed_new_publications())
 
     logger.info("=== Weekly ETL done: %s ===", summary)
