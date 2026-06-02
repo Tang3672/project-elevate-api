@@ -42,7 +42,13 @@ async def _run_job(name: str, coro) -> tuple[bool, str]:
     pool = await get_pool()
     try:
         result = await coro
-        rows = sum(result.values()) if isinstance(result, dict) else (result or 0)
+        if isinstance(result, dict):
+            # Values may be ints, floats, strings, or nested dicts — count safely
+            rows = sum(v for v in result.values() if isinstance(v, (int, float)))
+            if rows == 0:
+                rows = len(result)   # fall back to number of keys processed
+        else:
+            rows = int(result or 0)
         async with pool.acquire() as conn:
             await _log_run(conn, name, name, "completed",
                            fetched=rows, upserted=rows, started_at=started)
