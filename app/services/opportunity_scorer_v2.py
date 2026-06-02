@@ -810,18 +810,38 @@ async def run_discovery_engine_v2(top_n: int = 25, funding_pathway: str = "comme
         except Exception:
             known_pop = None
         pop = known_pop or _PREVALENCE_DISEASE.get(disease) or _PREVALENCE_TA.get(ta) or pop
-        # Bottom-up TAM from disease-specific expert parameters
+        # ── Market Sizing: 5-stage engine (Bass + BIA + DoT + Gross-to-Net) ──────
+        # 1. Try curated expert TAM first (tam_calculator.py)
         from app.services.tam_calculator import calculate_tam, format_tam
-        tam = calculate_tam(disease, fallback_population=pop, fallback_price=cost)
+        expert_tam = calculate_tam(disease, fallback_population=pop, fallback_price=cost)
 
         # Fetch live data in parallel
         trials, approved = await _asyncio.gather(
             _fetch_live_trial_count(disease, ta),
             _fetch_live_approval_count(disease, approved),
         )
+        first_in_class = (approved == 0 and phase in ("preclinical", "phase1", "phase2"))
+        desig = _phase_default_designations(ta, approved)
+
+        # 2. Always run the new engine — it enriches with Bass/DoT/BIA metadata
+        from app.services.market_sizing_engine import compute_market_size
+        engine_tam = compute_market_size(
+            disease_name=disease,
+            therapeutic_area=ta,
+            prevalent_patients=pop,
+            wac_annual_usd=cost,
+            approved_treatments_count=approved,
+            modality=modality,
+            designations=desig,
+            is_first_in_class=first_in_class,
+            has_biomarker=biomarker,
+            development_phase=phase,
+        )
+
+        # Expert TAM takes precedence for curated diseases; engine fills gaps
+        tam = expert_tam if expert_tam and expert_tam.get("formula") != "generic_fallback" else engine_tam
+
         try:
-            # Infer first-in-class: no approved therapies AND early/no validated target signal
-            first_in_class = (approved == 0 and phase in ("preclinical", "phase1", "phase2"))
             r = await score_opportunity_v2(
                 disease_name=disease,
                 therapeutic_area=ta,
@@ -830,7 +850,7 @@ async def run_discovery_engine_v2(top_n: int = 25, funding_pathway: str = "comme
                 competitor_trial_count=trials,
                 annual_treatment_cost_usd=cost,
                 us_patient_population=pop,
-                designations=_phase_default_designations(ta, approved),
+                designations=desig,
                 has_biomarker=biomarker,
                 modality=modality,
                 funding_pathway=funding_pathway,
@@ -841,12 +861,24 @@ async def run_discovery_engine_v2(top_n: int = 25, funding_pathway: str = "comme
             r["daly_source"] = daly_source
             # TAM fields for the frontend
             if tam:
-                r["us_tam_usd"]       = round(tam["us_tam_usd"])
-                r["peak_revenue_usd"] = round(tam["peak_revenue_usd"])
-                r["us_tam_fmt"]       = format_tam(tam["us_tam_usd"])
-                r["peak_revenue_fmt"] = format_tam(tam["peak_revenue_usd"])
-                r["tam_formula"]      = tam["formula"]
+                r["us_tam_usd"]        = round(tam["us_tam_usd"])
+                r["peak_revenue_usd"]  = round(tam["peak_revenue_usd"])
+                r["us_tam_fmt"]        = tam.get("us_tam_fmt") or format_tam(tam["us_tam_usd"])
+                r["peak_revenue_fmt"]  = tam.get("peak_revenue_fmt") or format_tam(tam["peak_revenue_usd"])
+                r["tam_formula"]       = tam["formula"]
                 r["pricing_rationale"] = tam.get("pricing_rationale", "")
+                # Engine-specific enrichment (always from new engine)
+                r["market_sizing"]     = {
+                    "dot_years":         engine_tam["dot"]["years"],
+                    "dot_category":      engine_tam["dot"]["category"],
+                    "bass_penetration_y5": engine_tam["bass"]["capturable_y5"],
+                    "peak_adoption_year":engine_tam["bass"]["peak_adoption_year"],
+                    "diagnostic_yield":  engine_tam["cascade"]["diagnostic_yield"],
+                    "eligible_patients": engine_tam["cascade"]["eligible"],
+                    "net_price_pct_wac": engine_tam["pricing"]["gross_to_net_pct"],
+                    "bia_concern":       engine_tam["bia"]["affordability_concern"],
+                    "bia_dampening":     engine_tam["bia"]["revenue_dampening"],
+                }
             # Flatten subscores into components for the existing frontend bars
             r["notes"] = notes
             r["phase"] = phase
