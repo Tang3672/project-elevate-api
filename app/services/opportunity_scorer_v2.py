@@ -649,16 +649,38 @@ _CT_SEARCH_ALIASES: dict[str, str] = {
 
 async def _fetch_live_trial_count(disease: str, ta: str) -> int:
     """
-    Query ClinicalTrials.gov v2 for the number of active/recruiting trials for
-    this condition. Results are cached for 24h. Falls back to the static
-    _DISEASE_OVERRIDES value on timeout or API error.
+    Query ClinicalTrials.gov v2 for active trial count.
+    Read order: L1 in-process cache → L2 DB disease_aggregate → live CT.gov API.
+    Results cached for 24h. Falls back to static value on error.
     """
     now = _time.monotonic()
+
+    # L1: in-process cache
     cached = _TRIAL_COUNT_CACHE.get(disease)
     if cached and (now - cached[1]) < _CACHE_TTL:
         return cached[0]
 
     fallback = _DISEASE_OVERRIDES.get(disease, _TA_DEFAULTS.get(ta, _TA_DEFAULTS["other"]))[0]
+
+    # L2: DB disease_aggregate (populated by cache_warmer on startup)
+    try:
+        from app.db.database import get_pool
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT competitor_trial_count FROM disease_aggregate "
+                "WHERE lower(disease_label)=lower($1) "
+                "  AND competitor_trial_count IS NOT NULL LIMIT 1",
+                disease,
+            )
+            if row and row["competitor_trial_count"] is not None:
+                count = int(row["competitor_trial_count"])
+                _TRIAL_COUNT_CACHE[disease] = (count, now)
+                return count
+    except Exception:
+        pass   # DB unavailable in test environments — fall through to live API
+
+    # L3: Live CT.gov API
     search_term = _CT_SEARCH_ALIASES.get(disease, disease)
 
     def _sync_fetch() -> int:

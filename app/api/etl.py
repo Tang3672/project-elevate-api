@@ -104,6 +104,36 @@ async def disease_aggregate_snapshot(disease: str = None):
             raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/warm-cache")
+async def trigger_cache_warm(background_tasks: BackgroundTasks, force: bool = False):
+    """Force-refresh the discovery cache (trial counts + approval counts)."""
+    async def _run():
+        from app.services.cache_warmer import warm_discovery_cache
+        result = await warm_discovery_cache(force_refresh=force)
+        logger.info("Manual cache warm: %s", result)
+    background_tasks.add_task(_run)
+    return {"status": "started", "force_refresh": force,
+            "note": "Check /etl/cache-status for progress"}
+
+
+@router.get("/cache-status")
+async def cache_status():
+    """Return current in-process discovery cache hit counts."""
+    try:
+        from app.services.opportunity_scorer_v2 import _TRIAL_COUNT_CACHE, _APPROVAL_COUNT_CACHE
+        from app.services.universe_builder import get_universe
+        universe_size = len(get_universe())
+        return {
+            "universe_size":        universe_size,
+            "trial_counts_cached":  len(_TRIAL_COUNT_CACHE),
+            "approval_counts_cached": len(_APPROVAL_COUNT_CACHE),
+            "trial_coverage_pct":   round(len(_TRIAL_COUNT_CACHE) / universe_size * 100, 1),
+            "ready":                len(_TRIAL_COUNT_CACHE) >= universe_size * 0.9,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/licenses")
 async def license_registry():
     """Return the source license register."""

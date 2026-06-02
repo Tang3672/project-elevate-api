@@ -47,10 +47,27 @@ async def startup():
     from app.db.disease_aggregate import ensure_aggregate_table
     await ensure_aggregate_table()
 
+    # Pre-warm discovery cache in background (non-blocking)
+    # Loads trial/approval counts from DB into L1 cache; fetches missing from APIs
+    import asyncio as _asyncio
+    _asyncio.create_task(_warm_cache_background())
+
     # Start the ingestion scheduler if enabled
     if settings.ENABLE_SCHEDULER:
         from app.scheduler.ingestion_scheduler import init_scheduler
         init_scheduler()
+
+
+async def _warm_cache_background():
+    """Background task: warm discovery cache without blocking startup."""
+    import logging
+    _log = logging.getLogger(__name__)
+    try:
+        from app.services.cache_warmer import warm_discovery_cache
+        result = await warm_discovery_cache()
+        _log.info("Discovery cache warm-up: %s", result)
+    except Exception as e:
+        _log.warning("Discovery cache warm-up failed (non-fatal): %s", e)
 
 @app.on_event("shutdown")
 async def shutdown():
