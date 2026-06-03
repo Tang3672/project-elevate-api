@@ -16,7 +16,7 @@ from app.core.config import settings
 
 app = FastAPI(
     title="Project Elevate API",
-    description="Healthcare innovation demand intelligence platform",
+    description="Medical market intelligence for tech transfer offices, health innovators, and researchers",
     version="0.2.0"
 )
 

@@ -541,7 +541,7 @@ async def generate_clarifying_questions(
 
     pathway_context = {
         "commercial": "a commercial product seeking go-to-market strategy (TAM/SAM, FDA pathway, buyers, pricing, competitive landscape)",
-        "sbir": "an SBIR/STTR grant application needing BOTH commercialization potential AND scientific significance",
+        "sbir": "an SBIR/STTR grant or licensing opportunity — needs both commercial market evidence and scientific significance for tech transfer or grant applications",
         "basic_science": "a basic science grant (NIH R01/R21) focused on significance, innovation, and scientific impact rather than commercial market",
     }.get(pathway, "a commercial product")
 
