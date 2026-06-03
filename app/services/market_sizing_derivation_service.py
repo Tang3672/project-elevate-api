@@ -247,7 +247,11 @@ def _derive_pharma_formula(
     epi   = _TA_EAPI_DEFAULTS_FOR_TA(therapeutic_area)
     price = _get_price_benchmark(archetype, idea, disease_name)
 
-    n_prev      = us_prev or epi["prev"]
+    # Use the disease-specific population if provided; otherwise fall back to TA default.
+    # The TA default is a LAST RESORT — it is very coarse and should only be used when
+    # no disease-specific data is available. The calling code (alignment_service.py)
+    # performs a 3-level lookup to provide the most accurate n_prev possible.
+    n_prev      = us_prev if us_prev and us_prev > 0 else epi["prev"]
     diag_yield  = epi["diag_yield"]
     treat_rate  = epi["treat_rate"]
     wac         = price["wac"]
@@ -258,19 +262,51 @@ def _derive_pharma_formula(
     n_diagnosed  = int(n_prev * diag_yield)
     n_eligible   = int(n_diagnosed * treat_rate)
 
-    # TAM = annual revenue at 100% capture
-    if dot < 1.0:   # acute drug: per-course pricing
+    # TAM calculation — uses the annual-cohort model for one-time therapies
+    # (gene therapy) to avoid multiplying the entire prevalent population by
+    # a very high per-treatment price, which inflates TAM by 10-100×.
+    if archetype == "gene_cell_therapy" or dot >= 15.0:
+        # One-time treatment: size by annual new eligible patients (cohort model)
+        # Annual cohort ≈ eligible_prevalent / expected benefit years
+        annual_cohort = max(1, n_eligible / max(1.0, dot))
+        tam = annual_cohort * net_price
+    elif dot < 1.0:
+        # Acute episodic therapy: revenue = per-episode price
         tam = n_eligible * net_price
-    else:            # chronic: annual price × DoT
+    else:
+        # Chronic maintenance: annual revenue stream
         tam = n_eligible * net_price
 
-    # Bass diffusion penetration at Year 5 (BIO-calibrated)
-    p, q = 0.020, 0.250   # pharma defaults
+    # Sanity cap: no single innovation can realistically address >$200B US market.
+    # If the formula produces > $200B, it almost certainly means the population
+    # input was too broad (TA default used instead of disease-specific).
+    _TAM_CAP = 200_000_000_000  # $200B
+    if tam > _TAM_CAP:
+        logger.warning(
+            "TAM cap triggered for '%s': computed $%.0fB > $200B cap. "
+            "Population input n_prev=%d may be a TA-level default, not disease-specific. "
+            "Capping at $200B — refinement required.",
+            disease_name, tam / 1e9, n_prev
+        )
+        scale = _TAM_CAP / tam
+        tam = _TAM_CAP
+        n_eligible = int(n_eligible * scale)
+
+    # Bass diffusion penetration at Year 5 (TA-calibrated p,q parameters)
+    _BASS_TA = {
+        "amr_infectious": (0.010, 0.080), "oncology": (0.030, 0.350),
+        "rare_disease": (0.018, 0.150), "gene_therapy": (0.015, 0.120),
+        "cns": (0.020, 0.220), "cardiovascular": (0.015, 0.280),
+        "metabolic": (0.028, 0.400), "immunology": (0.022, 0.320),
+        "ophthalmology": (0.018, 0.250), "vaccine": (0.020, 0.300),
+    }
+    p, q = _BASS_TA.get(therapeutic_area.lower(), (0.020, 0.250))
     bass_y5 = (1 - math.exp(-(p+q)*5)) / (1 + (q/p)*math.exp(-(p+q)*5))
     sam = tam * bass_y5
 
-    # SOM = realistic Year 5 share with BLP order-of-entry discount (3rd entrant ≈ 25%)
-    entry_share = 0.35   # assume 2nd-3rd entrant in competitive market
+    # SOM = realistic Year 5 share from BLP order-of-entry simulation
+    # First-in-class: 55-70%; 2nd entrant: 35-45%; 3rd+ entrant: 20-35%
+    entry_share = 0.60 if "first" in idea.lower() or "novel" in idea.lower() else 0.35
     som = sam * entry_share
 
     steps = [
@@ -589,9 +625,21 @@ def format_derivation_for_prompt(deriv: MarketSizingDerivation) -> str:
         f"",
         f"Confidence: {deriv.confidence_note}",
         f"",
-        f"INSTRUCTION FOR THE AI: In the Market Sizing chapter, reproduce EVERY step above. "
-        f"Do not summarise. Explain each formula component in 2-3 sentences citing the specific paper. "
-        f"State exactly where each number came from and why it was chosen for this specific innovation. "
-        f"Show the arithmetic explicitly. Flag any assumption that is particularly uncertain and explain why.",
+        f"=== MANDATORY MARKET SIZING NUMBERS — USE THESE EXACTLY ===",
+        f"TAM (Total Addressable Market): {deriv.tam_fmt}",
+        f"SAM (Serviceable Addressable Market): {deriv.sam_fmt}",
+        f"SOM (Serviceable Obtainable Market): {deriv.som_fmt}",
+        f"",
+        f"CRITICAL: These are the ONLY acceptable TAM/SAM/SOM numbers for this report.",
+        f"Do NOT compute your own figures. Do NOT use different estimates.",
+        f"Every mention of TAM/SAM/SOM in your output MUST match the values above exactly.",
+        f"",
+        f"INSTRUCTION FOR THE MARKET SIZING CHAPTER:",
+        f"- State TAM = {deriv.tam_fmt} as the headline. SAM = {deriv.sam_fmt}. SOM = {deriv.som_fmt}.",
+        f"- For each derivation step: explain WHY that specific value applies to THIS innovation",
+        f"  (not generic — connect each parameter to the specific disease and product characteristics)",
+        f"- Show arithmetic explicitly (e.g. '2,160 patients × $1.87M one-time = $4.0B TAM')",
+        f"- Explain why the Bass diffusion p,q parameters were chosen for this TA",
+        f"- Flag any step where the input data is uncertain and explain the uncertainty range",
     ]
     return "\n".join(lines)

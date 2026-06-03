@@ -665,23 +665,66 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
         from app.services.market_sizing_derivation_service import (
             generate_market_sizing_derivation, format_derivation_for_prompt
         )
+
+        # ── Accurate population lookup (3-level cascade) ──────────────────────
+        # Level 1: DISEASE_POPULATIONS dict — curated per-disease values
+        # Level 2: universe_builder match → TA-specific override
+        # Level 3: expert-domain TA default (last resort)
         us_pop = 0
+        ta_for_deriv = "other"
         try:
-            from app.services.universe_builder import get_universe
-            for d, ta, ph, appr, cost, notes in get_universe():
-                if disease_name and disease_name.lower() in d.lower():
-                    from app.services.opportunity_scorer_v2 import _TA_DEFAULTS
-                    _, pop, _, _, _ = _TA_DEFAULTS.get(ta, _TA_DEFAULTS["other"])
+            from app.services.universe_builder import get_universe, DISEASE_POPULATIONS, get_disease_population
+
+            # Level 1: exact match in curated population dict
+            for key, pop in DISEASE_POPULATIONS.items():
+                if disease_name and (disease_name.lower() in key.lower() or key.lower() in disease_name.lower()):
                     us_pop = pop
                     break
-        except Exception:
-            pass
+
+            # Level 2: scan universe for TA + TA-level default
+            from app.services.opportunity_scorer_v2 import _TA_DEFAULTS, _DISEASE_OVERRIDES
+            for d_entry, ta_entry, *rest in get_universe():
+                if disease_name and (disease_name.lower() in d_entry.lower() or d_entry.lower() in disease_name.lower()):
+                    ta_for_deriv = ta_entry
+                    if not us_pop:
+                        # Disease-specific override has better population data than TA default
+                        override = _DISEASE_OVERRIDES.get(d_entry)
+                        if override:
+                            us_pop = override[1]  # pop is index 1 in _DISEASE_OVERRIDES tuples
+                        else:
+                            _, pop, _, _, _ = _TA_DEFAULTS.get(ta_entry, _TA_DEFAULTS["other"])
+                            us_pop = pop
+                    break
+
+            # Level 3: map expert domain_id to TA if still no match
+            if not ta_for_deriv or ta_for_deriv == "other":
+                _EXPERT_TA_MAP = {
+                    "drug_amr": "amr_infectious", "drug_amr_antibiotics": "amr_infectious",
+                    "drug_oncology": "oncology", "biologic_oncology": "oncology",
+                    "drug_cns": "cns", "drug_mental_health": "cns",
+                    "drug_cardiology": "cardiovascular", "drug_metabolic": "metabolic",
+                    "drug_rare_disease": "rare_disease", "biologic_rare_disease": "rare_disease",
+                    "gene_therapy_rare": "gene_therapy", "gene_therapy_oncology": "oncology",
+                    "gene_therapy_hematology": "hematology", "gene_therapy_cns": "cns",
+                    "biologic_immunology": "immunology", "biologic_hematology": "hematology",
+                    "device_cardiovascular": "cardiovascular", "device_metabolic": "metabolic",
+                    "diagnostic_molecular": "diagnostic",
+                    "digital_cds": "device", "digital_therapeutic": "device",
+                    "vaccine_prophylactic": "vaccine",
+                }
+                expert_domain = getattr(expert, "domain_id", getattr(expert, "sub_expert_id", "other"))
+                ta_for_deriv = _EXPERT_TA_MAP.get(expert_domain, "other")
+                if not us_pop:
+                    _, pop, _, _, _ = _TA_DEFAULTS.get(ta_for_deriv, _TA_DEFAULTS["other"])
+                    us_pop = pop
+        except Exception as e_pop:
+            logger.debug("Population lookup failed: %s", e_pop)
 
         deriv = generate_market_sizing_derivation(
             idea=idea,
             product_type=product_type,
             disease_name=disease_name,
-            therapeutic_area=getattr(expert, "domain_id", "other"),
+            therapeutic_area=ta_for_deriv,
             us_patient_population=us_pop,
         )
         market_derivation_text = format_derivation_for_prompt(deriv)
