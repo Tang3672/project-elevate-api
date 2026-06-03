@@ -552,20 +552,36 @@ async def generate_clarifying_questions(
 Product type: {product_type}
 {competitive_context}
 
-Generate 5-8 specific clarifying questions that would make the resulting intelligence report dramatically more accurate and useful. The questions should fill in gaps that matter for {pathway} analysis.
+Your job is to generate 7 highly specific clarifying questions that will make the market sizing formula uniquely accurate for THIS specific innovation.
+
+The questions must directly determine the formula parameters:
+  - Patient population (N_prev, diagnostic yield, treatment eligibility)
+  - Pricing (WAC benchmark, gross-to-net ratio, pricing model)
+  - Workflow integration (adoption barriers, standard of care)
+  - Market topology (who buys, how, through what channel)
+  - Differentiation (vs. specific named competitors)
+  - Development stage (what data exists)
+  - Reimbursement pathway (CPT code, payer type, coverage precedent)
 
 Rules:
-- Questions must be SPECIFIC to this innovation, not generic
-- If competitor data is shown above, ask at least 2 questions about SPECIFIC named competitors:
-  e.g. "How does your mechanism differ from [CompetitorDrug]'s approach to [mechanism]?"
-  e.g. "What advantages do you have over [CompetitorDrug] for [PatientSegment]?"
-- Ask about competitive white space identified above — what unmet need you capture that competitors miss
-- For commercial/SBIR: ask about patient population, development stage, differentiation vs named competitors, pricing
-- For basic_science: ask about scientific gap, mechanism novelty, prior work, funded grant overlap
-- Each question answerable in 1-2 sentences; provide a helpful placeholder/hint
+- Each question must be DIRECTLY tied to a market sizing formula parameter
+- Questions must be SPECIFIC to this exact innovation — never generic
+- If competitor data is shown, ask about differentiation vs a NAMED competitor
+- Ask about clinical workflow: does this replace a procedure? Add a step? Integrate with existing systems?
+  (CRITICAL: if it replaces a guideline-mandated procedure, the market is constrained by guideline revision)
+- Ask who the BUYER is (physician, hospital committee, payer, patient) — this determines pricing and sales cycle
+- Ask about the PRICING MODEL — per-use, subscription, one-time, bundled? Comparable products?
+- Ask about development stage and existing evidence (preclinical data, IND status, Phase results)
+- For commercial: ask about patient specificity (biomarker? stage? prior therapy requirement?)
+- If competitors identified: ask "your product vs [CompetitorName] — what specific clinical advantage?"
+- Each question: answerable in 1-2 sentences; provide a realistic example as the hint
 
-Return ONLY a JSON array, no other text:
-[{{"question": "...", "hint": "...", "field": "short_snake_case_key"}}]"""
+Return ONLY a JSON array with exactly 7 questions, no other text:
+[{{"question": "...", "hint": "Example: ...", "field": "snake_case_key"}}]
+
+The 7 topics MUST cover: (1) specific patient population, (2) standard of care being addressed,
+(3) buyer/decision-maker, (4) development stage + evidence, (5) pricing model + comparable,
+(6) clinical workflow integration, (7) named competitor differentiation."""
 
     try:
         client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
