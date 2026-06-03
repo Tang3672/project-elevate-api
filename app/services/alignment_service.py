@@ -637,18 +637,87 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
         _competitive_intelligence = {}
 
 
+    # === UNIQUE MARKET SIZING DERIVATION — generate before building context ===
+    market_derivation_text = ""
+    try:
+        from app.services.market_sizing_derivation_service import (
+            generate_market_sizing_derivation, format_derivation_for_prompt
+        )
+        us_pop = 0
+        try:
+            from app.services.universe_builder import get_universe
+            for d, ta, ph, appr, cost, notes in get_universe():
+                if disease_name and disease_name.lower() in d.lower():
+                    from app.services.opportunity_scorer_v2 import _TA_DEFAULTS
+                    _, pop, _, _, _ = _TA_DEFAULTS.get(ta, _TA_DEFAULTS["other"])
+                    us_pop = pop
+                    break
+        except Exception:
+            pass
+
+        deriv = generate_market_sizing_derivation(
+            idea=idea,
+            product_type=product_type,
+            disease_name=disease_name,
+            therapeutic_area=getattr(expert, "domain_id", "other"),
+            us_patient_population=us_pop,
+        )
+        market_derivation_text = format_derivation_for_prompt(deriv)
+        logger.info("Market sizing derivation generated: TAM=%s SAM=%s", deriv.tam_fmt, deriv.sam_fmt)
+    except Exception as e_deriv:
+        logger.warning("Market sizing derivation failed (non-fatal): %s", e_deriv)
+
     # Build final context with demand signals + hospital matches
     context = _build_expert_context(
         idea, expert, demand_results, hospital_matches_raw,
-        disease_knowledge=researcher_ctx,
+        disease_knowledge=researcher_ctx + market_derivation_text,
         pi_memory=pi_memory_context,
     )
 
-    # Use expert system prompt + JSON schema
-    # Use static expert system prompt + JSON schema
-    system = expert.system_prompt + "\n\n" + EXPERT_JSON_SCHEMA
+    # Append clinical guideline compliance check to system prompt
+    clinical_guideline_warning = _check_guideline_compliance(idea, product_type)
 
-    raw  = await _call_claude(context, system, max_tokens=6000)
+    # Reporting instructions: over-explain chapters 2-4
+    reporting_instructions = """
+
+=== MANDATORY REPORTING STANDARDS (from tech transfer office requirements) ===
+
+OVERARCHING RULE: For EVERY number, claim, or market estimate in chapters 2-4 (Market Sizing,
+Regulatory Pathway, Market Access), you MUST:
+  (a) State the exact value
+  (b) Name the specific source (paper, database, or government dataset)
+  (c) Explain in 2-4 sentences WHY this number applies to THIS specific innovation
+  (d) Acknowledge key uncertainties or assumptions
+
+CHAPTER 2 — MARKET SIZING:
+  - Use the FULL derivation provided above (TAM/SAM/SOM with all steps shown)
+  - Reproduce each formula step, cite the paper it comes from
+  - State the exact arithmetic explicitly (e.g. "187,200 patients × $14,400 net price = $2.7B TAM")
+  - Explain why the diagnostic yield percentage was chosen for this specific disease
+  - Explain the gross-to-net ratio and cite the CMS data source
+  - Show the Bass diffusion parameters and why they apply to this TA
+
+CHAPTER 3 — REGULATORY PATHWAY:
+  - Every timeline estimate: cite a comparable approved drug (name + year + duration)
+  - Every cost estimate: cite published Phase cost ranges with source
+  - Every designation: cite the exact statutory authority (e.g. "21 CFR §316.20")
+  - Explain the specific eligibility criteria this innovation meets for each designation
+
+CHAPTER 4 — MARKET ACCESS:
+  - Every price mentioned: cite CMS Part B/D reimbursement code or ASP data
+  - Every payer coverage statement: cite a specific CMS NCD/LCD or published formulary tier
+  - Every adoption timeline: cite a comparable drug's formulary access timeline
+
+CLINICAL GUIDELINE COMPLIANCE: """ + clinical_guideline_warning + """
+
+DO NOT summarize or shorten these sections for brevity. Tech transfer offices need this level
+of specificity to make go/no-go commercialization decisions. More detail is better. If you
+are uncertain about a number, say so explicitly and give a range with sources for both ends.
+"""
+
+    system = expert.system_prompt + "\n\n" + EXPERT_JSON_SCHEMA + reporting_instructions
+
+    raw  = await _call_claude(context, system, max_tokens=8000)
     data = _clean_json(raw)
 
     # Parse into PIReport
@@ -1183,6 +1252,62 @@ def _parse_legacy_response(claude_response, idea, demand_results, hospital_match
         hospital_needs_searched=hospital_needs_count,
         model_version="1.0",
     )
+
+
+def _check_guideline_compliance(idea: str, product_type: str) -> str:
+    """
+    Check whether the proposed innovation's mechanism might conflict with
+    established clinical practice guidelines. Returns a warning string
+    for injection into the report prompt.
+
+    Based on TTO feedback: a case occurred where an innovator proposed replacing
+    a medical procedure that was mandated by clinical guidelines — the product
+    would have been commercially unviable because adoption would have required
+    guideline deviation. This check flags such risks.
+    """
+    warnings = []
+    idea_low = (idea + " " + product_type).lower()
+
+    # Pattern: replaces / eliminates an established procedure or therapy
+    replacement_signals = [
+        "replac", "eliminat", "instead of", "bypass", "skip", "avoid",
+        "without", "non-invasive alternative to", "alternative to"
+    ]
+    procedure_signals = [
+        "surgery", "biopsy", "imaging", "colonoscopy", "mammography",
+        "chemotherapy", "radiation", "dialysis", "transplant", "blood transfusion",
+        "standard of care", "first-line", "guideline-recommended"
+    ]
+
+    replaces_procedure = any(r in idea_low for r in replacement_signals)
+    mentions_procedure = any(p in idea_low for p in procedure_signals)
+
+    if replaces_procedure and mentions_procedure:
+        warnings.append(
+            "GUIDELINE COMPLIANCE FLAG: This innovation appears to propose replacing or bypassing "
+            "an established clinical procedure or standard-of-care therapy. IMPORTANT — in the report, "
+            "explicitly check whether the proposed approach would conflict with major clinical practice "
+            "guidelines (e.g. ACC/AHA, ASCO, IDSA, USPSTF). If a guideline mandates the procedure being "
+            "replaced, payers will not reimburse a substitute without a guideline update or strong "
+            "head-to-head trial data. Cite the relevant guideline and explain whether the innovation "
+            "requires guideline revision to achieve market access."
+        )
+
+    # Pattern: AI/algorithm replacing physician judgment
+    if any(x in idea_low for x in ["ai", "algorithm", "machine learning"]) and \
+       any(x in idea_low for x in ["diagnos", "triage", "screen", "detect", "replac"]):
+        warnings.append(
+            "FDA/CMS SAMD WORKFLOW FLAG: AI/software replacing or augmenting clinical decision-making "
+            "requires FDA SaMD classification (Class II/III) and CMS coverage determination. "
+            "Explicitly discuss: (1) FDA De Novo or 510(k) pathway, (2) CMS coding (CPT/HCPCS) and "
+            "whether NCD/LCD coverage exists for the use case, (3) whether the AI replaces or augments "
+            "physician judgment — replacement triggers higher regulatory burden and payer resistance."
+        )
+
+    if not warnings:
+        return "No specific guideline compliance flags detected. Standard commercialization pathway analysis applies."
+
+    return " | ".join(warnings)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
