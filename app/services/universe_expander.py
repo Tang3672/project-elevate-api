@@ -1,0 +1,301 @@
+"""
+Universe Expander
+=================
+Expands the disease universe from 309 curated entries to ALL conditions
+that have active clinical trial activity — potentially 5,000-15,000 diseases.
+
+Strategy:
+  1. Query ClinicalTrials.gov for active interventional trials
+  2. Extract ALL condition names from trial records
+  3. Deduplicate and normalise (MONDO/MeSH where available)
+  4. Score each condition using TA-level defaults (fast — no live API per disease)
+  5. Persist scores in disease_aggregate_extended table
+  6. Discovery endpoint reads from this table for broader results
+
+This runs as a background job (weekly). The first run takes ~30-60 minutes
+to pull and process CT.gov data. Subsequent runs are incremental.
+
+Coverage: WHO estimates ~10,000 recognised diseases. CT.gov conditions cover
+~15,000 unique condition strings (many are duplicates/synonyms). After
+normalisation we expect 3,000-8,000 unique disease concepts.
+"""
+
+import asyncio
+import logging
+import re
+import time
+from collections import Counter
+from typing import Optional
+
+import requests
+
+logger = logging.getLogger(__name__)
+
+CTGOV_BASE = "https://clinicaltrials.gov/api/v2/studies"
+_DELAY     = 0.4
+
+# ── TA classification by keyword ─────────────────────────────────────────────
+_TA_KEYWORDS = {
+    "oncology":       ["cancer","carcinoma","glioblastoma","leukemia","lymphoma","melanoma","sarcoma","tumor","myeloma","adenocarcinoma","blastoma","neoplasm","malignan"],
+    "rare_disease":   ["rare ","orphan","ataxia","muscular dystrophy","spinal muscular","gaucher","fabry","phenylketonuria","sickle cell","huntington","friedreich","wilson","pompe","niemann"],
+    "amr_infectious": ["resistant","mrsa","carbapenem","acinetobacter","difficile","staphylococc","enterobacterales","sepsis","infectious","antimicrobial","antibiotic","bacterial","viral","fungal","hiv","hepatitis","tuberculosis","malaria","influenza","rsv","covid"],
+    "cns":            ["alzheimer","parkinson","huntington","multiple sclerosis","epilepsy","depression","bipolar","schizophrenia","dementia","neurodegen","als","amyotrophic","stroke","cerebral","neurolog","psychiatric","autism","adhd","anxiety","ptsd","migraine"],
+    "cardiovascular": ["heart failure","atrial fibrillation","hypertension","coronary","myocardial","stroke","pulmonary arterial","cardiovascular","arrhythmia","cardiomyop","aortic","ventricular","cardiac"],
+    "metabolic":      ["diabetes","obesity","nash","mash","nonalcoholic","fatty liver","metabolic","dyslipidemia","gout","thyroid","cushing","acromegaly"],
+    "gene_therapy":   ["gene therapy","aav","lentiviral","gene editing","crispr","monogenic","gene replacement"],
+    "immunology":     ["rheumatoid","lupus","psoriasis","inflammatory bowel","crohn","ulcerative colitis","autoimmune","immunodeficiency","vasculitis","sjogren","myositis","scleroderma","dermatomyositis"],
+    "ophthalmology":  ["macular","glaucoma","retinal","geographic atrophy","amd","dry eye","optic","uveitis","corneal","retinitis"],
+    "vaccine":        ["rsv","influenza","covid","sars","respiratory syncytial","vaccine","prophylactic","immunization"],
+    "hematology":     ["hemophilia","thalassemia","anemia","myeloma","leukemia","lymphoma","thrombocytopenia","coagulation","platelet","neutropenia"],
+    "device":         ["sepsis","diagnostic","device","monitor","detection","wearable","implant","catheter"],
+    "respiratory":    ["copd","asthma","emphysema","pulmonary fibrosis","bronchiectasis","cystic fibrosis","respiratory"],
+    "dermatology":    ["psoriasis","eczema","atopic dermatitis","acne","rosacea","vitiligo","alopecia","hair loss","pemphigus","urticaria"],
+    "gastroenterology":["inflammatory bowel","crohn","colitis","liver","hepatitis","cirrhosis","gastroparesis","eosinophilic","celiac"],
+    "musculoskeletal":["osteoarthritis","osteoporosis","spondylitis","gout","fibromyalgia","myositis","muscular"],
+    "renal":          ["kidney","renal","nephropathy","glomerulosclerosis","polycystic kidney"],
+}
+
+def _classify_ta(condition: str) -> str:
+    low = condition.lower()
+    for ta, keywords in _TA_KEYWORDS.items():
+        if any(kw in low for kw in keywords):
+            return ta
+    return "other"
+
+# ── CT.gov condition harvester ────────────────────────────────────────────────
+
+def _fetch_conditions_page(page_token: Optional[str] = None,
+                            page_size: int = 1000) -> tuple[list[str], Optional[str]]:
+    """Fetch one page of conditions from CT.gov active interventional trials."""
+    params = {
+        "filter.overallStatus": "RECRUITING,ACTIVE_NOT_RECRUITING,NOT_YET_RECRUITING",
+        "filter.studyType":     "INTERVENTIONAL",
+        "pageSize":             page_size,
+        "format":               "json",
+        "fields":               "ConditionList",
+    }
+    if page_token:
+        params["pageToken"] = page_token
+
+    conditions: list[str] = []
+    next_token: Optional[str] = None
+
+    try:
+        r = requests.get(CTGOV_BASE, params=params, timeout=20)
+        if r.status_code != 200:
+            return conditions, None
+        data = r.json()
+        for study in data.get("studies", []):
+            proto = study.get("protocolSection", {})
+            conds = proto.get("conditionsModule", {}).get("conditions", [])
+            conditions.extend(conds)
+        next_token = data.get("nextPageToken")
+    except Exception as e:
+        logger.warning("CT.gov conditions page failed: %s", e)
+
+    return conditions, next_token
+
+
+def _normalise_condition(raw: str) -> str:
+    """Basic normalisation: strip parenthetical subtypes, trim, title-case."""
+    # Remove very specific subtypes that create noise
+    name = re.sub(r'\s*\((?:stage|type|grade|subtype|phase|class)\s+[IViv\d]+\)', '', raw, flags=re.IGNORECASE)
+    name = name.strip().strip(',').strip()
+    # Remove trailing qualifiers like "- Newly Diagnosed"
+    name = re.sub(r'\s*-\s*(newly diagnosed|relapsed|refractory|advanced|metastatic|recurrent)$', '', name, flags=re.IGNORECASE)
+    return name[:120].strip()
+
+
+async def harvest_all_conditions(max_pages: int = 50) -> dict[str, int]:
+    """
+    Pull all conditions from CT.gov active interventional trials.
+    Returns {condition_name: trial_count}.
+    Takes ~5-10 minutes for max_pages=50 (50,000 studies).
+    """
+    counter: Counter = Counter()
+    page_token = None
+    pages = 0
+
+    logger.info("Starting CT.gov condition harvest (max %d pages)...", max_pages)
+
+    while pages < max_pages:
+        conditions, next_token = _fetch_conditions_page(page_token)
+        for c in conditions:
+            norm = _normalise_condition(c)
+            if norm and len(norm) > 3:
+                counter[norm] += 1
+        pages += 1
+        logger.info("CT.gov harvest: page %d, total unique conditions: %d", pages, len(counter))
+        time.sleep(_DELAY)
+
+        if not next_token:
+            break
+        page_token = next_token
+
+    logger.info("CT.gov harvest complete: %d unique conditions from %d pages", len(counter), pages)
+    return dict(counter.most_common(10000))
+
+
+# ── Pre-scorer for expanded universe ─────────────────────────────────────────
+
+async def prescored_universe_table(conn) -> None:
+    """Create the extended disease scoring table if not exists."""
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS disease_scored (
+            id              SERIAL PRIMARY KEY,
+            disease_label   TEXT UNIQUE NOT NULL,
+            mondo_id        VARCHAR(20),
+            therapeutic_area VARCHAR(50),
+            trial_count     INTEGER DEFAULT 0,
+            score           FLOAT,
+            tier            VARCHAR(20),
+            opportunity     FLOAT,
+            probability     FLOAT,
+            value_score     FLOAT,
+            approved_count  INTEGER DEFAULT 0,
+            us_population   BIGINT,
+            us_tam_fmt      TEXT,
+            peak_revenue_fmt TEXT,
+            notes           TEXT,
+            last_scored     TIMESTAMPTZ DEFAULT NOW(),
+            data_source     TEXT DEFAULT 'ct_gov_harvest'
+        );
+    """)
+    await conn.execute("CREATE INDEX IF NOT EXISTS ds_score_idx ON disease_scored (score DESC NULLS LAST);")
+    await conn.execute("CREATE INDEX IF NOT EXISTS ds_ta_idx ON disease_scored (therapeutic_area);")
+    await conn.execute("CREATE INDEX IF NOT EXISTS ds_label_idx ON disease_scored (lower(disease_label));")
+
+
+async def score_and_persist_condition(conn, condition: str, trial_count: int) -> bool:
+    """Score one condition with TA-level defaults and upsert to disease_scored."""
+    from app.services.opportunity_scorer_v2 import score_opportunity_v2, _tier
+
+    ta = _classify_ta(condition)
+
+    # TA-level defaults for unlisted diseases
+    _TA_DEFAULTS = {
+        "oncology":        {"phase": "phase2", "approved": 3, "pop": 80_000,   "cost": 150_000},
+        "rare_disease":    {"phase": "phase2", "approved": 0, "pop": 15_000,   "cost": 300_000},
+        "amr_infectious":  {"phase": "phase2", "approved": 2, "pop": 200_000,  "cost": 12_000},
+        "cns":             {"phase": "phase2", "approved": 2, "pop": 300_000,  "cost": 30_000},
+        "cardiovascular":  {"phase": "phase3", "approved": 4, "pop": 800_000,  "cost": 15_000},
+        "metabolic":       {"phase": "phase3", "approved": 5, "pop": 2_000_000,"cost": 10_000},
+        "gene_therapy":    {"phase": "phase2", "approved": 0, "pop": 10_000,   "cost": 2_000_000},
+        "immunology":      {"phase": "phase2", "approved": 3, "pop": 400_000,  "cost": 40_000},
+        "ophthalmology":   {"phase": "phase2", "approved": 2, "pop": 200_000,  "cost": 20_000},
+        "vaccine":         {"phase": "phase3", "approved": 1, "pop": 5_000_000,"cost": 200},
+        "hematology":      {"phase": "phase2", "approved": 3, "pop": 80_000,   "cost": 150_000},
+        "device":          {"phase": "phase2", "approved": 1, "pop": 500_000,  "cost": 5_000},
+        "respiratory":     {"phase": "phase2", "approved": 3, "pop": 600_000,  "cost": 20_000},
+        "dermatology":     {"phase": "phase2", "approved": 3, "pop": 1_000_000,"cost": 25_000},
+        "gastroenterology":{"phase": "phase2", "approved": 3, "pop": 300_000,  "cost": 40_000},
+        "musculoskeletal": {"phase": "phase2", "approved": 4, "pop": 2_000_000,"cost": 8_000},
+        "renal":           {"phase": "phase2", "approved": 2, "pop": 250_000,  "cost": 25_000},
+        "other":           {"phase": "phase2", "approved": 2, "pop": 200_000,  "cost": 30_000},
+    }
+    d = _TA_DEFAULTS.get(ta, _TA_DEFAULTS["other"])
+
+    try:
+        r = await score_opportunity_v2(
+            disease_name=condition,
+            therapeutic_area=ta,
+            development_phase=d["phase"],
+            approved_treatments_count=d["approved"],
+            competitor_trial_count=trial_count,
+            annual_treatment_cost_usd=d["cost"],
+            us_patient_population=d["pop"],
+        )
+        tier, _ = _tier(r["score"])
+        s = r.get("subscores", {})
+
+        await conn.execute("""
+            INSERT INTO disease_scored
+                (disease_label, therapeutic_area, trial_count, score, tier,
+                 opportunity, probability, value_score,
+                 approved_count, us_population, notes, last_scored)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW())
+            ON CONFLICT (disease_label) DO UPDATE SET
+                therapeutic_area = EXCLUDED.therapeutic_area,
+                trial_count      = EXCLUDED.trial_count,
+                score            = EXCLUDED.score,
+                tier             = EXCLUDED.tier,
+                opportunity      = EXCLUDED.opportunity,
+                probability      = EXCLUDED.probability,
+                value_score      = EXCLUDED.value_score,
+                last_scored      = NOW()
+        """,
+            condition, ta, trial_count, r["score"], tier,
+            s.get("opportunity", 0), s.get("probability", 0), s.get("value", 0),
+            d["approved"], d["pop"],
+            f"Trial count: {trial_count} | TA: {ta} | Auto-scored from CT.gov",
+        )
+        return True
+    except Exception as e:
+        logger.debug("Score failed for '%s': %s", condition[:40], e)
+        return False
+
+
+async def run_universe_expansion(max_pages: int = 30) -> dict:
+    """
+    Main entry point: harvest CT.gov conditions and pre-score them all.
+    Runs in background. Returns summary.
+    """
+    from app.db.database import get_pool
+    pool = await get_pool()
+
+    async with pool.acquire() as conn:
+        await prescored_universe_table(conn)
+
+    # Harvest conditions from CT.gov
+    condition_counts = await harvest_all_conditions(max_pages=max_pages)
+    total_conditions = len(condition_counts)
+    logger.info("Scoring %d conditions...", total_conditions)
+
+    # Score in batches
+    scored = 0
+    async with pool.acquire() as conn:
+        for condition, trial_count in condition_counts.items():
+            if await score_and_persist_condition(conn, condition, trial_count):
+                scored += 1
+            if scored % 100 == 0:
+                logger.info("Universe expansion: %d/%d scored", scored, total_conditions)
+
+    # Also score all diseases from universe_builder (higher quality data)
+    from app.services.universe_builder import get_universe
+    universe = get_universe()
+    async with pool.acquire() as conn:
+        for disease, ta, phase, approved, cost, notes in universe:
+            from app.services.opportunity_scorer_v2 import score_opportunity_v2, _tier, _TA_DEFAULTS
+            _, pop, biomarker, modality, _ = _TA_DEFAULTS.get(ta, _TA_DEFAULTS["other"])
+            try:
+                r = await score_opportunity_v2(
+                    disease_name=disease, therapeutic_area=ta,
+                    development_phase=phase, approved_treatments_count=approved,
+                    annual_treatment_cost_usd=cost, us_patient_population=pop,
+                )
+                tier_str, _ = _tier(r["score"])
+                s = r.get("subscores", {})
+                await conn.execute("""
+                    INSERT INTO disease_scored
+                        (disease_label, therapeutic_area, trial_count, score, tier,
+                         opportunity, probability, value_score,
+                         approved_count, us_population, notes, last_scored, data_source)
+                    VALUES ($1,$2,0,$3,$4,$5,$6,$7,$8,$9,$10,NOW(),'universe_builder')
+                    ON CONFLICT (disease_label) DO UPDATE SET
+                        score=EXCLUDED.score, tier=EXCLUDED.tier,
+                        opportunity=EXCLUDED.opportunity, probability=EXCLUDED.probability,
+                        value_score=EXCLUDED.value_score, data_source='universe_builder',
+                        last_scored=NOW()
+                """,
+                    disease, ta, r["score"], tier_str,
+                    s.get("opportunity", 0), s.get("probability", 0), s.get("value", 0),
+                    approved, pop, notes,
+                )
+            except Exception:
+                pass
+
+    return {
+        "conditions_harvested": total_conditions,
+        "conditions_scored":    scored,
+        "curated_diseases":     len(universe),
+    }

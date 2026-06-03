@@ -47,6 +47,15 @@ async def startup():
     # Disease aggregate table
     from app.db.disease_aggregate import ensure_aggregate_table
     await ensure_aggregate_table()
+    # Full pre-scored universe table (disease_scored)
+    try:
+        from app.db.database import get_pool
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            from app.services.universe_expander import prescored_universe_table
+            await prescored_universe_table(conn)
+    except Exception:
+        pass
 
     # Pre-warm discovery cache in background (non-blocking)
     # Loads trial/approval counts from DB into L1 cache; fetches missing from APIs

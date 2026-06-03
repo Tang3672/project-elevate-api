@@ -104,6 +104,52 @@ async def disease_aggregate_snapshot(disease: str = None):
             raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/expand-universe")
+async def trigger_universe_expansion(background_tasks: BackgroundTasks,
+                                      max_pages: int = 30):
+    """
+    Harvest ALL conditions from CT.gov and pre-score them into disease_scored table.
+    Expands from 309 curated diseases to 5,000-15,000 diseases.
+    Takes 30-60 minutes. Run once then weekly.
+    """
+    async def _run():
+        from app.services.universe_expander import run_universe_expansion
+        result = await run_universe_expansion(max_pages=max_pages)
+        logger.info("Universe expansion complete: %s", result)
+    background_tasks.add_task(_run)
+    return {"status": "started", "max_pages": max_pages,
+            "note": f"Harvesting ~{max_pages * 1000:,} CT.gov studies. Check /etl/universe-stats when done."}
+
+
+@router.get("/universe-stats")
+async def universe_stats():
+    """Return stats on the pre-scored disease universe."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        try:
+            total = await conn.fetchval("SELECT COUNT(*) FROM disease_scored")
+            by_tier = await conn.fetch("""
+                SELECT tier, COUNT(*) as cnt FROM disease_scored
+                GROUP BY tier ORDER BY cnt DESC
+            """)
+            by_ta = await conn.fetch("""
+                SELECT therapeutic_area, COUNT(*) as cnt FROM disease_scored
+                GROUP BY therapeutic_area ORDER BY cnt DESC LIMIT 10
+            """)
+            top5 = await conn.fetch("""
+                SELECT disease_label, score, tier FROM disease_scored
+                ORDER BY score DESC NULLS LAST LIMIT 5
+            """)
+            return {
+                "total_diseases": total,
+                "by_tier": {r["tier"]: r["cnt"] for r in by_tier},
+                "by_ta":   {r["therapeutic_area"]: r["cnt"] for r in by_ta},
+                "top5":    [{"disease": r["disease_label"], "score": r["score"], "tier": r["tier"]} for r in top5],
+            }
+        except Exception as e:
+            return {"total_diseases": 0, "note": "disease_scored table empty or not yet created", "error": str(e)}
+
+
 @router.post("/warm-cache")
 async def trigger_cache_warm(background_tasks: BackgroundTasks, force: bool = False):
     """Force-refresh the discovery cache (trial counts + approval counts)."""

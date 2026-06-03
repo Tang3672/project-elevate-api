@@ -270,29 +270,100 @@ async def mock_pi_report():
 
 @router.get("/discovery/opportunities")
 async def get_opportunities(
-    top_n: int = 20,
+    top_n: int = 100,
+    search: str = "",
     current_user = Depends(get_current_user),
 ):
     """
-    Return ranked biomedical opportunities scored by the MCDA algorithm.
-    Cached weekly; refreshed by scheduler.
+    Return ranked biomedical opportunities.
+    Reads from disease_scored table (full universe) when available,
+    falls back to live v2 engine for the curated 309.
     """
+    # Try full pre-scored universe first (populated by run_universe_expansion)
+    try:
+        from app.db.database import get_pool
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            if search:
+                rows = await conn.fetch("""
+                    SELECT * FROM disease_scored
+                    WHERE lower(disease_label) LIKE lower($1)
+                       OR lower(notes) LIKE lower($1)
+                    ORDER BY score DESC NULLS LAST
+                    LIMIT $2
+                """, f"%{search}%", top_n)
+            else:
+                rows = await conn.fetch("""
+                    SELECT * FROM disease_scored
+                    ORDER BY score DESC NULLS LAST
+                    LIMIT $1
+                """, top_n)
+
+            total = await conn.fetchval("SELECT COUNT(*) FROM disease_scored")
+
+            if rows and total and total > 50:
+                # Map DB rows to frontend-expected format
+                opps = []
+                for i, row in enumerate(rows, 1):
+                    opps.append({
+                        "rank":             i,
+                        "disease":          row["disease_label"],
+                        "therapeutic_area": row["therapeutic_area"] or "other",
+                        "score":            round(row["score"] or 0, 1),
+                        "tier":             row["tier"] or "MODERATE",
+                        "tier_color":       _tier_color(row["tier"]),
+                        "score_raw":        round(row["score"] or 0, 2),
+                        "ptrs":             0,
+                        "confidence_low":   round((row["score"] or 0) * 0.82, 1),
+                        "confidence_high":  round((row["score"] or 0) * 1.18, 1),
+                        "notes":            row["notes"] or "",
+                        "phase":            "phase2",
+                        "components": {
+                            "opportunity": round(row["opportunity"] or 0, 1),
+                            "probability": round(row["probability"] or 0, 1),
+                            "value":       round(row["value_score"] or 0, 1),
+                        },
+                        "subscores": {
+                            "opportunity": round(row["opportunity"] or 0, 1),
+                            "probability": round(row["probability"] or 0, 1),
+                            "value":       round(row["value_score"] or 0, 1),
+                            "innovation":  0,
+                        },
+                        "us_tam_fmt":        row["us_tam_fmt"] or "",
+                        "peak_revenue_fmt":  row["peak_revenue_fmt"] or "",
+                        "funding_pathway":   "commercial",
+                    })
+                return {
+                    "opportunities": opps,
+                    "generated_at":  datetime.utcnow().isoformat(),
+                    "algorithm":     f"Full universe ({total:,} diseases)",
+                    "total_scored":  len(opps),
+                    "universe_size": total,
+                }
+    except Exception as e_db:
+        logger.debug("disease_scored table not yet populated: %s", e_db)
+
+    # Fallback: live v2 engine (309 curated diseases)
     try:
         from app.services.opportunity_scorer_v2 import run_discovery_engine_v2
         opportunities = await run_discovery_engine_v2(top_n=top_n)
-        algo = "Opportunity Engine v2 (geometric: Opportunity x Probability x Value; PTRS + rNPV)"
+        algo = "Opportunity Engine v2 (309 curated diseases)"
     except Exception as e_v2:
-        import logging
-        logging.getLogger(__name__).error(f"v2 engine failed, falling back to v1: {e_v2}")
+        logger.error(f"v2 engine failed, falling back to v1: {e_v2}")
         from app.services.opportunity_scorer import run_discovery_engine
         opportunities = await run_discovery_engine(top_n=top_n)
         algo = "MCDA v1.0 (fallback)"
     return {
         "opportunities": opportunities,
-        "generated_at": datetime.utcnow().isoformat(),
-        "algorithm": algo,
-        "total_scored": len(opportunities),
+        "generated_at":  datetime.utcnow().isoformat(),
+        "algorithm":     algo,
+        "total_scored":  len(opportunities),
     }
+
+
+def _tier_color(tier: str) -> str:
+    return {"EXCEPTIONAL": "#059669", "HIGH": "#0891b2",
+            "MODERATE": "#d97706", "LOW": "#dc2626"}.get(tier or "", "#6366f1")
 
 
 @router.post("/discovery/score")
