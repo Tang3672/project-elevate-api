@@ -279,85 +279,121 @@ async def get_opportunities(
     Reads from disease_scored table (full universe) when available,
     falls back to live v2 engine for the curated 309.
     """
-    # Try full pre-scored universe first (populated by run_universe_expansion)
-    try:
-        from app.db.database import get_pool
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            if search:
-                rows = await conn.fetch("""
-                    SELECT * FROM disease_scored
-                    WHERE lower(disease_label) LIKE lower($1)
-                       OR lower(notes) LIKE lower($1)
-                    ORDER BY score DESC NULLS LAST
-                    LIMIT $2
-                """, f"%{search}%", top_n)
-            else:
-                rows = await conn.fetch("""
-                    SELECT * FROM disease_scored
-                    ORDER BY score DESC NULLS LAST
-                    LIMIT $1
-                """, top_n)
+    # Strategy: Live v2 engine for curated 309 (expert TAM, EXCEPTIONAL tiers)
+    # + disease_scored DB for extended MONDO universe (search only when >1000 entries)
+    curated_opps = []
+    extended_total = 0
 
-            total = await conn.fetchval("SELECT COUNT(*) FROM disease_scored")
-
-            if rows and total and total > 1000:  # only use full universe when CT.gov harvest complete
-                # Map DB rows to frontend-expected format
-                opps = []
-                for i, row in enumerate(rows, 1):
-                    opps.append({
-                        "rank":             i,
-                        "disease":          row["disease_label"],
-                        "therapeutic_area": row["therapeutic_area"] or "other",
-                        "score":            round(row["score"] or 0, 1),
-                        "tier":             row["tier"] or "MODERATE",
-                        "tier_color":       _tier_color(row["tier"]),
-                        "score_raw":        round(row["score"] or 0, 2),
-                        "ptrs":             0,
-                        "confidence_low":   round((row["score"] or 0) * 0.82, 1),
-                        "confidence_high":  round((row["score"] or 0) * 1.18, 1),
-                        "notes":            row["notes"] or "",
-                        "phase":            "phase2",
-                        "components": {
-                            "opportunity": round(row["opportunity"] or 0, 1),
-                            "probability": round(row["probability"] or 0, 1),
-                            "value":       round(row["value_score"] or 0, 1),
-                        },
-                        "subscores": {
-                            "opportunity": round(row["opportunity"] or 0, 1),
-                            "probability": round(row["probability"] or 0, 1),
-                            "value":       round(row["value_score"] or 0, 1),
-                            "innovation":  0,
-                        },
-                        "us_tam_fmt":        row["us_tam_fmt"] or "",
-                        "peak_revenue_fmt":  row["peak_revenue_fmt"] or "",
-                        "funding_pathway":   "commercial",
-                    })
-                return {
-                    "opportunities": opps,
-                    "generated_at":  datetime.utcnow().isoformat(),
-                    "algorithm":     f"Full universe ({total:,} diseases)",
-                    "total_scored":  len(opps),
-                    "universe_size": total,
-                }
-    except Exception as e_db:
-        logger.debug("disease_scored table not yet populated: %s", e_db)
-
-    # Fallback: live v2 engine (309 curated diseases)
+    # Always run live v2 for the curated 309 (highest quality)
     try:
         from app.services.opportunity_scorer_v2 import run_discovery_engine_v2
-        opportunities = await run_discovery_engine_v2(top_n=top_n)
-        algo = "Opportunity Engine v2 (309 curated diseases)"
+        curated_opps = await run_discovery_engine_v2(top_n=max(top_n, 309))
     except Exception as e_v2:
-        logger.error(f"v2 engine failed, falling back to v1: {e_v2}")
-        from app.services.opportunity_scorer import run_discovery_engine
-        opportunities = await run_discovery_engine(top_n=top_n)
-        algo = "MCDA v1.0 (fallback)"
+        logger.error("v2 engine failed: %s", e_v2)
+        try:
+            from app.services.opportunity_scorer import run_discovery_engine
+            curated_opps = await run_discovery_engine(top_n=top_n)
+        except Exception:
+            curated_opps = []
+
+    curated_names = {o["disease"].lower() for o in curated_opps}
+
+    # If searching or extended universe is ready, supplement with disease_scored
+    if search or True:  # always check for extended diseases
+        try:
+            from app.db.database import get_pool
+            pool = await get_pool()
+            async with pool.acquire() as conn:
+                extended_total = await conn.fetchval(
+                    "SELECT COUNT(*) FROM disease_scored WHERE data_source != 'universe_builder'"
+                ) or 0
+
+                if search:
+                    # Search curated first
+                    curated_filtered = [o for o in curated_opps
+                                        if search.lower() in o["disease"].lower()
+                                        or search.lower() in (o.get("notes") or "").lower()]
+                    # Also search extended universe
+                    ext_rows = await conn.fetch("""
+                        SELECT * FROM disease_scored
+                        WHERE (lower(disease_label) LIKE lower($1)
+                               OR lower(notes) LIKE lower($1))
+                          AND lower(disease_label) NOT IN
+                              (SELECT lower(disease_label) FROM disease_scored WHERE data_source='universe_builder')
+                        ORDER BY score DESC NULLS LAST LIMIT $2
+                    """, f"%{search}%", top_n)
+
+                    ext_opps = [_row_to_opp(row, i + len(curated_filtered))
+                                for i, row in enumerate(ext_rows, 1)]
+                    all_opps = curated_filtered + ext_opps
+                    # Re-sort by score
+                    all_opps.sort(key=lambda x: x["score"], reverse=True)
+                    for i, o in enumerate(all_opps, 1):
+                        o["rank"] = i
+                    return {
+                        "opportunities": all_opps[:top_n],
+                        "generated_at":  datetime.utcnow().isoformat(),
+                        "algorithm":     f"Expert 309 + {extended_total:,} MONDO diseases",
+                        "total_scored":  len(all_opps),
+                        "universe_size": 309 + extended_total,
+                    }
+
+                elif extended_total > 100:
+                    # No search: return curated top-N (best quality)
+                    for i, o in enumerate(curated_opps[:top_n], 1):
+                        o["rank"] = i
+                    return {
+                        "opportunities": curated_opps[:top_n],
+                        "generated_at":  datetime.utcnow().isoformat(),
+                        "algorithm":     f"Expert 309 + {extended_total:,} MONDO (search to explore all)",
+                        "total_scored":  len(curated_opps[:top_n]),
+                        "universe_size": 309 + extended_total,
+                    }
+        except Exception as e_db:
+            logger.debug("disease_scored supplement failed: %s", e_db)
+
+    # No extended universe yet — just curated 309
+    for i, o in enumerate(curated_opps[:top_n], 1):
+        o["rank"] = i
     return {
-        "opportunities": opportunities,
+        "opportunities": curated_opps[:top_n],
         "generated_at":  datetime.utcnow().isoformat(),
-        "algorithm":     algo,
-        "total_scored":  len(opportunities),
+        "algorithm":     "Expert 309 curated diseases",
+        "total_scored":  len(curated_opps[:top_n]),
+        "universe_size": 309,
+    }
+
+
+def _row_to_opp(row, rank: int) -> dict:
+    """Convert a disease_scored DB row to the frontend opportunity dict."""
+    score = float(row["score"] or 0)
+    return {
+        "rank":             rank,
+        "disease":          row["disease_label"],
+        "therapeutic_area": row["therapeutic_area"] or "other",
+        "score":            round(score, 1),
+        "tier":             row["tier"] or "MODERATE",
+        "tier_color":       _tier_color(row["tier"]),
+        "score_raw":        round(score, 2),
+        "ptrs":             0,
+        "confidence_low":   round(score * 0.82, 1),
+        "confidence_high":  round(score * 1.18, 1),
+        "notes":            row["notes"] or "",
+        "phase":            "phase2",
+        "components": {
+            "opportunity": round(float(row["opportunity"] or 0), 1),
+            "probability": round(float(row["probability"] or 0), 1),
+            "value":       round(float(row["value_score"] or 0), 1),
+        },
+        "subscores": {
+            "opportunity": round(float(row["opportunity"] or 0), 1),
+            "probability": round(float(row["probability"] or 0), 1),
+            "value":       round(float(row["value_score"] or 0), 1),
+            "innovation":  0,
+        },
+        "us_tam_fmt":       row["us_tam_fmt"] or "",
+        "peak_revenue_fmt": row["peak_revenue_fmt"] or "",
+        "funding_pathway":  "commercial",
     }
 
 
