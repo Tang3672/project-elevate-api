@@ -108,9 +108,9 @@ def _normalise_condition(raw: str) -> str:
 
 async def harvest_all_conditions(max_pages: int = 50) -> dict[str, int]:
     """
-    Pull all conditions from CT.gov active interventional trials.
+    Pull conditions from CT.gov active interventional trials (without field filtering
+    which causes 500 errors). Extracts conditions from full study responses.
     Returns {condition_name: trial_count}.
-    Takes ~5-10 minutes for max_pages=50 (50,000 studies).
     """
     counter: Counter = Counter()
     page_token = None
@@ -119,11 +119,40 @@ async def harvest_all_conditions(max_pages: int = 50) -> dict[str, int]:
     logger.info("Starting CT.gov condition harvest (max %d pages)...", max_pages)
 
     while pages < max_pages:
-        conditions, next_token = _fetch_conditions_page(page_token)
-        for c in conditions:
+        params = {
+            "filter.overallStatus": "RECRUITING,ACTIVE_NOT_RECRUITING,NOT_YET_RECRUITING",
+            "filter.studyType":     "INTERVENTIONAL",
+            "pageSize":             1000,
+            "format":               "json",
+            # NOTE: No "fields" param — causes 500 on Railway; parse from full response
+        }
+        if page_token:
+            params["pageToken"] = page_token
+
+        conditions_this_page: list[str] = []
+        next_token = None
+
+        try:
+            r = requests.get(CTGOV_BASE, params=params, timeout=20)
+            if r.status_code == 200:
+                data = r.json()
+                for study in data.get("studies", []):
+                    proto = study.get("protocolSection", {})
+                    conds = proto.get("conditionsModule", {}).get("conditions", [])
+                    conditions_this_page.extend(conds)
+                next_token = data.get("nextPageToken")
+            else:
+                logger.warning("CT.gov returned %d on page %d", r.status_code, pages)
+                break
+        except Exception as e:
+            logger.warning("CT.gov conditions page %d failed: %s", pages, e)
+            break
+
+        for c in conditions_this_page:
             norm = _normalise_condition(c)
             if norm and len(norm) > 3:
                 counter[norm] += 1
+
         pages += 1
         logger.info("CT.gov harvest: page %d, total unique conditions: %d", pages, len(counter))
         time.sleep(_DELAY)
@@ -134,6 +163,59 @@ async def harvest_all_conditions(max_pages: int = 50) -> dict[str, int]:
 
     logger.info("CT.gov harvest complete: %d unique conditions from %d pages", len(counter), pages)
     return dict(counter.most_common(10000))
+
+
+async def run_mondo_expansion(max_pages: int = 40) -> dict:
+    """
+    Expand universe using full MONDO ontology (up to 20,000 diseases).
+    More reliable than CT.gov on Railway — uses the existing bulk_load_mondo
+    connector to load all MONDO disease terms, then scores each one.
+    This is the PRIMARY expansion method.
+    """
+    from app.db.database import get_pool
+    from app.ingestion.connectors.mondo import bulk_load_mondo
+
+    logger.info("Starting MONDO-based universe expansion (max_pages=%d)...", max_pages)
+
+    # Step 1: Load all MONDO diseases into the disease table
+    total_mondo = await bulk_load_mondo(page_size=500, max_pages=max_pages)
+    logger.info("MONDO bulk load complete: %d diseases loaded", total_mondo)
+
+    # Step 2: Score all MONDO diseases not yet in disease_scored
+    pool = await get_pool()
+    scored = 0
+
+    async with pool.acquire() as conn:
+        await prescored_universe_table(conn)
+
+        # Pull all diseases from the disease table
+        rows = await conn.fetch("""
+            SELECT d.mondo_id, d.label, d.therapeutic_area, d.is_rare,
+                   d.icd10_ids, d.omim_ids
+            FROM disease d
+            WHERE d.label IS NOT NULL AND length(d.label) > 3
+            ORDER BY d.mondo_id
+        """)
+
+        logger.info("Scoring %d MONDO diseases...", len(rows))
+
+        for row in rows:
+            label = row["label"]
+            ta    = row["therapeutic_area"] or _classify_ta(label)
+
+            # Use real trial count from cache if available, else default to 5
+            from app.services.opportunity_scorer_v2 import _TRIAL_COUNT_CACHE
+            cached = _TRIAL_COUNT_CACHE.get(label)
+            trial_count = cached[0] if cached else 5
+
+            if await score_and_persist_condition(conn, label, trial_count):
+                scored += 1
+
+            if scored % 500 == 0:
+                logger.info("MONDO scoring: %d/%d scored", scored, len(rows))
+
+    logger.info("MONDO expansion complete: %d diseases scored", scored)
+    return {"mondo_loaded": total_mondo, "scored": scored, "source": "mondo"}
 
 
 # ── Pre-scorer for expanded universe ─────────────────────────────────────────
@@ -237,8 +319,10 @@ async def score_and_persist_condition(conn, condition: str, trial_count: int) ->
 
 async def run_universe_expansion(max_pages: int = 30) -> dict:
     """
-    Main entry point: harvest CT.gov conditions and pre-score them all.
-    Runs in background. Returns summary.
+    Main entry point: expand the disease universe to thousands using MONDO ontology
+    + CT.gov conditions + curated 309 diseases.
+    Primary source: MONDO (reliable, 20,000 diseases, no network blocks).
+    Secondary source: CT.gov condition names (supplements MONDO).
     """
     from app.db.database import get_pool
     pool = await get_pool()
@@ -246,8 +330,18 @@ async def run_universe_expansion(max_pages: int = 30) -> dict:
     async with pool.acquire() as conn:
         await prescored_universe_table(conn)
 
-    # Harvest conditions from CT.gov
-    condition_counts = await harvest_all_conditions(max_pages=max_pages)
+    # PRIMARY: MONDO ontology expansion (most reliable source)
+    mondo_result = await run_mondo_expansion(max_pages=max_pages)
+    logger.info("MONDO expansion: %s", mondo_result)
+
+    # SECONDARY: CT.gov conditions (supplements MONDO with clinical trial names)
+    try:
+        condition_counts = await harvest_all_conditions(max_pages=min(max_pages, 20))
+    except Exception as e:
+        logger.warning("CT.gov harvest failed (non-fatal): %s", e)
+        condition_counts = {}
+
+    condition_counts = condition_counts  # may be empty if CT.gov blocked
     total_conditions = len(condition_counts)
     logger.info("Scoring %d conditions...", total_conditions)
 

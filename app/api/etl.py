@@ -104,6 +104,22 @@ async def disease_aggregate_snapshot(disease: str = None):
             raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/expand-universe/mondo")
+async def trigger_mondo_expansion(background_tasks: BackgroundTasks,
+                                   max_pages: int = 40):
+    """
+    Expand disease universe using MONDO ontology (20,000 diseases).
+    More reliable than CT.gov on Railway. Takes 20-40 minutes.
+    """
+    async def _run():
+        from app.services.universe_expander import run_mondo_expansion
+        result = await run_mondo_expansion(max_pages=max_pages)
+        logger.info("MONDO expansion complete: %s", result)
+    background_tasks.add_task(_run)
+    return {"status": "started", "source": "mondo",
+            "note": f"Loading up to {max_pages * 500:,} MONDO diseases. Check /etl/universe-stats."}
+
+
 @router.post("/expand-universe")
 async def trigger_universe_expansion(background_tasks: BackgroundTasks,
                                       max_pages: int = 30):
