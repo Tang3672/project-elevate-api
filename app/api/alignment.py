@@ -301,7 +301,7 @@ async def get_opportunities(
 
             total = await conn.fetchval("SELECT COUNT(*) FROM disease_scored")
 
-            if rows and total and total > 50:
+            if rows and total and total > 1000:  # only use full universe when CT.gov harvest complete
                 # Map DB rows to frontend-expected format
                 opps = []
                 for i, row in enumerate(rows, 1):
