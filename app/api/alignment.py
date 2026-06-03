@@ -266,6 +266,35 @@ async def mock_pi_report():
     }
 
 
+@router.post("/market-sizing-derivation")
+async def get_market_sizing_derivation(body: dict):
+    """
+    Returns the full structured market sizing derivation — all 8 steps with
+    citations, formulas, and explanations — as JSON for direct frontend rendering.
+    Bypasses Claude so numbers are deterministic and always sourced.
+    """
+    try:
+        from app.services.market_sizing_derivation_service import (
+            generate_market_sizing_derivation, MarketSizingDerivation
+        )
+        from dataclasses import asdict
+        idea     = body.get("idea", "")
+        pt       = body.get("product_type", "other")
+        disease  = body.get("disease_name", "")
+        ta       = body.get("therapeutic_area", "other")
+        pop      = int(body.get("us_patient_population", 0))
+        if not idea:
+            raise HTTPException(status_code=400, detail="idea required")
+        deriv = generate_market_sizing_derivation(
+            idea=idea, product_type=pt, disease_name=disease,
+            therapeutic_area=ta, us_patient_population=pop,
+        )
+        return asdict(deriv)
+    except Exception as e:
+        logger.error("Market sizing derivation failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ── Discovery Engine Endpoints ────────────────────────────────────────────────
 
 @router.get("/discovery/opportunities")
