@@ -637,6 +637,28 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
         _competitive_intelligence = {}
 
 
+    # === INNOVATION INTELLIGENCE SWEEP — runs in executor, doesn't block ===
+    intelligence_text = ""
+    try:
+        from app.services.innovation_intelligence_service import (
+            run_intelligence_sweep, format_intelligence_for_prompt
+        )
+        loop = asyncio.get_event_loop()
+        intel = await loop.run_in_executor(
+            None,
+            lambda: run_intelligence_sweep(
+                idea=idea,
+                disease_name=disease_name,
+                product_type=product_type,
+                therapeutic_area=getattr(expert, "domain_id", "other"),
+            )
+        )
+        intelligence_text = format_intelligence_for_prompt(intel)
+        logger.info("Intelligence sweep: %d signals from %d sources",
+                    len(intel.signals), len(intel.sources_swept))
+    except Exception as e_intel:
+        logger.warning("Intelligence sweep failed (non-fatal): %s", e_intel)
+
     # === UNIQUE MARKET SIZING DERIVATION — generate before building context ===
     market_derivation_text = ""
     try:
@@ -667,10 +689,10 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
     except Exception as e_deriv:
         logger.warning("Market sizing derivation failed (non-fatal): %s", e_deriv)
 
-    # Build final context with demand signals + hospital matches
+    # Build final context with demand signals + hospital matches + all intelligence
     context = _build_expert_context(
         idea, expert, demand_results, hospital_matches_raw,
-        disease_knowledge=researcher_ctx + market_derivation_text,
+        disease_knowledge=researcher_ctx + intelligence_text + market_derivation_text,
         pi_memory=pi_memory_context,
     )
 
