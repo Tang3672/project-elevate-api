@@ -576,12 +576,31 @@ Rules:
 - If competitors identified: ask "your product vs [CompetitorName] — what specific clinical advantage?"
 - Each question: answerable in 1-2 sentences; provide a realistic example as the hint
 
-Return ONLY a JSON array with exactly 7 questions, no other text:
-[{{"question": "...", "hint": "Example: ...", "field": "snake_case_key"}}]
+Return ONLY a JSON array with exactly 7 questions. Each question MUST have 3-4 specific multiple-choice options
+(not generic — options should reflect this specific innovation and disease area).
+Also include a short "hint" for the optional free-text field.
 
-The 7 topics MUST cover: (1) specific patient population, (2) standard of care being addressed,
-(3) buyer/decision-maker, (4) development stage + evidence, (5) pricing model + comparable,
-(6) clinical workflow integration, (7) named competitor differentiation."""
+Format (return ONLY this JSON, no other text):
+[{{
+  "question": "...",
+  "field": "snake_case_key",
+  "options": ["Option A (specific)", "Option B (specific)", "Option C (specific)", "Option D (specific)"],
+  "hint": "Add any specific detail not covered above (optional)"
+}}]
+
+Example of GOOD specific options for a CRE antibiotic:
+  options: ["ICU patients with confirmed CRE bacteremia", "HAP/VAP patients with gram-negative resistance", "Outpatient SSTI with documented MRSA", "Any hospitalized patient with resistant gram-negative infection"]
+
+Example of BAD generic options (DO NOT DO THIS):
+  options: ["Option A", "Option B", "Option C", "Option D"]
+
+The 7 topics MUST cover: (1) specific patient population + line of therapy,
+(2) standard of care being replaced/supplemented + the specific unmet need,
+(3) primary buyer and decision-maker + sales channel,
+(4) development stage + existing clinical evidence,
+(5) pricing model + WAC benchmark comparator,
+(6) clinical workflow — does it add a step, replace a mandated procedure, or integrate with existing systems,
+(7) key differentiator vs the single most similar named competitor."""
 
     try:
         client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
