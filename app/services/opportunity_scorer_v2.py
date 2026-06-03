@@ -816,6 +816,15 @@ async def run_discovery_engine_v2(top_n: int = 25, funding_pathway: str = "comme
         from app.services.opportunity_scorer import OPPORTUNITY_UNIVERSE
 
     async def score_one(opp):
+        # Outer try catches any error outside the inner v2-scoring try block
+        # (e.g. compute_market_size failing) so one disease never crashes all 309.
+        try:
+          return await _score_one_inner(opp, funding_pathway)
+        except Exception as e:
+          _logger.error("score_one outer failed for %s: %s", opp[0] if opp else "?", e)
+          return None
+
+    async def _score_one_inner(opp, funding_pathway):
         disease, ta, phase, approved, cost, notes = opp
         _, pop, biomarker, modality, _old_dalys = _DISEASE_OVERRIDES.get(
             disease, _TA_DEFAULTS.get(ta, _TA_DEFAULTS["other"])
@@ -922,8 +931,9 @@ async def run_discovery_engine_v2(top_n: int = 25, funding_pathway: str = "comme
             logging.getLogger(__name__).error(f"v2 score failed for {disease}: {e}")
             return None
 
-    results = await _asyncio.gather(*[score_one(o) for o in OPPORTUNITY_UNIVERSE])
-    scored = [r for r in results if r is not None]
+    results = await _asyncio.gather(*[score_one(o) for o in OPPORTUNITY_UNIVERSE],
+                                    return_exceptions=True)
+    scored = [r for r in results if r is not None and not isinstance(r, Exception)]
 
     # Market-size scaling: prevent ultra-rare diseases from dominating the
     # leaderboard on innovation+unmet-need alone. Tiered penalty by patient count:
