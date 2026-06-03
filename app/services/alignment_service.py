@@ -743,46 +743,19 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
     clinical_guideline_warning = _check_guideline_compliance(idea, product_type)
 
     # Reporting instructions: over-explain chapters 2-4
-    reporting_instructions = """
-
-=== MANDATORY REPORTING STANDARDS (from tech transfer office requirements) ===
-
-OVERARCHING RULE: For EVERY number, claim, or market estimate in chapters 2-4 (Market Sizing,
-Regulatory Pathway, Market Access), you MUST:
-  (a) State the exact value
-  (b) Name the specific source (paper, database, or government dataset)
-  (c) Explain in 2-4 sentences WHY this number applies to THIS specific innovation
-  (d) Acknowledge key uncertainties or assumptions
-
-CHAPTER 2 — MARKET SIZING:
-  - Use the FULL derivation provided above (TAM/SAM/SOM with all steps shown)
-  - Reproduce each formula step, cite the paper it comes from
-  - State the exact arithmetic explicitly (e.g. "187,200 patients × $14,400 net price = $2.7B TAM")
-  - Explain why the diagnostic yield percentage was chosen for this specific disease
-  - Explain the gross-to-net ratio and cite the CMS data source
-  - Show the Bass diffusion parameters and why they apply to this TA
-
-CHAPTER 3 — REGULATORY PATHWAY:
-  - Every timeline estimate: cite a comparable approved drug (name + year + duration)
-  - Every cost estimate: cite published Phase cost ranges with source
-  - Every designation: cite the exact statutory authority (e.g. "21 CFR §316.20")
-  - Explain the specific eligibility criteria this innovation meets for each designation
-
-CHAPTER 4 — MARKET ACCESS:
-  - Every price mentioned: cite CMS Part B/D reimbursement code or ASP data
-  - Every payer coverage statement: cite a specific CMS NCD/LCD or published formulary tier
-  - Every adoption timeline: cite a comparable drug's formulary access timeline
-
-CLINICAL GUIDELINE COMPLIANCE: """ + clinical_guideline_warning + """
-
-DO NOT summarize or shorten these sections for brevity. Tech transfer offices need this level
-of specificity to make go/no-go commercialization decisions. More detail is better. If you
-are uncertain about a number, say so explicitly and give a range with sources for both ends.
-"""
+    reporting_instructions = (
+        "\n\nREPORTING RULES: "
+        "(1) Every number must cite its source by name. "
+        "(2) TAM/SAM/SOM: use ONLY the values from the derivation above — no other estimates. "
+        "(3) Regulatory timelines: cite a comparable approved drug. "
+        "(4) Market access prices: cite CMS ASP or reimbursement data. "
+        "(5) If uncertain, state a range with sources for both ends. "
+        f"GUIDELINE NOTE: {clinical_guideline_warning[:200]}"
+    )
 
     system = expert.system_prompt + "\n\n" + EXPERT_JSON_SCHEMA + reporting_instructions
 
-    raw  = await _call_claude(context, system, max_tokens=8000)
+    raw  = await _call_claude(context, system, max_tokens=8192)
     data = _clean_json(raw)
 
     # Parse into PIReport
@@ -1500,7 +1473,52 @@ def _clean_json(raw: str) -> dict:
     if start >= 0 and end > start:
         try:
             return json.loads(clean[start:end])
-        except json.JSONDecodeError as e:
-            logger.error(f"JSON parse failed after cleanup: {e}")
-            raise
-    raise ValueError(f"No valid JSON found in response: {clean[:200]}")
+        except json.JSONDecodeError:
+            pass
+
+    # Truncation repair: if the JSON is cut off mid-response, try closing it.
+    # This happens when Claude hits the token limit before finishing the JSON.
+    if start >= 0:
+        fragment = clean[start:]
+        # Count open braces/brackets to determine what we need to close
+        depth_brace   = fragment.count('{') - fragment.count('}')
+        depth_bracket = fragment.count('[') - fragment.count(']')
+        # Check for trailing incomplete string (odd number of unescaped quotes)
+        in_string = False
+        escape    = False
+        for ch in fragment:
+            if escape:
+                escape = False
+                continue
+            if ch == '\\':
+                escape = True
+                continue
+            if ch == '"':
+                in_string = not in_string
+        # Close any open string, brackets, then braces
+        suffix = ''
+        if in_string:
+            suffix += '"'
+        suffix += ']' * max(0, depth_bracket)
+        suffix += '}' * max(0, depth_brace)
+        if suffix:
+            try:
+                repaired = fragment + suffix
+                result   = json.loads(repaired)
+                logger.warning("JSON truncation repaired (added '%s')", suffix[:20])
+                return result
+            except json.JSONDecodeError:
+                pass
+
+        # Final attempt: extract any complete top-level JSON object
+        import re as _re
+        matches = list(_re.finditer(r'\{[^{}]*\}', clean, _re.DOTALL))
+        if matches:
+            for m in reversed(matches):
+                try:
+                    return json.loads(m.group())
+                except json.JSONDecodeError:
+                    continue
+
+    logger.error("JSON parse failed: %s", clean[:300])
+    raise ValueError(f"Could not parse JSON response. First 200 chars: {clean[:200]}")

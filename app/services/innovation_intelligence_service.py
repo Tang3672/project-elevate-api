@@ -600,37 +600,28 @@ def format_intelligence_for_prompt(intel: InnovationIntelligence) -> str:
     if not intel.signals:
         return ""
 
+    # Limit to top 4 signals by strength to keep context compact
+    _ORDER = {"strong": 0, "moderate": 1, "weak": 2}
+    top = sorted(intel.signals, key=lambda s: _ORDER.get(s.strength, 3))[:4]
+
     lines = [
-        f"\n=== INNOVATION INTELLIGENCE SWEEP ({intel.disease_name}) ===",
-        f"Sources swept: {', '.join(intel.sources_swept)}",
-        f"Timestamp: {intel.sweep_timestamp}",
-        "",
-        "SIGNALS (use ALL of these in the 'Innovation Intelligence' section of the report):",
+        f"\n=== INNOVATION INTELLIGENCE ({intel.disease_name}) ===",
+        f"Sources: {', '.join(intel.sources_swept[:4])}",
         "",
     ]
 
-    for i, sig in enumerate(intel.signals, 1):
+    for i, sig in enumerate(top, 1):
         lines += [
-            f"Signal {i} [{sig.category.upper()}] — Strength: {sig.strength}",
-            f"  Headline: {sig.headline}",
-            f"  Detail: {sig.detail}",
-            f"  Implication: {sig.implication}",
-            f"  Source: {sig.source}",
-            f"  URL: {sig.source_url}",
-            f"  Recency: {sig.recency}",
+            f"Signal {i} [{sig.category.upper()}|{sig.strength}]: {sig.headline}",
+            f"  Implication for this innovator: {sig.implication}",
+            f"  Cite: {sig.source} — {sig.source_url}",
             "",
         ]
 
     lines += [
-        "INSTRUCTION: Add a dedicated 'Innovation Intelligence' chapter to the report BEFORE the market sizing chapter.",
-        "For each signal above:",
-        "  - State the headline finding explicitly",
-        "  - Explain what it means for THIS specific inventor's positioning (not generically)",
-        "  - Cite the exact source with the URL",
-        "  - 'Read between the lines' — explain non-obvious implications",
-        "  - Geographic signals should explain how the location creates specific structural advantages",
-        "  - Competitive signals should explain what the data implies about timing and white space",
-        "DO NOT summarise — reproduce each signal with full detail and its specific source.",
+        "INSTRUCTION: Include a brief 'Innovation Intelligence' section (3-5 paragraphs).",
+        "For each signal: state the finding, explain the specific implication for this inventor, cite source URL.",
+        "Keep this section concise — detail and sourcing matter more than length.",
     ]
 
     return "\n".join(lines)
