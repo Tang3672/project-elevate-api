@@ -54,11 +54,16 @@ async def send_email(to: str, subject: str, body: str, html: str = "") -> bool:
         if html:
             msg.attach(_MMT(html, "html"))
 
+        # Extract bare email for SMTP envelope (SES rejects "Name <email>" format)
+        import re as _re
+        _match = _re.search(r'<(.+?)>', from_addr)
+        envelope_from = _match.group(1) if _match else from_addr
+
         with _smtp.SMTP(host, port) as server:
             server.ehlo()
             server.starttls()
             server.login(user, password)
-            server.sendmail(from_addr, to, msg.as_string())
+            server.sendmail(envelope_from, to, msg.as_string())
 
         logger.info("Email sent to %s: %s", to, subject)
         return True

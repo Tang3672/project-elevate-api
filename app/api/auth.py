@@ -410,15 +410,13 @@ async def submit_waitlist(body: dict):
         """)
         # Check for duplicate
         existing = await conn.fetchrow("SELECT id FROM waitlist WHERE lower(email)=lower($1)", email)
-        if existing:
-            return {"status": "already_registered", "message": "Email already on the waitlist"}
+        if not existing:
+            await conn.execute("""
+                INSERT INTO waitlist (name, email, institution, role, plan, message)
+                VALUES ($1,$2,$3,$4,$5,$6)
+            """, name or None, email, institution or None, role or None, plan, message or None)
 
-        await conn.execute("""
-            INSERT INTO waitlist (name, email, institution, role, plan, message)
-            VALUES ($1,$2,$3,$4,$5,$6)
-        """, name or None, email, institution or None, role or None, plan, message or None)
-
-    # Send notifications
+    # Send notifications (always — even for duplicates so admin is aware)
     try:
         from app.services.email_service import send_email
         admin_email = "ijw91021@gmail.com"
