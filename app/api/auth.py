@@ -418,13 +418,15 @@ async def submit_waitlist(body: dict):
             VALUES ($1,$2,$3,$4,$5,$6)
         """, name or None, email, institution or None, role or None, plan, message or None)
 
-    # Send email notification to admin
+    # Send notifications
     try:
         from app.services.email_service import send_email
         admin_email = "ijw91021@gmail.com"
+
+        # 1. Notify Isaac immediately
         await send_email(
             to=admin_email,
-            subject=f"🚀 New early access request — {plan} plan",
+            subject=f"🚀 Early access request — {name or email} ({plan} plan)",
             body=f"""New early access request for Project Elevate:
 
 Name:        {name or '(not provided)'}
@@ -434,11 +436,35 @@ Role:        {role or '(not provided)'}
 Plan:        {plan}
 Message:     {message or '(none)'}
 
-View all submissions: https://web-staging-production-9c6a.up.railway.app/api/v1/auth/waitlist/admin?key=elevate_admin_2026
+━━━━━━━━━━━━━━━━━━━━━━━━
+View all submissions:
+https://web-staging-production-9c6a.up.railway.app/api/v1/auth/waitlist/admin?key=elevate_admin_2026
+
+Reply to this person: {email}
+━━━━━━━━━━━━━━━━━━━━━━━━
 """,
         )
+
+        # 2. Send confirmation to the person who submitted
+        if name:
+            await send_email(
+                to=email,
+                subject="You're on the Project Elevate early access list",
+                body=f"""Hi {name.split()[0]},
+
+Thanks for requesting early access to Project Elevate!
+
+We'll set up your {plan.title()} account and reach out within 24 hours.
+
+In the meantime, you can create a free account and start exploring the platform:
+https://projectelevate1.netlify.app/app.html?register=1
+
+— The Project Elevate Team
+contact@projectelevate.io
+""",
+            )
     except Exception as e:
-        logger.warning("Admin email notification failed: %s", e)
+        logger.warning("Email notification failed: %s", e)
 
     return {"status": "success", "message": "You're on the list! We'll be in touch within 24 hours."}
 
