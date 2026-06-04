@@ -28,6 +28,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Rate limiting — protects Anthropic/OpenAI API tokens from abuse
+from app.middleware.rate_limit import RateLimitMiddleware
+app.add_middleware(RateLimitMiddleware)
+
 @app.on_event("startup")
 async def startup():
     await init_db()

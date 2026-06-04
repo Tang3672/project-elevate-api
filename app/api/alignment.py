@@ -64,6 +64,63 @@ async def get_pi_report(payload: PIReportRequest, current_user = Depends(get_cur
 
     Takes 20-40 seconds.
     """
+    # ── Server-side quota enforcement (BEFORE calling Claude) ─────────────────
+    # This is the real gate — frontend checks are just UX. Without this,
+    # anyone who bypasses the frontend can burn Anthropic API tokens freely.
+    _dev_emails = {"test@projectelevate.io", "ijw91021@gmail.com",
+                   "admin@projectelevate.io", "oneonesie100@gmail.com"}
+    _PLAN_LIMITS = {
+        "basic":        5,   # Explorer $49
+        "starter":      20,  # Innovator $149
+        "professional": None, # Institution $799 — unlimited
+        "active":       None,
+        "trialing":     None,
+    }
+
+    try:
+        if current_user and current_user.get("email") not in _dev_emails:
+            from app.db.user_repository import get_user_by_id
+            user = await get_user_by_id(current_user["id"])
+            if user:
+                sub_status = user.get("subscription_status", "none")
+                plan       = user.get("plan", "none")
+                used       = user.get("free_reports_used", 0) or 0
+                limit      = _PLAN_LIMITS.get(plan) or _PLAN_LIMITS.get(sub_status)
+
+                # Early access period: grant 10 free analyses to anyone on the waitlist
+                # Remove this block when billing is live
+                on_waitlist = False
+                try:
+                    from app.db.database import get_pool
+                    pool = await get_pool()
+                    async with pool.acquire() as conn:
+                        wl = await conn.fetchrow(
+                            "SELECT id FROM waitlist WHERE lower(email)=lower($1)",
+                            current_user.get("email","")
+                        )
+                        on_waitlist = bool(wl)
+                except Exception:
+                    pass
+
+                early_access_limit = 10  # free analyses for waitlist members
+                if on_waitlist and used < early_access_limit:
+                    limit = early_access_limit  # override with early access allowance
+
+                if limit is not None and used >= limit:
+                    raise HTTPException(
+                        status_code=402,
+                        detail={
+                            "error": "quota_exceeded",
+                            "message": f"You've used all {limit} analyses on your plan. Upgrade to continue.",
+                            "used": used,
+                            "limit": limit,
+                        }
+                    )
+    except HTTPException:
+        raise
+    except Exception as quota_e:
+        logger.warning("Quota check failed (non-fatal): %s", quota_e)
+
     try:
         idea = payload.idea
         if payload.target_pathogen:
@@ -72,17 +129,16 @@ async def get_pi_report(payload: PIReportRequest, current_user = Depends(get_cur
             idea, payload.product_type, payload.disease_domain,
             payload.tier1_category, funding_pathway=payload.funding_pathway,
         )
-        # Increment free report counter if not subscribed
+        # Increment usage counter after successful report
         try:
-            if current_user:
+            if current_user and current_user.get("email") not in _dev_emails:
                 from app.db.user_repository import get_user_by_id, increment_free_report_count
                 user = await get_user_by_id(current_user["id"])
                 status = user.get("subscription_status", "none") if user else "none"
-                dev_emails = {"test@projectelevate.io", "ijw91021@gmail.com", "admin@projectelevate.io"}
-                if status not in ("active", "trialing") and current_user.get("email") not in dev_emails:
+                if status not in ("active", "trialing"):
                     await increment_free_report_count(current_user["id"])
         except Exception as inc_e:
-            logger.warning(f"Failed to increment free report count: {inc_e}")
+            logger.warning(f"Failed to increment report count: {inc_e}")
         return report
     except ValueError as e:
         raise HTTPException(status_code=503, detail=str(e))
