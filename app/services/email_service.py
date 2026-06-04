@@ -35,7 +35,7 @@ async def send_email(to: str, subject: str, body: str, html: str = "") -> bool:
     port     = int(getattr(settings, 'SMTP_PORT', 0) or getattr(settings, 'EMAIL_PORT', 587))
     user     = getattr(settings, 'SMTP_USER', '') or getattr(settings, 'EMAIL_USER', '')
     password = getattr(settings, 'SMTP_PASS', '') or getattr(settings, 'EMAIL_PASSWORD', '')
-    from_addr = getattr(settings, 'EMAIL_FROM', '') or f"Project Elevate <{user}>"
+    from_addr = getattr(settings, 'EMAIL_FROM', '') or "Project Elevate <contact@projectelevate.io>"
 
     if not host or not user or not password:
         logger.warning("Email not configured — cannot send '%s'. Set SMTP_HOST/SMTP_USER/SMTP_PASS in Railway.", subject)
@@ -232,7 +232,7 @@ async def send_digest_email(
     try:
         msg = MIMEMultipart("alternative")
         msg["Subject"] = subject
-        msg["From"]    = getattr(settings, 'EMAIL_FROM', f"Project Elevate <{settings.EMAIL_USER}>")
+        msg["From"]    = getattr(settings, 'EMAIL_FROM', "Project Elevate <contact@projectelevate.io>")
         msg["To"]      = user_email
 
         # Plain text fallback
