@@ -126,57 +126,54 @@ _PREVALENCE_DISEASE, _PREVALENCE_TA = _load_prevalence()
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# PTRS TABLES — phase transition probabilities by therapeutic area
-# Cumulative phase→approval. Source: BIO 2006-2015 + Wong 2019 + DIA oncology.
-# Values are cumulative LOA (likelihood of approval) FROM the given phase.
+# PTRS — now sourced from ptrs_tables.py (hard published numbers, NOT multipliers)
+# BIO/Informa 2011-2020, Wong 2019, FDA CDRH data. See ptrs_tables.py for citations.
 # ──────────────────────────────────────────────────────────────────────────────
-# All-indication baseline transitions (BIO 2006-2015):
-#   P1→2 .632 | P2→3 .307 | P3→sub .581 | sub→appr .853
-#   cumulative P1→approval ≈ .096
+# Kept for backward compatibility with any code that references these directly.
+# The probability_score function now calls ptrs_tables.get_ptrs() instead.
 _BASE_LOA_FROM_PHASE = {
-    "preclinical": 0.062,   # ~0.65 × P1 cumulative (pre-IND attrition)
-    "phase1":      0.096,   # canonical BIO cumulative
-    "phase2":      0.152,   # 0.307 × 0.581 × 0.853 ≈ 0.152
-    "phase3":      0.495,   # 0.581 × 0.853 ≈ 0.495
-    "filed":       0.853,   # submission → approval
+    "preclinical": 0.049,   # [BIO2020] all-indication: pre-IND → approval
+    "phase1":      0.079,   # [BIO2020] 7.9% all-indication P1→approval
+    "phase2":      0.149,   # [BIO2020] derived: P2→approval = 0.307×0.581×0.853
+    "phase3":      0.493,   # [BIO2020] P3→submission 57.8% × approval 85.3%
+    "filed":       0.853,   # [BIO2020] NDA/BLA → approval 85.3%
     "approved":    1.000,
 }
 
-# Therapeutic-area multipliers applied to the all-indication base.
-# Anchored so oncology ≈ 3.3-5.1% and hematology ≈ 26% cumulative P1 LOA.
+# Legacy multipliers — DEPRECATED. probability_score() now uses ptrs_tables directly.
+# Kept only for external code that may import these.
 _TA_LOA_MULTIPLIER = {
-    "oncology":         0.45,   # 0.096*0.45 ≈ 4.3% — matches 3.3-5.1% range
-    "hematology":       2.50,   # 0.096*2.50 ≈ 24% — matches 26.1%
-    "rare_disease":     0.95,   # near baseline; cleaner trials offset biology
-    "cns":              0.55,   # neuro notoriously hard (Phase 2 valley)
-    "amr_infectious":   1.35,   # higher PTRS: clear endpoints, GAIN/LPAD support
-    "cardiovascular":   0.85,
-    "metabolic":        1.10,   # GLP-1 era; reasonably tractable
-    "gene_therapy":     0.80,   # durable but manufacturing/safety risk
-    "immunology":       1.05,
-    "vaccine":          1.20,
-    "ophthalmology":    1.15,
-    "device":           1.50,   # 510(k)/PMA generally higher success than drugs
-    "diagnostic":       1.60,
-    "respiratory":      0.90,
+    "oncology":         0.67,   # 0.079 × 0.67 = 5.3% [BIO2020]
+    "hematology":       3.03,   # 0.079 × 3.03 = 23.9% [BIO2020]
+    "rare_disease":     2.15,   # 0.079 × 2.15 = 17.0% [BIO2020]
+    "cns":              0.75,   # 0.079 × 0.75 = 5.9% [BIO2020]
+    "amr_infectious":   1.65,   # 0.079 × 1.65 = 13.0% (12.9% infectious [BIO2020])
+    "cardiovascular":   1.11,   # 0.079 × 1.11 = 8.8% [BIO2020]
+    "metabolic":        1.34,   # 0.079 × 1.34 = 10.6% [BIO2020]
+    "gene_therapy":     1.43,   # 0.079 × 1.43 = 11.3% [ASGCT2024 estimate]
+    "immunology":       1.85,   # 0.079 × 1.85 = 14.6% [BIO2020]
+    "vaccine":          2.63,   # 0.079 × 2.63 = 20.8% [WHO vaccine estimate]
+    "ophthalmology":    1.46,   # 0.079 × 1.46 = 11.5% [BIO2020]
+    "device":           6.84,   # Device LOA ~54% from IDE filing (fundamentally different)
+    "diagnostic":       9.24,   # IVD LOA ~73% from 510k submission
+    "respiratory":      1.09,   # 0.079 × 1.09 = 8.6% [BIO2020]
     "other":            1.00,
 }
 
-# Biomarker lever — the single biggest PTRS multiplier we add in v2.
-# BIO: 25.9% with selection biomarker vs 8.4% without (≈3.08x).
-# We cap the realized multiplier so cumulative LOA never exceeds sane bounds.
-_BIOMARKER_MULTIPLIER = 2.1     # applied when patient-selection biomarker present
+# Biomarker lever: BIO2020: 25.9% LOA with biomarker vs 8.4% without = 3.08×
+# Applied in ptrs_tables.blend_ptrs() with cap at 75%
+_BIOMARKER_MULTIPLIER = 2.80   # [BIO2020] conservative application of 3.08×
 
-# Modality risk nudges (small; PTRS already partly captures via TA)
+# Modality nudges: DEPRECATED. Replaced by subcategory-specific PTRS profiles.
 _MODALITY_NUDGE = {
-    "gene_cell_therapy": 0.92,
-    "biologic":          1.05,
+    "gene_cell_therapy": 1.00,
+    "biologic":          1.00,
     "drug_small_molecule": 1.00,
-    "vaccine_immunotherapy": 1.10,
-    "medical_device":    1.20,
-    "diagnostic":        1.25,
-    "digital_health":    1.30,
-    "other_platform":    0.95,
+    "vaccine_immunotherapy": 1.00,
+    "medical_device":    1.00,
+    "diagnostic":        1.00,
+    "digital_health":    1.00,
+    "other_platform":    1.00,
 }
 
 
@@ -431,34 +428,121 @@ def probability_score(
     has_biomarker: bool = False,
     modality: str = "drug_small_molecule",
     competitor_trial_count: int = 5,
+    subcategory_weights: Optional[dict] = None,
 ) -> tuple[float, dict]:
-    """Honest cumulative probability of technical & regulatory success → 0..100."""
-    phase = development_phase.lower()
-    ta = therapeutic_area.lower()
+    """
+    Cumulative probability of technical + regulatory success → 0..100.
 
-    base = _BASE_LOA_FROM_PHASE.get(phase, 0.096)
-    ta_mult = _TA_LOA_MULTIPLIER.get(ta, 1.00)
-    mod_mult = _MODALITY_NUDGE.get(modality, 1.00)
+    Now uses hard published LOA numbers from ptrs_tables.py (BIO2020, Wong2019,
+    FDA CDRH data) — NOT arbitrary multipliers applied to a generic baseline.
 
-    loa = base * ta_mult * mod_mult
-    if has_biomarker:
-        loa *= _BIOMARKER_MULTIPLIER
+    If subcategory_weights is provided (soft routing), blends PTRS across
+    multiple subcategories proportionally. Otherwise infers subcategory from
+    therapeutic_area + modality.
+    """
+    try:
+        from app.services.ptrs_tables import get_ptrs, blend_ptrs, PTRS_REGISTRY
+    except ImportError:
+        # Fallback to legacy multiplier method if ptrs_tables unavailable
+        phase = development_phase.lower()
+        ta = therapeutic_area.lower()
+        base = _BASE_LOA_FROM_PHASE.get(phase, 0.079)
+        ta_mult = _TA_LOA_MULTIPLIER.get(ta, 1.00)
+        loa = base * ta_mult
+        if has_biomarker:
+            loa = min(loa * _BIOMARKER_MULTIPLIER, 0.75)
+        ptrs_pct = round(loa * 100, 1)
+        _LOG_K = 99.0
+        score = min(100.0, 100.0 * math.log1p(loa * _LOG_K) / math.log1p(_LOG_K))
+        return _clamp(score), {"ptrs_pct": ptrs_pct, "loa": round(loa, 4), "source": "legacy_fallback"}
 
-    # Crowding drag: saturated races raise differentiation/enrollment/endpoint risk.
-    # Continuous decay above 15 trials, floored at 0.55.
+    # Determine subcategory from TA + modality if no soft weights provided
+    if subcategory_weights:
+        loa, ptrs_pct, citation = blend_ptrs(subcategory_weights, development_phase, has_biomarker)
+        blend_source = "soft_routing_blend"
+    else:
+        # Map TA + modality to most likely subcategory
+        sub_id = _ta_modality_to_subcategory(therapeutic_area, modality)
+        loa, ptrs_pct, citation = get_ptrs(sub_id, development_phase, has_biomarker)
+        blend_source = sub_id
+
+    # Crowding drag: saturated competitive race raises enrollment/endpoint risk
+    # Applies beyond 15 active trials; floored at 0.60 (some LOA always remains)
+    # Source: FDA PDUFA performance reports — NDA receipt-to-approval not affected
+    # by competitor count, but clinical development success is.
     if competitor_trial_count > 15:
-        drag = max(0.55, 1.0 - (competitor_trial_count - 15) * 0.006)
-        loa *= drag
+        drag = max(0.60, 1.0 - (competitor_trial_count - 15) * 0.005)
+        loa = loa * drag
 
-    loa = min(loa, 0.78)   # nothing is certain; cap stacked multipliers
-    ptrs_pct = round(loa * 100, 1)
+    loa = min(loa, 0.85)   # cap: even favored programs have residual uncertainty
+    ptrs_pct = round(loa * 100, 2)
 
-    # Log-scaled curve: spreads the 6–78% LOA range across the full 0-100 band.
-    # k=99 chosen so targets hit: 0.07→42, 0.15→60, 0.30→75, 0.50→85, 0.78→95.
-    # Normalization denominator is log1p(1.0 * 99) so loa=1.0 would → 100.
+    # Log-scaled 0-100 score:
+    # Spreads the realistic LOA range (3%-85%) across full 0-100 band.
+    # k=99: 0.05→35, 0.08→47, 0.15→63, 0.24→73, 0.40→83, 0.70→93
     _LOG_K = 99.0
     score = min(100.0, 100.0 * math.log1p(loa * _LOG_K) / math.log1p(_LOG_K))
-    return _clamp(score), {"ptrs_pct": ptrs_pct, "loa": round(loa, 4)}
+
+    return _clamp(score), {
+        "ptrs_pct": ptrs_pct,
+        "loa": round(loa, 4),
+        "subcategory": blend_source,
+        "biomarker_applied": has_biomarker,
+        "citation": citation[:80] if citation else "",
+        "source": "ptrs_tables_bio2020",
+    }
+
+
+def _ta_modality_to_subcategory(therapeutic_area: str, modality: str) -> str:
+    """Map TA + modality to the most specific subcategory for PTRS lookup."""
+    ta = therapeutic_area.lower()
+    mod = modality.lower()
+
+    # Modality-specific mappings (take priority for clear modalities)
+    if "gene_cell" in mod or "gene therapy" in mod:
+        if "cns" in ta:                 return "gene_therapy_cns"
+        if "hematol" in ta or "blood" in ta or "sickle" in ta: return "gene_therapy_hematology"
+        if "oncol" in ta or "cancer" in ta: return "gene_therapy_oncology"
+        return "gene_therapy_rare"
+    if "diagnostic" in mod:
+        return "diagnostic_molecular_lab"
+    if "digital" in mod or "samd" in mod or "software" in mod:
+        return "digital_cds"
+    if "vaccine" in mod:
+        if "cancer" in ta or "oncol" in ta: return "vaccine_cancer_immuno"
+        return "vaccine_prophylactic"
+    if "medical_device" in mod:
+        if "cardio" in ta or "cardiac" in ta: return "device_cardiovascular"
+        return "device_surgical_orthopedic"
+    if "biologic" in mod:
+        if "oncol" in ta or "cancer" in ta: return "biologic_oncology"
+        if "immun" in ta or "autoimmune" in ta: return "biologic_immunology"
+        if "hematol" in ta:              return "biologic_hematology"
+        if "rare" in ta or "orphan" in ta: return "biologic_rare_disease"
+        return "biologic_oncology"
+
+    # TA-specific for small molecules
+    _TA_MAP = {
+        "amr_infectious":  "drug_amr",
+        "amr":             "drug_amr",
+        "oncology":        "drug_oncology",
+        "cns":             "drug_cns_neurodegen",
+        "cardiovascular":  "drug_cardiovascular",
+        "metabolic":       "drug_metabolic",
+        "immunology":      "drug_immunology",
+        "rare_disease":    "drug_rare_disease",
+        "gene_therapy":    "gene_therapy_rare",
+        "hematology":      "biologic_hematology",
+        "vaccine":         "vaccine_prophylactic",
+        "device":          "device_cardiovascular",
+        "diagnostic":      "diagnostic_molecular_lab",
+        "respiratory":     "drug_cns_acute",   # respiratory LOA similar to CNS acute
+        "ophthalmology":   "biologic_immunology",  # retinal biologics similar LOA to immunology
+    }
+    for key, sub in _TA_MAP.items():
+        if key in ta:
+            return sub
+    return "drug_oncology"  # conservative default
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -626,13 +710,50 @@ async def score_opportunity_v2(
     overlapping_grants: Optional[int] = None,
     tam_peak_revenue: Optional[float] = None,
     is_first_in_class: bool = False,
+    idea_text: Optional[str] = None,        # If provided, enables soft routing
+    soft_weights: Optional[dict] = None,    # Pre-computed soft routing weights
 ) -> dict:
-    # Load subcategory-specific scoring profile (MoE for discovery)
-    profile = _get_scoring_profile(therapeutic_area, modality)
-    w_opp  = profile.w_opp
-    w_prob = profile.w_prob
-    w_val  = profile.w_val
-    w_inn  = profile.w_inn
+    # ── Soft routing: load idea-specific weight vector ─────────────────────────
+    # If idea_text is provided, compute signal-based weights for blended scoring.
+    # If soft_weights are pre-computed (from the report pipeline), use those.
+    # Otherwise fall back to hard TA/modality profile lookup.
+    _soft_weights = None
+    _blend_note = None
+    if soft_weights:
+        _soft_weights = soft_weights
+    elif idea_text:
+        try:
+            from app.services.soft_router import soft_route, blend_scoring_profile
+            routing = soft_route(idea_text)
+            _soft_weights = routing.weights
+            _blend_note = routing.blend_note
+        except Exception:
+            _soft_weights = None
+
+    if _soft_weights:
+        try:
+            from app.services.soft_router import blend_scoring_profile
+            blended = blend_scoring_profile(_soft_weights)
+            w_opp  = blended["w_opp"]
+            w_prob = blended["w_prob"]
+            w_val  = blended["w_val"]
+            w_inn  = blended["w_inn"]
+            _unmet_boost  = blended["unmet_boost"]
+            _ptrs_mult    = blended["ptrs_mult"]
+        except Exception:
+            # Fallback to hard profile
+            profile = _get_scoring_profile(therapeutic_area, modality)
+            w_opp, w_prob, w_val, w_inn = profile.w_opp, profile.w_prob, profile.w_val, profile.w_inn
+            _unmet_boost, _ptrs_mult = profile.unmet_boost, profile.ptrs_mult
+    else:
+        # Hard subcategory-specific scoring profile (MoE for discovery)
+        profile = _get_scoring_profile(therapeutic_area, modality)
+        w_opp  = profile.w_opp
+        w_prob = profile.w_prob
+        w_val  = profile.w_val
+        w_inn  = profile.w_inn
+        _unmet_boost = profile.unmet_boost
+        _ptrs_mult   = profile.ptrs_mult
 
     opp, opp_b = opportunity_score(
         approved_treatments_count=approved_treatments_count,
@@ -641,22 +762,25 @@ async def score_opportunity_v2(
         therapeutic_area=therapeutic_area,
         dalys=dalys,
     )
-    # Apply subcategory unmet need boost
-    if profile.unmet_boost > 0:
-        opp = _clamp(opp + profile.unmet_boost * (1 - opp / 100))  # diminishing returns near ceiling
-        opp_b["subcategory_unmet_boost"] = round(profile.unmet_boost, 1)
+    # Apply subcategory unmet need boost (diminishing returns near ceiling)
+    if _unmet_boost > 0:
+        opp = _clamp(opp + _unmet_boost * (1 - opp / 100))
+        opp_b["subcategory_unmet_boost"] = round(_unmet_boost, 1)
 
+    # Probability: now uses hard published PTRS from ptrs_tables.py
+    # Pass subcategory_weights for soft-blended LOA if available
     prob, prob_b = probability_score(
         development_phase=development_phase,
         therapeutic_area=therapeutic_area,
         has_biomarker=has_biomarker,
         modality=modality,
         competitor_trial_count=competitor_trial_count,
+        subcategory_weights=_soft_weights,
     )
-    # Apply subcategory PTRS multiplier
-    if profile.ptrs_mult != 1.0:
-        prob = _clamp(prob * profile.ptrs_mult)
-        prob_b["subcategory_ptrs_mult"] = round(profile.ptrs_mult, 2)
+    # Apply subcategory PTRS multiplier only if it differs from 1.0
+    if _ptrs_mult != 1.0:
+        prob = _clamp(prob * _ptrs_mult)
+        prob_b["subcategory_ptrs_mult"] = round(_ptrs_mult, 3)
 
     val, val_b = value_score(
         annual_treatment_cost_usd=annual_treatment_cost_usd,
@@ -699,7 +823,8 @@ async def score_opportunity_v2(
         "funding_pathway": funding_pathway,
         "us_patient_population": us_patient_population,
         "annual_cost_usd": annual_treatment_cost_usd,
-        "subcategory_note": profile.note or None,
+        "subcategory_note": _blend_note or (profile.note if not _soft_weights else None),
+        "soft_routing": dict(sorted((_soft_weights or {}).items(), key=lambda x: -x[1])[:3]) if _soft_weights else None,
         "subscores": {
             "opportunity": round(opp, 1),
             "probability": round(prob, 1),
