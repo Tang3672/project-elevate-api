@@ -58,7 +58,7 @@ async def send_email(to: str, subject: str, body: str, html: str = "") -> bool:
             server.ehlo()
             server.starttls()
             server.login(user, password)
-            server.sendmail(user, to, msg.as_string())
+            server.sendmail(from_addr, to, msg.as_string())
 
         logger.info("Email sent to %s: %s", to, subject)
         return True

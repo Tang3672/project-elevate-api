@@ -460,7 +460,7 @@ In the meantime, you can create a free account and start exploring the platform:
 https://projectelevate1.netlify.app/app.html?register=1
 
 — The Project Elevate Team
-contact@projectelevate.io
+ijw91021@gmail.com
 """,
             )
     except Exception as e:
