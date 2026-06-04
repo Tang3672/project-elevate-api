@@ -421,7 +421,7 @@ async def submit_waitlist(body: dict):
     # Send notifications
     try:
         from app.services.email_service import send_email
-        admin_email = "projectelevatetest1@gmail.com"
+        admin_email = "ijw91021@gmail.com"
 
         # 1. Notify Isaac immediately
         await send_email(
