@@ -547,14 +547,27 @@ def arbitrator_node(state: PIReportState) -> dict:
 
 def formatter_node(state: PIReportState) -> dict:
     """Attaches full validation results to the report."""
-    report  = state["report"].copy()
-    flags   = state.get("all_flags", [])
-    passed  = state.get("validation_passed", True)
-    verdict = state.get("_verdict", "PASS")
+    report = state["report"].copy()
+    flags  = state.get("all_flags", [])
 
+    # Recompute verdict from actual flags — don't rely on _verdict which LangGraph
+    # may drop if the key isn't in PIReportState TypedDict.
     errors   = [f for f in flags if f.get("severity") == "ERROR"]
     warnings = [f for f in flags if f.get("severity") == "WARNING"]
     notes    = [f for f in flags if f.get("severity") == "NOTE"]
+
+    if errors:
+        verdict = "ERROR"
+        passed  = False
+    elif warnings:
+        verdict = "FLAG"
+        passed  = True
+    elif notes:
+        verdict = "REVIEW"
+        passed  = True
+    else:
+        verdict = "PASS"
+        passed  = True
 
     # Group by agent for display
     by_agent = {}
@@ -582,10 +595,13 @@ def formatter_node(state: PIReportState) -> dict:
         "validator_model":  VERIFIER_MODEL,
         "validated_at":     datetime.utcnow().isoformat(),
         "summary": (
-            f"PASS: All 5 verification agents found no issues." if verdict == "PASS" else
-            f"FLAG: {len(warnings)} warning(s) found by: {', '.join(set(f.get('agent','') for f in warnings))}." if verdict == "FLAG" else
-            f"ERROR: {len(errors)} critical error(s) found. Report may contain significant inaccuracies." if verdict == "ERROR" else
-            f"REVIEW: {len(notes)} minor note(s) found."
+            f"✓ PASS: All 5 verification agents found no issues — math, sources, regulatory, market, and factual checks all clear."
+            if verdict == "PASS" else
+            f"⚠ FLAG: {len(warnings)} warning(s) found by {', '.join(sorted(set(f.get('agent','') for f in warnings)))}. Report is usable but review flagged items."
+            if verdict == "FLAG" else
+            f"✗ ERROR: {len(errors)} critical error(s) found by {', '.join(sorted(set(f.get('agent','') for f in errors)))}. Report contains inaccuracies that should be corrected."
+            if verdict == "ERROR" else
+            f"ℹ REVIEW: {len(notes)} minor note(s) found — no errors or warnings."
         )
     }
 
