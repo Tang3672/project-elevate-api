@@ -373,3 +373,88 @@ async def change_password(request: Request, current_user: dict = Depends(get_cur
         await conn.execute("UPDATE users SET password_hash=$1 WHERE id=$2", hashed, current_user["id"])
 
     return {"message": "Password updated successfully"}
+
+
+# ── EARLY ACCESS WAITLIST ──────────────────────────────────────────────────────
+
+@router.post("/waitlist")
+async def submit_waitlist(body: dict):
+    """
+    Save an early access request. No auth required — anyone can submit.
+    Stores in waitlist table + sends email notification to admin.
+    """
+    name        = (body.get("name") or "").strip()[:100]
+    email       = (body.get("email") or "").strip()[:200]
+    institution = (body.get("institution") or "").strip()[:200]
+    role        = (body.get("role") or "").strip()[:100]
+    plan        = (body.get("plan") or "starter").strip()[:50]
+    message     = (body.get("message") or "").strip()[:1000]
+
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="Valid email required")
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        # Create table if not exists
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS waitlist (
+                id          SERIAL PRIMARY KEY,
+                name        TEXT,
+                email       TEXT NOT NULL,
+                institution TEXT,
+                role        TEXT,
+                plan        TEXT DEFAULT 'starter',
+                message     TEXT,
+                created_at  TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+        # Check for duplicate
+        existing = await conn.fetchrow("SELECT id FROM waitlist WHERE lower(email)=lower($1)", email)
+        if existing:
+            return {"status": "already_registered", "message": "Email already on the waitlist"}
+
+        await conn.execute("""
+            INSERT INTO waitlist (name, email, institution, role, plan, message)
+            VALUES ($1,$2,$3,$4,$5,$6)
+        """, name or None, email, institution or None, role or None, plan, message or None)
+
+    # Send email notification to admin
+    try:
+        from app.services.email_service import send_email
+        admin_email = "ijw91021@gmail.com"
+        await send_email(
+            to=admin_email,
+            subject=f"🚀 New early access request — {plan} plan",
+            body=f"""New early access request for Project Elevate:
+
+Name:        {name or '(not provided)'}
+Email:       {email}
+Institution: {institution or '(not provided)'}
+Role:        {role or '(not provided)'}
+Plan:        {plan}
+Message:     {message or '(none)'}
+
+View all submissions: https://web-staging-production-9c6a.up.railway.app/api/v1/auth/waitlist/admin?key=elevate_admin_2026
+""",
+        )
+    except Exception as e:
+        logger.warning("Admin email notification failed: %s", e)
+
+    return {"status": "success", "message": "You're on the list! We'll be in touch within 24 hours."}
+
+
+@router.get("/waitlist/admin")
+async def view_waitlist(key: str = ""):
+    """View all waitlist submissions. Protected by simple key."""
+    if key != "elevate_admin_2026":
+        raise HTTPException(status_code=403, detail="Invalid key")
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT id, name, email, institution, role, plan, message, created_at
+            FROM waitlist ORDER BY created_at DESC
+        """)
+    return {
+        "count": len(rows),
+        "submissions": [dict(r) for r in rows]
+    }
