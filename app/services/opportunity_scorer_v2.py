@@ -22,6 +22,7 @@ Stewart 2001 / Alacrita / standard healthcare-IB practice.
 
 from __future__ import annotations
 import asyncio as _asyncio
+import dataclasses
 import json as _json
 import logging as _logging
 import math
@@ -177,6 +178,168 @@ _MODALITY_NUDGE = {
     "digital_health":    1.30,
     "other_platform":    0.95,
 }
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# SUBCATEGORY SCORING PROFILES — Mixture of Experts for market discovery
+# Each profile adjusts the four sub-score weights and adds modifiers specific
+# to the product vertical. Prevents AMR, gene therapy, SaMD etc. from being
+# scored by the same logic as oncology biologics.
+# ──────────────────────────────────────────────────────────────────────────────
+
+@dataclasses.dataclass
+class _ScoringProfile:
+    """Subcategory-specific scoring parameters."""
+    # Weight overrides (must sum to ~1.0; replaces globals for this subcategory)
+    w_opp:  float = 0.35
+    w_prob: float = 0.28
+    w_val:  float = 0.25
+    w_inn:  float = 0.12
+    # Unmet need adjustment (additive on top of the approved-treatment curve)
+    unmet_boost: float = 0.0
+    # Value ceiling override (log-normalisation ceiling, default $35B)
+    value_ceiling_usd: float = 35_000_000_000
+    # PTRS base multiplier (multiplicative on TA-specific LOA)
+    ptrs_mult: float = 1.0
+    # Whether commercial size dominates (True) vs regulatory burden (False)
+    commercial_dominant: bool = True
+    # Note shown in UI
+    note: str = ""
+
+
+_SUBCATEGORY_PROFILES: dict[str, _ScoringProfile] = {
+    # AMR: unmet need is sky-high (CDC urgent threat) but commercial value is
+    # structurally depressed (stewardship programs restrict use). Adjust weights.
+    "drug_amr": _ScoringProfile(
+        w_opp=0.45, w_prob=0.25, w_val=0.18, w_inn=0.12,
+        unmet_boost=25.0, value_ceiling_usd=5_000_000_000,
+        note="AMR: high unmet need / constrained commercial (stewardship programs limit use)",
+    ),
+    "drug_amr_community": _ScoringProfile(
+        w_opp=0.40, w_prob=0.30, w_val=0.20, w_inn=0.10,
+        unmet_boost=15.0, value_ceiling_usd=3_000_000_000,
+        note="Community AMR: broader patient access but generic competition faster",
+    ),
+    # Gene therapy: value ceiling high (one-time curative pricing) but PTRS low
+    # (manufacturing + durable safety risk). Weight probability more conservatively.
+    "gene_cell_therapy": _ScoringProfile(
+        w_opp=0.30, w_prob=0.35, w_val=0.25, w_inn=0.10,
+        ptrs_mult=0.85, value_ceiling_usd=10_000_000_000,
+        note="Gene therapy: high value ceiling but elevated PTRS risk (manufacturing, durability)",
+    ),
+    # Oncology: well-characterized trials, biomarker-driven. Innovation weight high.
+    "biologic_oncology": _ScoringProfile(
+        w_opp=0.32, w_prob=0.28, w_val=0.28, w_inn=0.12,
+        value_ceiling_usd=40_000_000_000,
+        note="Oncology biologic: biomarker-gated population reduces size but improves PTRS",
+    ),
+    "drug_oncology": _ScoringProfile(
+        w_opp=0.32, w_prob=0.30, w_val=0.26, w_inn=0.12,
+        note="Oncology small molecule: established biomarker-driven precision oncology pathways",
+    ),
+    # Medical devices: higher PTRS (510(k)/PMA clearer than drug approval), but
+    # value is procedure-volume based not patient-prevalence based.
+    "medical_device": _ScoringProfile(
+        w_opp=0.38, w_prob=0.22, w_val=0.28, w_inn=0.12,
+        ptrs_mult=1.40, value_ceiling_usd=20_000_000_000,
+        note="Medical device: higher regulatory success rate (510k/PMA vs drug), procedure-volume TAM",
+    ),
+    # IVD diagnostics: very high PTRS (FDA clearance much faster than drug approval)
+    # and test-volume based TAM, not prevalence-based.
+    "diagnostic": _ScoringProfile(
+        w_opp=0.35, w_prob=0.20, w_val=0.32, w_inn=0.13,
+        ptrs_mult=1.55, value_ceiling_usd=15_000_000_000,
+        note="IVD: fast 510k/De Novo clearance; TAM = test volume × CLFS rate (not drug pricing)",
+    ),
+    # SaMD/digital health: lowest regulatory barrier BUT lowest reimbursement certainty.
+    # CMS NCD/LCD coverage determines whether TAM materialises.
+    "digital_health": _ScoringProfile(
+        w_opp=0.35, w_prob=0.25, w_val=0.28, w_inn=0.12,
+        ptrs_mult=1.60, value_ceiling_usd=8_000_000_000,
+        commercial_dominant=False,
+        note="SaMD: fast FDA clearance but reimbursement uncertainty (CMS NCD/LCD needed for TAM)",
+    ),
+    # Vaccines: public health value vs commercial value diverge. ACIP recommendation
+    # drives both access and revenue. Probability depends on immunogenicity endpoint.
+    "vaccine_immunotherapy": _ScoringProfile(
+        w_opp=0.40, w_prob=0.28, w_val=0.22, w_inn=0.10,
+        unmet_boost=10.0, value_ceiling_usd=25_000_000_000,
+        note="Vaccine: ACIP recommendation is the key commercial gate; population-level TAM",
+    ),
+    # Rare disease: small populations but premium pricing and FDA incentives.
+    "drug_rare_disease": _ScoringProfile(
+        w_opp=0.30, w_prob=0.30, w_val=0.30, w_inn=0.10,
+        unmet_boost=20.0, value_ceiling_usd=8_000_000_000,
+        note="Rare disease: orphan pricing offsets small population; strong FDA incentives",
+    ),
+    "biologic_rare_disease": _ScoringProfile(
+        w_opp=0.28, w_prob=0.30, w_val=0.32, w_inn=0.10,
+        unmet_boost=25.0, ptrs_mult=0.95, value_ceiling_usd=12_000_000_000,
+        note="Rare disease biologic: enzyme replacement pricing $200-500K/yr; orphan market",
+    ),
+    # CNS: highest Phase 2 failure rate in all of medicine. Weight probability heavily.
+    "drug_cns": _ScoringProfile(
+        w_opp=0.30, w_prob=0.40, w_val=0.22, w_inn=0.08,
+        ptrs_mult=0.65, value_ceiling_usd=15_000_000_000,
+        note="CNS: highest clinical failure rate; Phase 2 attrition ~80% (FDA, 2023)",
+    ),
+    # Immunology/autoimmune: crowded but validated; biosimilar competition compresses value.
+    "drug_immunology": _ScoringProfile(
+        w_opp=0.32, w_prob=0.30, w_val=0.26, w_inn=0.12,
+        value_ceiling_usd=20_000_000_000,
+        note="Immunology: crowded with biosimilars; differentiation via mechanism or convenience critical",
+    ),
+    "biologic_immunology": _ScoringProfile(
+        w_opp=0.30, w_prob=0.30, w_val=0.28, w_inn=0.12,
+        value_ceiling_usd=25_000_000_000,
+        note="Autoimmune biologic: biosimilar pressure growing; mechanistic differentiation needed",
+    ),
+}
+
+_SUBCATEGORY_PROFILE_MAP: dict[str, str] = {
+    # Maps TA strings and modality strings to profile keys
+    "amr_infectious": "drug_amr",
+    "gene_therapy": "gene_cell_therapy",
+    "gene_cell_therapy": "gene_cell_therapy",
+    "rare_disease": "drug_rare_disease",
+    "biologic_rare": "biologic_rare_disease",
+    "cns": "drug_cns",
+    "oncology": "drug_oncology",
+    "biologic": "biologic_oncology",
+    "biologic_oncology": "biologic_oncology",
+    "device": "medical_device",
+    "medical_device": "medical_device",
+    "diagnostic": "diagnostic",
+    "digital_health": "digital_health",
+    "software_samd": "digital_health",
+    "vaccine": "vaccine_immunotherapy",
+    "vaccine_immunotherapy": "vaccine_immunotherapy",
+    "immunology": "drug_immunology",
+    "biologic_immunology": "biologic_immunology",
+    "drug_rare_disease": "drug_rare_disease",
+    "drug_amr": "drug_amr",
+}
+
+
+def _get_scoring_profile(therapeutic_area: str, modality: str) -> _ScoringProfile:
+    """
+    Return subcategory scoring profile. TA takes priority over modality for
+    TAs with dominant clinical characteristics (CNS failure rate, AMR stewardship,
+    rare disease pricing), but modality wins for oncology (biologic vs small mol differs).
+    """
+    ta = therapeutic_area.lower()
+    mod = modality.lower()
+
+    # TA-dominant: the TA characteristic overrides modality classification
+    _TA_DOMINANT = {"cns", "amr_infectious", "amr", "gene_therapy", "rare_disease",
+                    "vaccine", "digital_health", "diagnostic"}
+    if any(t in ta for t in _TA_DOMINANT):
+        key = _SUBCATEGORY_PROFILE_MAP.get(ta) or _SUBCATEGORY_PROFILE_MAP.get(mod)
+    else:
+        # Modality-dominant for oncology and immunology (biologic vs small mol matters a lot)
+        key = _SUBCATEGORY_PROFILE_MAP.get(mod) or _SUBCATEGORY_PROFILE_MAP.get(ta)
+
+    return _SUBCATEGORY_PROFILES.get(key, _ScoringProfile())
 
 
 def _clamp(x: float, lo: float = 1.0, hi: float = 100.0) -> float:
@@ -464,6 +627,13 @@ async def score_opportunity_v2(
     tam_peak_revenue: Optional[float] = None,
     is_first_in_class: bool = False,
 ) -> dict:
+    # Load subcategory-specific scoring profile (MoE for discovery)
+    profile = _get_scoring_profile(therapeutic_area, modality)
+    w_opp  = profile.w_opp
+    w_prob = profile.w_prob
+    w_val  = profile.w_val
+    w_inn  = profile.w_inn
+
     opp, opp_b = opportunity_score(
         approved_treatments_count=approved_treatments_count,
         competitor_trial_count=competitor_trial_count,
@@ -471,6 +641,11 @@ async def score_opportunity_v2(
         therapeutic_area=therapeutic_area,
         dalys=dalys,
     )
+    # Apply subcategory unmet need boost
+    if profile.unmet_boost > 0:
+        opp = _clamp(opp + profile.unmet_boost * (1 - opp / 100))  # diminishing returns near ceiling
+        opp_b["subcategory_unmet_boost"] = round(profile.unmet_boost, 1)
+
     prob, prob_b = probability_score(
         development_phase=development_phase,
         therapeutic_area=therapeutic_area,
@@ -478,6 +653,11 @@ async def score_opportunity_v2(
         modality=modality,
         competitor_trial_count=competitor_trial_count,
     )
+    # Apply subcategory PTRS multiplier
+    if profile.ptrs_mult != 1.0:
+        prob = _clamp(prob * profile.ptrs_mult)
+        prob_b["subcategory_ptrs_mult"] = round(profile.ptrs_mult, 2)
+
     val, val_b = value_score(
         annual_treatment_cost_usd=annual_treatment_cost_usd,
         us_patient_population=us_patient_population,
@@ -496,9 +676,8 @@ async def score_opportunity_v2(
         designations=designations,
     )
 
-    # Geometric combination — a near-zero in any factor crushes the score.
-    # Innovation floored at 1 so diseases with no innovation signal don't zero out.
-    score_raw = (opp ** _W_OPP) * (prob ** _W_PROB) * (val ** _W_VAL) * (max(inn, 1.0) ** _W_INN)
+    # Geometric combination with subcategory-specific weights
+    score_raw = (opp ** w_opp) * (prob ** w_prob) * (val ** w_val) * (max(inn, 1.0) ** w_inn)
     score_display = _clamp(score_raw)
 
     tier, color = _tier(score_display)
@@ -520,6 +699,7 @@ async def score_opportunity_v2(
         "funding_pathway": funding_pathway,
         "us_patient_population": us_patient_population,
         "annual_cost_usd": annual_treatment_cost_usd,
+        "subcategory_note": profile.note or None,
         "subscores": {
             "opportunity": round(opp, 1),
             "probability": round(prob, 1),
@@ -528,10 +708,10 @@ async def score_opportunity_v2(
         },
         "components": {**opp_b, **prob_b, **val_b, **inn_b},
         "weights": {
-            "opportunity": _W_OPP,
-            "probability": _W_PROB,
-            "value": _W_VAL,
-            "innovation": _W_INN,
+            "opportunity": w_opp,
+            "probability": w_prob,
+            "value": w_val,
+            "innovation": w_inn,
         },
     }
 
