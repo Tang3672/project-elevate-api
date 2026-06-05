@@ -1316,15 +1316,65 @@ async def run_discovery_engine_v2(top_n: int = 25, funding_pathway: str = "comme
 
     for r in scored:
         pop_val = r.get("us_patient_population") or 0
+        trials_val = r.get("components", {}).get("competitor_trial_count", 5)
+        if isinstance(trials_val, (int, float)):
+            trials_count = int(trials_val)
+        else:
+            trials_count = 5
+        approved_val = r.get("approved_treatments_count", 0) or 0
+
+        # Population scale: small markets get penalized to prevent ultra-rare dominating
         scale = _pop_scale(pop_val)
-        if scale < 1.0:
-            r["score"]     = round(r["score"] * scale, 1)
-            r["score_raw"] = round(r.get("score_raw", r["score"]) * scale, 2)
-            r["rare_disease_penalty"] = True
+
+        # Commercial tractability penalty — the most important new check.
+        # Diseases with 0 approved therapies AND very few active trials have NO
+        # validated clinical/commercial path. High unmet need + no trials =
+        # scientifically interesting but commercially speculative.
+        # Source: McKinsey drug development analysis — 95%+ of diseases with
+        # 0 approvals and <3 trials never reach commercial stage.
+        # Examples: 22q11.2 deletion (no validated DMT path), AKI (complex endpoint
+        # validation failures). These should rank behind diseases with proven paths.
+        tractability_scale = 1.0
+        if approved_val == 0 and trials_count < 5:
+            # No approved therapy + very thin pipeline = speculative opportunity
+            tractability_scale = 0.55
+            r["commercial_tractability"] = "SPECULATIVE"
+            r["tractability_note"] = f"0 approved therapies + {trials_count} active trials — no validated clinical path yet"
+        elif approved_val == 0 and trials_count < 15:
+            # Emerging but unproven
+            tractability_scale = 0.78
+            r["commercial_tractability"] = "EMERGING"
+            r["tractability_note"] = f"0 approved therapies; {trials_count} trials show emerging interest"
+        elif approved_val >= 3 and trials_count >= 20:
+            # Crowded but commercially validated
+            r["commercial_tractability"] = "VALIDATED_CROWDED"
+        else:
+            r["commercial_tractability"] = "VIABLE"
+
+        combined_scale = scale * tractability_scale
+        if combined_scale < 1.0:
+            r["score"]     = round(r["score"] * combined_scale, 1)
+            r["score_raw"] = round(r.get("score_raw", r["score"]) * combined_scale, 2)
+            if scale < 1.0:
+                r["rare_disease_penalty"] = True
         # Re-tier after scaling
         r["tier"], r["tier_color"] = _tier(r["score"])
 
-    scored.sort(key=lambda x: x["score"], reverse=True)
+        # Compute SAM explicitly for frontend display
+        # SAM = peak_revenue_usd (already risk-adjusted via Bass + BIA + formulary + MEPS)
+        peak = r.get("peak_revenue_usd") or 0
+        r["sam_usd"] = round(peak)
+        r["sam_fmt"] = (f"${peak/1e9:.1f}B" if peak >= 1e9 else
+                        f"${peak/1e6:.0f}M" if peak >= 1e6 else
+                        f"${peak/1e3:.0f}K")
+
+    # SORT BY SAM (risk-adjusted commercial value) not composite score.
+    # Rationale: SAM already incorporates PTRS, Bass diffusion, formulary coverage,
+    # MEPS adherence, and BIA affordability — it IS the risk-adjusted expected value.
+    # Ranking by SAM ensures commercially viable diseases (large + tractable + accessible)
+    # surface above academically interesting but commercially speculative diseases.
+    scored.sort(key=lambda x: x.get("sam_usd", 0), reverse=True)
+
     # Add rank field
     for i, r in enumerate(scored, 1):
         r["rank"] = i
