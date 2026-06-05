@@ -437,15 +437,21 @@ async def get_opportunities(
         except Exception as e_db:
             logger.debug("disease_scored supplement failed: %s", e_db)
 
-    # No extended universe yet — just curated 309
+    # Fallback — return curated universe with accurate count
+    curated_size = len(curated_opps)
+    try:
+        from app.services.universe_expander_v2 import get_all_diseases_for_batch_scoring
+        total_known = len(get_all_diseases_for_batch_scoring())
+    except Exception:
+        total_known = curated_size
     for i, o in enumerate(curated_opps[:top_n], 1):
         o["rank"] = i
     return {
         "opportunities": curated_opps[:top_n],
         "generated_at":  datetime.utcnow().isoformat(),
-        "algorithm":     "Expert 309 curated diseases",
+        "algorithm":     f"Expert {curated_size} curated diseases",
         "total_scored":  len(curated_opps[:top_n]),
-        "universe_size": 309,
+        "universe_size": total_known,
     }
 
 

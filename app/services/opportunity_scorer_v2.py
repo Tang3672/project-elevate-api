@@ -1140,10 +1140,15 @@ async def run_discovery_engine_v2(top_n: int = 25, funding_pathway: str = "comme
                      _time_mod.time() - cached_at, len(cached))
         return cached[:top_n]
     try:
-        from app.services.universe_builder import get_universe
-        OPPORTUNITY_UNIVERSE = get_universe()
+        # Use expanded universe (curated 496 + ICD-10 extended = 739+ diseases)
+        from app.services.universe_expander_v2 import get_all_diseases_for_batch_scoring
+        OPPORTUNITY_UNIVERSE = get_all_diseases_for_batch_scoring()
     except Exception:
-        from app.services.opportunity_scorer import OPPORTUNITY_UNIVERSE
+        try:
+            from app.services.universe_builder import get_universe
+            OPPORTUNITY_UNIVERSE = get_universe()
+        except Exception:
+            from app.services.opportunity_scorer import OPPORTUNITY_UNIVERSE
 
     async def score_one(opp):
         # Outer try catches any error outside the inner v2-scoring try block
