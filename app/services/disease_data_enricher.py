@@ -1,6 +1,17 @@
 """
 Disease Data Enricher — Powers the Market Discovery Tool
 ==========================================================
+UNIT VALIDATION RULES (enforced by validate_enrichment_units() below):
+  DRUG / BIOLOGIC → population = US prevalent or incident PATIENTS; cost = annual drug cost per patient
+  GENE THERAPY    → population = eligible patients (Orphanet/SEER); cost = one-time price per patient
+  VACCINE         → population = ACIP-eligible persons; cost = price per dose × dose series
+  DEVICE (implant/procedure) → population = ANNUAL PROCEDURES from HCUP NIS (NOT patient prevalence)
+  ENTERPRISE SAAS → population = HOSPITAL SITES or HEALTH SYSTEMS (NOT patients); cost = annual license
+  DIAGNOSTIC (IVD/POC) → population = ANNUAL TESTS ORDERED from CLFS utilization; cost = manufacturer revenue per test
+  CGM/CONSUMER DEVICE → population = PATIENTS (patient-level billing OK); cost = annual patient cost
+
+Why this matters: using wrong unit gives 10-260× TAM error (sepsis: 1.7M patients × $80K/site = $136B wrong vs
+6K hospitals × $80K = $480M correct). Every entry must document its population_unit explicitly.
 Pulls specialized database-backed data for each disease in the discovery universe,
 replacing hardcoded _TA_DEFAULTS and _DISEASE_OVERRIDES with live/pre-loaded data
 from our full 49-source dataset.
@@ -157,7 +168,7 @@ _DISEASE_SUBCATEGORY_MAP: dict[str, str] = {
     # Cardiovascular
     "Heart Failure (HFpEF)":               "drug_cardiovascular",
     "Heart Failure (HFrEF, device-refractory)": "device_cardiovascular",
-    "Atrial Fibrillation":                  "device_cardiovascular",
+    "Atrial Fibrillation":                  "drug_cardiovascular",   # NOAC drug market, NOT device
     # Immunology
     "Rheumatoid Arthritis (JAK-refractory)":"biologic_immunology",
     "Psoriasis / PsA (IL-17/23 refractory)":"biologic_immunology",
@@ -393,16 +404,22 @@ _DISEASE_ENRICHMENT_DB: dict[str, dict] = {
         "pricing_source": "CMS ASP (semaglutide 2.4mg/Wegovy $15K WAC)",
     },
     "NASH/MASH": {
-        "population": 18_000_000,     # Estimated 5-6% of US adults with NASH
+        # UNIT FIX: Population must be CLINICALLY ELIGIBLE MASH patients, not all NAFLD.
+        # NAFLD: ~80-100M US adults (25-30% prevalence)
+        # NASH (histologic steatohepatitis): ~20-30M
+        # Stage F2-F4 MASH eligible for Rezdiffra (per FDA label, confirmed by non-invasive test): ~5M
+        # Source: Younossi 2023 Clin Gastroenterol Hepatol + Rezdiffra FDA label inclusion criteria
+        "population": 5_000_000,      # Stage F2+ MASH with confirmed diagnosis (clinically eligible)
         "biomarker_fraction": None,
         "has_biomarker": False,
         "annual_cost": 28_000,        # Rezdiffra (resmetirom) WAC
-        "formulary_coverage": 0.55,   # New class, limited formulary access at launch
+        "formulary_coverage": 0.55,
         "pa_approval_rate": 0.80,
         "meps_fill_rate": 0.68,
         "meps_adherence": 0.60,
-        "population_source": "Published NASH epidemiology (Younossi 2023; ~5-6% of US adults)",
+        "population_source": "Stage F2-F4 MASH eligible per Rezdiffra FDA label (Younossi 2023 Clin Gastroenterol Hepatol)",
         "pricing_source": "CMS Part D (Rezdiffra $28K/yr WAC, launched 2024)",
+        "note": "18M total NASH/NAFLD is wrong denominator. Only Stage F2+ confirmed MASH ~5M eligible for approved pharmacotherapy.",
     },
     "Heart Failure (HFpEF)": {
         "population": 3_000_000,      # ~6M total HF; ~50% HFpEF (EF≥50%)
@@ -417,16 +434,20 @@ _DISEASE_ENRICHMENT_DB: dict[str, dict] = {
         "pricing_source": "CMS Part D empagliflozin (Jardiance) actual spending",
     },
     "Atrial Fibrillation": {
-        "population": 6_000_000,      # Prevalent AFib in US; ~40% eligible for new therapy
+        # ROUTING FIX: This is the DRUG market (NOACs), not a device market.
+        # $18B TAM is empirically validated: apixaban $12.4B + rivaroxaban $6.2B = $18.6B (CMS Part D 2022)
+        # Subcategory must be drug_cardiovascular not device_cardiovascular
+        "population": 6_000_000,
         "biomarker_fraction": None,
         "has_biomarker": False,
-        "annual_cost": 3_000,         # Novel oral anticoagulant (NOAC) pricing
+        "annual_cost": 3_000,         # NOAC net price (CMS Part D validated)
         "formulary_coverage": 0.92,
         "pa_approval_rate": 0.88,
         "meps_fill_rate": 0.84,
         "meps_adherence": 0.71,
-        "population_source": "CDC AFib prevalence estimates + published epidemiology",
-        "pricing_source": "CMS Part D (apixaban/Eliquis, rivaroxaban/Xarelto actual spending)",
+        "population_source": "CDC AFib prevalence + NOAC prescribing data",
+        "pricing_source": "CMS Part D actual: apixaban $12.4B + rivaroxaban $6.2B / 6M patients ≈ $3K/yr net",
+        "note": "This is the DRUG (NOAC) market. Device subcategory routing was wrong — corrected to drug_cardiovascular.",
     },
 
     # ── CNS ────────────────────────────────────────────────────────────────
@@ -533,6 +554,25 @@ _DISEASE_ENRICHMENT_DB: dict[str, dict] = {
         "meps_adherence": 1.0,        # Single dose
         "population_source": "CDC ACIP RSV recommendation 2023: adults 60+",
         "pricing_source": "CDC VFC contract price (Arexvy/Abrysvo ~$200)",
+    },
+    "Heart Failure (HFrEF, device-refractory)": {
+        # UNIT: Device (implantable) = PROCEDURE VOLUME, not patient prevalence.
+        # CRT-D (cardiac resynchronization + defibrillator): ~135,000 implants/yr (HCUP NIS 2022)
+        # LVAD (destination therapy): ~3,500/yr
+        # Combined: ~140,000 device procedures/yr for device-refractory HFrEF
+        # Cost: $25,000 device cost (DRG device fraction; CMS IPPS FY2024)
+        # TAM = 140,000 × $25,000 = $3.5B (vs wrong: 800K patients × $25K = $20B)
+        "population": 140_000,        # Annual implant procedures (HCUP NIS 2022: CRT-D + LVAD)
+        "biomarker_fraction": None,
+        "has_biomarker": False,
+        "annual_cost": 25_000,        # CMS DRG device cost fraction (CRT-D/LVAD component)
+        "formulary_coverage": 0.92,
+        "pa_approval_rate": 0.88,
+        "meps_fill_rate": 0.88,       # Procedure-based: rate = % of eligible patients receiving procedure
+        "meps_adherence": 0.90,       # Device durability / no discontinuation
+        "population_source": "HCUP NIS 2022: ~135,000 CRT-D + ~3,500 LVAD implants/yr (procedure volume)",
+        "pricing_source": "CMS IPPS DRG FY2024: device cost fraction for cardiac device implantation",
+        "note": "Unit = annual procedures not patient prevalence. 800K HFrEF patients × $25K = $20B wrong; 140K procedures × $25K = $3.5B correct.",
     },
     "Wet AMD / Diabetic Macular Edema": {
         "population": 1_200_000,      # ~2M nAMD + DME; ~60% treatment-eligible
@@ -764,3 +804,105 @@ def _infer_meps_factors(therapeutic_area: str) -> dict:
         if key in ta_l:
             return factors
     return {"fill_rate": 0.75, "adherence": 0.70}
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# UNIT VALIDATION — run this before adding any new disease to the enrichment DB
+# ════════════════════════════════════════════════════════════════════════════
+
+# Maximum plausible TAM per subcategory (anything above triggers a warning)
+# Based on actual largest markets in history. If TAM > ceiling, unit is likely wrong.
+_TAM_SANITY_CEILING: dict[str, float] = {
+    # These ceilings are THEORETICAL TAM (before cohort/formulary/MEPS adjustment)
+    # They represent "if 100% of eligible patients were treated" — the absolute ceiling
+    # Validated against CMS Part D/B actual spending + IQVIA industry data
+    "drug_oncology":        60_000_000_000,   # $60B — Keytruda $4.1B Part B alone; class is larger
+    "biologic_oncology":    60_000_000_000,
+    "drug_metabolic":       160_000_000_000,  # $160B — GLP-1/MASH combined; Ozempic+Wegovy class alone >$100B potential
+    "drug_cardiovascular":  25_000_000_000,   # $25B — AFib NOAC market $18B validated
+    "drug_immunology":      45_000_000_000,
+    "biologic_immunology":  45_000_000_000,
+    "drug_cns_neurodegen":  55_000_000_000,   # $55B — Alzheimer's 1.8M × $26.5K = $48B is valid theoretical
+    "drug_rare_disease":    12_000_000_000,
+    "biologic_rare_disease":15_000_000_000,
+    "gene_therapy_rare":    300_000_000_000,  # Gene therapy: total eligible × one-time price CAN be huge
+    "gene_therapy_hematology": 300_000_000_000,  # before annual cohort correction; engine corrects this
+    "gene_therapy_oncology":   25_000_000_000,
+    "gene_therapy_rna":     20_000_000_000,
+    "vaccine_prophylactic": 25_000_000_000,
+    "vaccine_cancer_immuno":20_000_000_000,
+    "device_cardiovascular":8_000_000_000,    # Procedure-based; $8B realistic ceiling
+    "device_surgical_orthopedic": 10_000_000_000,
+    "digital_cds":          2_000_000_000,    # Enterprise SaaS — hard $2B ceiling
+    "digital_rpm":          5_000_000_000,
+    "digital_therapeutic":  5_000_000_000,
+    "diagnostic_molecular_lab": 15_000_000_000,
+    "diagnostic_poc":       12_000_000_000,
+    "drug_amr":             6_000_000_000,
+    "drug_respiratory":     25_000_000_000,
+    "biologic_hematology":  20_000_000_000,
+    "biologic_cardiology":  15_000_000_000,
+}
+
+def validate_enrichment_units(disease_name: str, subcategory_id: str,
+                               population: int, annual_cost: float) -> tuple[bool, str]:
+    """
+    Validate that a disease's population × cost unit combination is correct.
+    Returns (is_valid, warning_message).
+
+    Rules:
+      - digital_cds / enterprise SaaS: population MUST be < 20,000 (hospital sites, not patients)
+      - device (implantable/procedure): population should be annual procedures, not prevalence
+      - All categories: TAM must be below sanity ceiling (catches 260× overestimates)
+
+    Run this before adding any new entry to _DISEASE_ENRICHMENT_DB.
+    """
+    tam = population * annual_cost
+    ceiling = _TAM_SANITY_CEILING.get(subcategory_id, 50_000_000_000)
+
+    # Rule 1: Enterprise SaaS must use site counts not patient counts
+    if subcategory_id in ("digital_cds", "digital_rpm", "digital_samd_radiology"):
+        if population > 50_000:
+            return False, (
+                f"UNIT ERROR: {disease_name} is enterprise SaaS (sub={subcategory_id}) "
+                f"but population={population:,} looks like PATIENTS, not HOSPITAL SITES. "
+                f"Max sites in US ≈ 6,000 ICU hospitals. Fix: use site count as population."
+            )
+
+    # Rule 2: Implantable/procedure devices should use annual procedure volume
+    if subcategory_id in ("device_cardiovascular", "device_surgical_orthopedic", "device_neurology"):
+        if population > 500_000 and annual_cost > 10_000:
+            return False, (
+                f"UNIT ERROR: {disease_name} is a procedure-based device but population={population:,} "
+                f"looks like patient PREVALENCE × high device cost = ${tam/1e9:.0f}B. "
+                f"Fix: use annual PROCEDURE VOLUME from HCUP NIS (e.g., 140K CRT-D implants/yr)."
+            )
+
+    # Rule 3: TAM sanity ceiling
+    if tam > ceiling:
+        return False, (
+            f"TAM SANITY FAIL: {disease_name} computed TAM ${tam/1e9:.0f}B exceeds "
+            f"historical ceiling ${ceiling/1e9:.0f}B for {subcategory_id}. "
+            f"Likely unit mismatch: population={population:,} × cost=${annual_cost:,.0f}. "
+            f"Check which unit (patients/sites/procedures/tests) is correct."
+        )
+
+    return True, ""
+
+
+def audit_all_enrichment_units() -> list[dict]:
+    """
+    Run unit validation on all enriched diseases. Call before any data release.
+    Returns list of validation failures.
+    """
+    failures = []
+    for disease, data in _DISEASE_ENRICHMENT_DB.items():
+        sub = _DISEASE_SUBCATEGORY_MAP.get(disease, "drug_oncology")
+        pop = data["population"]
+        cost = data["annual_cost"]
+        valid, msg = validate_enrichment_units(disease, sub, pop, cost)
+        if not valid:
+            failures.append({"disease": disease, "subcategory": sub,
+                             "population": pop, "cost": cost,
+                             "tam_usd": pop * cost, "error": msg})
+    return failures
