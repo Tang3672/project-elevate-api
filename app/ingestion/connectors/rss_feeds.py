@@ -77,7 +77,7 @@ def _parse_rss(url: str, max_items: int = 30) -> list[dict]:
     items = []
     try:
         r = requests.get(url, timeout=_TIMEOUT,
-                         headers={"User-Agent": "ProjectElevate/1.0 contact@projectelevate.io"})
+                         headers={"User-Agent": "Medlevate/1.0 contact@projectelevate.io"})
         if r.status_code != 200:
             return items
 

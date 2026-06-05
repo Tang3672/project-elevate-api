@@ -69,7 +69,7 @@ def _build_ical(tl: dict) -> bytes:
     import uuid
 
     cal = Calendar()
-    cal.add("prodid", "-//Project Elevate//Development Timeline//EN")
+    cal.add("prodid", "-//Medlevate//Development Timeline//EN")
     cal.add("version", "2.0")
     cal.add("calscale", "GREGORIAN")
     cal.add("x-wr-calname", f"Dev Timeline: {tl.get('disease', 'Innovation')}")

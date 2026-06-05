@@ -39,7 +39,7 @@ class BaseConnector(ABC):
     async def __aenter__(self):
         self._client = httpx.AsyncClient(
             timeout=30.0,
-            headers={"User-Agent": "ProjectElevate/1.0 (healthcare-research-platform)"},
+            headers={"User-Agent": "Medlevate/1.0 (healthcare-research-platform)"},
             follow_redirects=True,
         )
         return self

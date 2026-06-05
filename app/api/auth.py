@@ -178,7 +178,7 @@ async def verify_email(token: str):
     user_id = await verify_token(token)
     if not user_id:
         raise HTTPException(status_code=400, detail="Invalid or expired verification link. Please register again.")
-    return {"message": "Email verified! You can now log in to Project Elevate."}
+    return {"message": "Email verified! You can now log in to Medlevate."}
 
 @router.post("/google", response_model=AuthResponse)
 async def google_auth(payload: GoogleAuthRequest):
@@ -425,7 +425,7 @@ async def submit_waitlist(body: dict):
         await send_email(
             to=admin_email,
             subject=f"🚀 Early access request — {name or email} ({plan} plan)",
-            body=f"""New early access request for Project Elevate:
+            body=f"""New early access request for Medlevate:
 
 Name:        {name or '(not provided)'}
 Email:       {email}
@@ -447,17 +447,17 @@ Reply to this person: {email}
         if name:
             await send_email(
                 to=email,
-                subject="You're on the Project Elevate early access list",
+                subject="You're on the Medlevate early access list",
                 body=f"""Hi {name.split()[0]},
 
-Thanks for requesting early access to Project Elevate!
+Thanks for requesting early access to Medlevate!
 
 We'll set up your {plan.title()} account and reach out within 24 hours.
 
 In the meantime, you can create a free account and start exploring the platform:
 https://projectelevate1.netlify.app/app.html?register=1
 
-— The Project Elevate Team
+— The Medlevate Team
 ijw91021@gmail.com
 """,
             )

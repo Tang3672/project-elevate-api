@@ -36,7 +36,7 @@ _PARAMS_BASE = {
     "db":      "pubmed",
     "retmode": "json",
     "retmax":  0,           # we only want counts
-    "tool":    "project-elevate",
+    "tool":    "medlevate",
     "email":   "contact@projectelevate.io",
 }
 

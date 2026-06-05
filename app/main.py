@@ -15,7 +15,7 @@ from app.db.demand_repository import ensure_demand_signals_table
 from app.core.config import settings
 
 app = FastAPI(
-    title="Project Elevate API",
+    title="Medlevate API",
     description="Medical market intelligence for tech transfer offices, health innovators, and researchers",
     version="0.2.0"
 )
@@ -120,7 +120,7 @@ app.include_router(tracker_router,   prefix="/api/v1", tags=["tracker"])
 async def health_check():
     return {
         "status": "ok",
-        "service": "project-elevate",
+        "service": "medlevate",
         "version": "0.2.0",
         "scheduler_enabled": settings.ENABLE_SCHEDULER,
     }

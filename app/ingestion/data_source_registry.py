@@ -1,5 +1,5 @@
 """
-Data Source Registry — Project Elevate
+Data Source Registry — Medlevate
 ========================================
 Complete catalog of all data sources: license, commercial status, API endpoint,
 and what unique data each provides.
@@ -50,7 +50,7 @@ DATA_SOURCES = [
         api_endpoint="https://ghoapi.azureedge.net/api",
         connector_file="ingestion/connectors/who_gho.py",
         unique_data="Disease DALYs, mortality, prevalence for 194 countries. Primary commercial-safe replacement for IHME GBD.",
-        attribution='Source: "World Health Organization. Global Health Observatory." WHO does not endorse Project Elevate.',
+        attribution='Source: "World Health Organization. Global Health Observatory." WHO does not endorse Medlevate.',
         restrictions="Cannot imply WHO endorsement. Cannot alter data to misrepresent WHO findings.",
         rate_limit="~1 req/sec practical",
         requires_key=False, key_source=None,
@@ -81,7 +81,7 @@ DATA_SOURCES = [
         connector_file="ingestion/connectors/orphanet.py",
         unique_data="Official EU rare disease prevalence (patients/million). ORPHAcode taxonomy. Gene-disease associations. Used in FDA orphan designation applications.",
         attribution='Source: "Orphanet. orphadata.com. Accessed 2024."',
-        restrictions="Attribution required. Cannot claim Orphanet endorses Project Elevate.",
+        restrictions="Attribution required. Cannot claim Orphanet endorses Medlevate.",
         rate_limit="None documented",
         requires_key=False, key_source=None,
     ),
@@ -439,7 +439,7 @@ DATA_SOURCES = [
         api_endpoint="https://api.anthropic.com/v1/messages",
         connector_file="app/services/alignment_service.py",
         unique_data="Market analysis generation, competitive intelligence synthesis, regulatory pathway recommendations.",
-        attribution="Optional: 'AI-assisted analysis by Project Elevate'",
+        attribution="Optional: 'AI-assisted analysis by Medlevate'",
         restrictions="Cannot use outputs to train competing models. Outputs are customer-owned.",
         rate_limit="Tier-based; scales with usage",
         requires_key=True, key_source="https://console.anthropic.com/",

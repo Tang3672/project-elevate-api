@@ -72,7 +72,7 @@ def _search_edgar(term: str, form_type: str, days_back: int = 365) -> dict:
                 "hits.hits.total.value": 1,
             },
             timeout=_TIMEOUT,
-            headers={"User-Agent": "ProjectElevate/1.0 contact@projectelevate.io"},
+            headers={"User-Agent": "Medlevate/1.0 contact@projectelevate.io"},
         )
         if r.status_code == 200:
             data  = r.json()
