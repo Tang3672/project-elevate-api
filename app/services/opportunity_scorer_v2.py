@@ -1278,6 +1278,10 @@ async def run_discovery_engine_v2(top_n: int = 25, funding_pathway: str = "comme
                     "bia_concern":       engine_tam.get("bia", {}).get("affordability_concern", False),
                     "bia_dampening":     engine_tam.get("bia", {}).get("revenue_dampening", 1.0),
                 }
+            # Store trial + approval counts so tractability computation can read them
+            # (score_opportunity_v2 doesn't return these — must add explicitly)
+            r["competitor_trial_count"]    = trials
+            r["approved_treatments_count"] = approved
             # Flatten subscores into components for the existing frontend bars
             r["notes"] = notes
             r["phase"] = phase
@@ -1316,12 +1320,9 @@ async def run_discovery_engine_v2(top_n: int = 25, funding_pathway: str = "comme
 
     for r in scored:
         pop_val = r.get("us_patient_population") or 0
-        trials_val = r.get("components", {}).get("competitor_trial_count", 5)
-        if isinstance(trials_val, (int, float)):
-            trials_count = int(trials_val)
-        else:
-            trials_count = 5
-        approved_val = r.get("approved_treatments_count", 0) or 0
+        # Read actual live-fetched values (stored by _score_one_inner above)
+        trials_count = int(r.get("competitor_trial_count", 5) or 5)
+        approved_val = int(r.get("approved_treatments_count", 0) or 0)
 
         # Population scale: small markets get penalized to prevent ultra-rare dominating
         scale = _pop_scale(pop_val)
