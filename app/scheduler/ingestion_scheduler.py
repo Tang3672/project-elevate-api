@@ -86,6 +86,21 @@ def init_scheduler():
         misfire_grace_time=14400,
     )
 
+    # ── Nightly 2:30am UTC: batch-score full 10,000-disease universe ──────────
+    # Phase 1: full engine on 739+ curated diseases → persists sam_usd + all
+    #          sub-scores to disease_scored, refreshes in-process cache.
+    # Phase 2: TA-default scoring for remaining MONDO diseases (~9,000+).
+    # Runs after midnight so live trial/approval caches are warm from daytime
+    # traffic; results are available instantly for the morning user surge.
+    scheduler.add_job(
+        _run_nightly_batch_scoring,
+        CronTrigger(hour=2, minute=30),
+        id="nightly_batch_scoring",
+        name="Nightly batch scoring: 10,000-disease universe → disease_scored",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
+
     scheduler.start()
     logger.info("✅ Ingestion scheduler started")
     _log_next_runs()
@@ -136,6 +151,17 @@ async def _run_quarterly_baseline():
         "cdc_places",
         "census_sahie",
     ])
+
+
+async def _run_nightly_batch_scoring():
+    logger.info("⏰ Running nightly batch scoring (10,000-disease universe)")
+    from app.services.universe_expander import run_nightly_batch_scoring
+    result = await run_nightly_batch_scoring()
+    logger.info(
+        "Nightly batch complete: %d curated + %d MONDO = %d total in %.0fs",
+        result["phase1_curated"], result["phase2_mondo"],
+        result["total"], result["elapsed_seconds"],
+    )
 
 
 def _log_next_runs():

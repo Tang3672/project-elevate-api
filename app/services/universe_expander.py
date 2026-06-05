@@ -393,3 +393,133 @@ async def run_universe_expansion(max_pages: int = 30) -> dict:
         "conditions_scored":    scored,
         "curated_diseases":     len(universe),
     }
+
+
+async def run_nightly_batch_scoring() -> dict:
+    """
+    Nightly job: score all diseases in two phases and persist to disease_scored.
+
+    Phase 1 (~5-8 min): Run full opportunity_scorer_v2 engine on the 739+
+    curated + ICD-10 diseases. Uses live trial/approval counts (populated by
+    daytime traffic into the in-process caches). Persists sam_usd,
+    peak_revenue_usd, commercial_tractability, and all sub-scores to DB.
+    Then refreshes the in-process _DISCOVERY_RESULT_CACHE so morning users
+    get an instant cache hit instead of a cold-start 25s rescore.
+
+    Phase 2 (~10-15 min): Score any remaining MONDO-ontology diseases not
+    yet in disease_scored, using TA-level defaults (no live API calls at
+    that scale). Brings the DB toward the full 10,000-disease target.
+
+    Scheduled: nightly at 2:30am UTC by ingestion_scheduler.
+    """
+    import time as _time
+    start = _time.time()
+    from app.db.database import get_pool
+    pool = await get_pool()
+
+    # Ensure schema has the extended columns (idempotent ALTER)
+    async with pool.acquire() as conn:
+        await prescored_universe_table(conn)
+        await conn.execute("""
+            ALTER TABLE disease_scored
+                ADD COLUMN IF NOT EXISTS sam_usd                 BIGINT,
+                ADD COLUMN IF NOT EXISTS peak_revenue_usd        BIGINT,
+                ADD COLUMN IF NOT EXISTS us_tam_usd              BIGINT,
+                ADD COLUMN IF NOT EXISTS commercial_tractability TEXT,
+                ADD COLUMN IF NOT EXISTS tractability_note       TEXT,
+                ADD COLUMN IF NOT EXISTS ptrs_pct                FLOAT
+        """)
+
+    # ── Phase 1: full engine on curated + ICD-10 universe ────────────────────
+    phase1_count = 0
+    try:
+        from app.services.opportunity_scorer_v2 import run_discovery_engine_v2
+        # top_n=10_000 returns all scored diseases (universe is ~739 curated)
+        all_scored = await run_discovery_engine_v2(top_n=10_000)
+        logger.info("Nightly batch phase 1: scored %d diseases", len(all_scored))
+
+        async with pool.acquire() as conn:
+            for r in all_scored:
+                if not r:
+                    continue
+                s = r.get("subscores", {})
+                try:
+                    await conn.execute("""
+                        INSERT INTO disease_scored
+                            (disease_label, therapeutic_area, trial_count, score, tier,
+                             opportunity, probability, value_score,
+                             approved_count, us_population,
+                             us_tam_fmt, us_tam_usd,
+                             peak_revenue_fmt, sam_usd, peak_revenue_usd,
+                             commercial_tractability, tractability_note,
+                             ptrs_pct, notes, last_scored, data_source)
+                        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,NOW(),'nightly_full_score')
+                        ON CONFLICT (disease_label) DO UPDATE SET
+                            therapeutic_area        = EXCLUDED.therapeutic_area,
+                            trial_count             = EXCLUDED.trial_count,
+                            score                   = EXCLUDED.score,
+                            tier                    = EXCLUDED.tier,
+                            opportunity             = EXCLUDED.opportunity,
+                            probability             = EXCLUDED.probability,
+                            value_score             = EXCLUDED.value_score,
+                            approved_count          = EXCLUDED.approved_count,
+                            us_population           = EXCLUDED.us_population,
+                            us_tam_fmt              = EXCLUDED.us_tam_fmt,
+                            us_tam_usd              = EXCLUDED.us_tam_usd,
+                            peak_revenue_fmt        = EXCLUDED.peak_revenue_fmt,
+                            sam_usd                 = EXCLUDED.sam_usd,
+                            peak_revenue_usd        = EXCLUDED.peak_revenue_usd,
+                            commercial_tractability = EXCLUDED.commercial_tractability,
+                            tractability_note       = EXCLUDED.tractability_note,
+                            ptrs_pct                = EXCLUDED.ptrs_pct,
+                            last_scored             = NOW(),
+                            data_source             = 'nightly_full_score'
+                    """,
+                        r.get("disease"),           # $1
+                        r.get("therapeutic_area"),  # $2
+                        r.get("competitor_trial_count", 0),  # $3
+                        r.get("score"),             # $4
+                        r.get("tier"),              # $5
+                        s.get("opportunity", 0),    # $6
+                        s.get("probability", 0),    # $7
+                        s.get("value", 0),          # $8
+                        r.get("approved_treatments_count", 0),  # $9
+                        r.get("us_patient_population", 0),      # $10
+                        r.get("us_tam_fmt"),         # $11
+                        r.get("us_tam_usd"),         # $12
+                        r.get("peak_revenue_fmt"),   # $13
+                        r.get("sam_usd"),            # $14
+                        r.get("peak_revenue_usd"),   # $15
+                        r.get("commercial_tractability"),  # $16
+                        r.get("tractability_note"),  # $17
+                        r.get("ptrs"),               # $18
+                        r.get("notes", ""),          # $19
+                    )
+                    phase1_count += 1
+                except Exception as e:
+                    logger.debug("Persist failed '%s': %s", r.get("disease", "?")[:40], e)
+
+    except Exception as e:
+        logger.error("Nightly batch phase 1 failed: %s", e)
+
+    logger.info("Nightly batch phase 1 persisted: %d diseases", phase1_count)
+
+    # ── Phase 2: MONDO expansion for the remaining ~9,000+ diseases ──────────
+    phase2_count = 0
+    try:
+        result = await run_mondo_expansion(max_pages=20)
+        phase2_count = result.get("scored", 0)
+        logger.info("Nightly batch phase 2 MONDO: %d additional diseases", phase2_count)
+    except Exception as e:
+        logger.warning("Nightly batch phase 2 MONDO failed (non-fatal): %s", e)
+
+    elapsed = round(_time.time() - start, 1)
+    total = phase1_count + phase2_count
+    logger.info("Nightly batch scoring complete: %d diseases in %.1fs", total, elapsed)
+
+    return {
+        "phase1_curated":   phase1_count,
+        "phase2_mondo":     phase2_count,
+        "total":            total,
+        "elapsed_seconds":  elapsed,
+    }
