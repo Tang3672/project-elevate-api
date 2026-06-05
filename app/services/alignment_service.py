@@ -66,7 +66,19 @@ async def generate_pi_report(
     """
     from app.services.expert_router import route as route_expert
 
-    pt = ProductType(product_type.lower()) if product_type else ProductType.OTHER
+    # Map new subcategory/tier1 IDs to legacy ProductType enum
+    _PT_MAP = {
+        "drug_small_molecule": ProductType.OTHER, "drug_amr": ProductType.ANTIBIOTIC,
+        "drug_amr_community": ProductType.ANTIBIOTIC, "biologic": ProductType.OTHER,
+        "gene_cell_therapy": ProductType.GENE_THERAPY, "gene_therapy": ProductType.GENE_THERAPY,
+        "medical_device": ProductType.MEDICAL_DEVICE, "diagnostic": ProductType.DIAGNOSTIC,
+        "digital_health": ProductType.SOFTWARE, "vaccine_immunotherapy": ProductType.OTHER,
+        "other_platform": ProductType.OTHER,
+    }
+    try:
+        pt = _PT_MAP.get(product_type.lower()) or ProductType(product_type.lower())
+    except (ValueError, AttributeError):
+        pt = ProductType.OTHER
 
     source_counts        = await get_signal_counts_by_source()
     total_signals        = sum(r["count"] for r in source_counts)

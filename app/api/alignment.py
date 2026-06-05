@@ -703,68 +703,77 @@ async def generate_clarifying_questions(
         "basic_science": "a basic science grant (NIH R01/R21) focused on significance, innovation, and scientific impact rather than commercial market",
     }.get(pathway, "a commercial product")
 
-    prompt = f"""A researcher submitted this innovation for analysis as {pathway_context}:
+    # Pull specialized data to inform what we already know vs what we need
+    data_context = ""
+    try:
+        from app.services.soft_router import soft_route
+        from app.services.disease_data_enricher import get_enrichment_data
+        routing = soft_route(idea)
+        sub_id  = routing.primary
+        enrich  = get_enrichment_data(disease_hint or idea[:50], routing.primary.split("_")[0])
+        data_context = (
+            f"\nWhat our database already knows about this market:\n"
+            f"  - Subcategory: {sub_id} ({routing.confidence:.0%} confidence)\n"
+            f"  - Known patient population: {enrich.us_patient_population:,} ({enrich.population_source[:60]})\n"
+            f"  - Typical pricing: ${enrich.annual_treatment_cost:,.0f}/yr ({enrich.pricing_source[:60]})\n"
+            f"  - Formulary coverage: {enrich.formulary_coverage:.0%} of plans\n"
+            f"  - MEPS adherence: {enrich.meps_adherence_rate:.0%} real-world\n"
+            f"  - Realized TAM factor: {enrich.realized_tam_factor:.0%} of theoretical\n"
+        )
+    except Exception:
+        pass
 
+    prompt = f"""You are conducting deep research on a health innovation before generating a market intelligence report.
+Your goal: ask the 6 most important questions that will make this specific report dramatically more accurate.
+
+THE INNOVATION:
 "{idea}"
 
 Product type: {product_type}
+{data_context}
 {competitive_context}
 
-Your job is to generate 7 highly specific clarifying questions that will make the market sizing formula uniquely accurate for THIS specific innovation.
+DEEP RESEARCH PRINCIPLES (follow these exactly):
+1. We already know the rough market size and standard pricing — DO NOT ask generic "what is your market size" questions
+2. Ask what would CHANGE the formula significantly: biomarker restriction, line of therapy, specific subpopulation
+3. Reference SPECIFIC named drugs/devices as comparators — never say "competitor A"
+4. Ask about things our databases can't know: unpublished preclinical data, specific mechanism novelty, proprietary IP
+5. Each question should unlock a DIFFERENT formula parameter — no redundancy
+6. Questions must be answerable by the PI in 1 sentence based on what they know about their own work
 
-The questions must directly determine the formula parameters:
-  - Patient population (N_prev, diagnostic yield, treatment eligibility)
-  - Pricing (WAC benchmark, gross-to-net ratio, pricing model)
-  - Workflow integration (adoption barriers, standard of care)
-  - Market topology (who buys, how, through what channel)
-  - Differentiation (vs. specific named competitors)
-  - Development stage (what data exists)
-  - Reimbursement pathway (CPT code, payer type, coverage precedent)
+REQUIRED FORMULA PARAMETERS TO UNLOCK (one question per parameter):
+  Q1 → ELIGIBLE SUBPOPULATION: Which specific patient subset does this target?
+       (e.g., "Exon 51-skippable DMD patients" vs "all DMD", or "CRE bacteremia, not just colonization")
+  Q2 → LINE OF THERAPY / TREATMENT SETTING: Where does this fit in the clinical pathway?
+       (1st-line vs salvage, inpatient ICU vs outpatient, post-surgical vs prophylactic)
+  Q3 → CLINICAL MECHANISM NOVELTY: What is genuinely different about the mechanism?
+       (Not the disease area — specifically what does this do that approved drugs don't)
+  Q4 → DEVELOPMENT EVIDENCE: What data already exists to validate efficacy?
+       (In vitro MIC/IC50, animal model survival, Phase 1 safety, Phase 2 ORR — be specific)
+  Q5 → PRIMARY ECONOMIC BUYER: Who signs the check and what is their price sensitivity?
+       (Hospital P&T committee, specialty pharmacy PBM, patient OOP, payer formulary tier)
+  Q6 → COMPETITIVE CLINICAL ADVANTAGE: vs the single closest approved therapy, what is the measurable advantage?
+       (e.g., "vs ceftazidime-avibactam, your drug covers NDM-1 producing organisms — confirmed by MIC data?")
 
-Rules:
-- Each question must be DIRECTLY tied to a market sizing formula parameter
-- Questions must be SPECIFIC to this exact innovation — never generic
-- If competitor data is shown, ask about differentiation vs a NAMED competitor
-- Ask about clinical workflow: does this replace a procedure? Add a step? Integrate with existing systems?
-  (CRITICAL: if it replaces a guideline-mandated procedure, the market is constrained by guideline revision)
-- Ask who the BUYER is (physician, hospital committee, payer, patient) — this determines pricing and sales cycle
-- Ask about the PRICING MODEL — per-use, subscription, one-time, bundled? Comparable products?
-- Ask about development stage and existing evidence (preclinical data, IND status, Phase results)
-- For commercial: ask about patient specificity (biomarker? stage? prior therapy requirement?)
-- If competitors identified: ask "your product vs [CompetitorName] — what specific clinical advantage?"
-- Each question: answerable in 1-2 sentences; provide a realistic example as the hint
+RULES FOR OPTIONS:
+- Every option must be specific to THIS innovation and disease area — never abstract
+- Use real drug names, real organism names, real clinical endpoints
+- Options should cover the realistic range for this specific product
+- Include a "None of these — explain:" option when appropriate
 
-Return ONLY a JSON array with exactly 7 questions. Each question MUST have 3-4 specific multiple-choice options
-(not generic — options should reflect this specific innovation and disease area).
-Also include a short "hint" for the optional free-text field.
-
-Format (return ONLY this JSON, no other text):
+Return ONLY a JSON array of 6 objects. No other text.
 [{{
-  "question": "...",
+  "question": "<specific question directly referencing the product's disease/mechanism>",
   "field": "snake_case_key",
-  "options": ["Option A (specific)", "Option B (specific)", "Option C (specific)", "Option D (specific)"],
-  "hint": "Add any specific detail not covered above (optional)"
-}}]
-
-Example of GOOD specific options for a CRE antibiotic:
-  options: ["ICU patients with confirmed CRE bacteremia", "HAP/VAP patients with gram-negative resistance", "Outpatient SSTI with documented MRSA", "Any hospitalized patient with resistant gram-negative infection"]
-
-Example of BAD generic options (DO NOT DO THIS):
-  options: ["Option A", "Option B", "Option C", "Option D"]
-
-The 7 topics MUST cover: (1) specific patient population + line of therapy,
-(2) standard of care being replaced/supplemented + the specific unmet need,
-(3) primary buyer and decision-maker + sales channel,
-(4) development stage + existing clinical evidence,
-(5) pricing model + WAC benchmark comparator,
-(6) clinical workflow — does it add a step, replace a mandated procedure, or integrate with existing systems,
-(7) key differentiator vs the single most similar named competitor."""
+  "options": ["<specific option with concrete detail>", "<specific option>", "<specific option>", "<specific option>"],
+  "hint": "<prompt for what additional detail would most improve the analysis>"
+}}]"""
 
     try:
         client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
         msg = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=1500,
+            model="claude-sonnet-4-6",
+            max_tokens=2000,
             messages=[{"role": "user", "content": prompt}],
         )
         text = msg.content[0].text if msg.content else "[]"
