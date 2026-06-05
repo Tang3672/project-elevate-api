@@ -561,7 +561,10 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
             format_aggregated_sources,
         )
 
-        ci, pub_data, strategic_intel, aggregated_sources = await asyncio.gather(
+        # Chapter data service — specialized databases for each report section
+        from app.services.chapter_data_service import get_all_chapter_data, format_all_chapter_data
+
+        ci, pub_data, strategic_intel, aggregated_sources, chapter_data = await asyncio.gather(
             get_full_competitive_intelligence(
                 condition=disease_name,
                 disease_keywords=disease_keywords,
@@ -578,8 +581,22 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
                 disease_name=disease_name,
                 sub_expert_id=sub_expert_id,
             ),
+            get_all_chapter_data(
+                disease_name=disease_name,
+                therapeutic_area=ta_for_deriv or "other",
+                subcategory_id=sub_expert_id or "drug_amr",
+                idea=idea,
+            ),
             return_exceptions=True
         )
+
+        # Inject chapter-specific database data into researcher context
+        if not isinstance(chapter_data, Exception) and chapter_data:
+            researcher_ctx = researcher_ctx + "\n" + format_all_chapter_data(chapter_data)
+            logger.info("Chapter data service: injected %d context blocks", len(chapter_data))
+        else:
+            if isinstance(chapter_data, Exception):
+                logger.warning("Chapter data service failed (non-fatal): %s", chapter_data)
 
         if not isinstance(ci, Exception):
             ci_context = format_competitive_intelligence_for_report(ci)

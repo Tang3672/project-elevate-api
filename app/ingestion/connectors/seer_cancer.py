@@ -165,14 +165,61 @@ def get_cancer_incidence(cancer_type: str) -> Optional[dict]:
 
     Source: NCI SEER Cancer Stat Facts (seer.cancer.gov/statfacts) — US Public Domain
     """
-    # Normalize cancer type name
+    # Normalize cancer type name — flexible matching
+    ct_l = cancer_type.lower()
+
+    # Alias expansions for common abbreviations and biomarker-qualified names
+    _ALIASES: dict[str, str] = {
+        "nsclc": "Non-Small Cell Lung Cancer",
+        "non-small cell": "Non-Small Cell Lung Cancer",
+        "lung cancer": "Non-Small Cell Lung Cancer",
+        "kras": "Non-Small Cell Lung Cancer",        # KRAS mutations are in NSCLC
+        "egfr": "Non-Small Cell Lung Cancer",
+        "alk+": "Non-Small Cell Lung Cancer",
+        "pdl1": "Non-Small Cell Lung Cancer",
+        "breast": "Breast Cancer",
+        "her2": "Breast Cancer",
+        "brca": "Breast Cancer",
+        "tnbc": "Breast Cancer",
+        "colorectal": "Colorectal Cancer",
+        "colon": "Colorectal Cancer",
+        "rectal": "Colorectal Cancer",
+        "crc": "Colorectal Cancer",
+        "pancreatic": "Pancreatic Cancer",
+        "pdac": "Pancreatic Cancer",
+        "pancreas": "Pancreatic Cancer",
+        "prostate": "Prostate Cancer",
+        "psma": "Prostate Cancer",
+        "mcrpc": "Prostate Cancer",
+        "crpc": "Prostate Cancer",
+        "glioblastoma": "Glioblastoma Multiforme",
+        "gbm": "Glioblastoma Multiforme",
+        "myeloma": "Multiple Myeloma",
+        "dlbcl": "Multiple Myeloma",   # hematology fallback
+        "ovarian": "Ovarian Cancer",
+        "parp": "Ovarian Cancer",       # PARP inhibitors primarily ovarian
+        "hrd": "Ovarian Cancer",
+    }
+
+    # Try alias first
+    for alias_kw, canonical in _ALIASES.items():
+        if alias_kw in ct_l:
+            if canonical in _SEER_CANCER_STATS:
+                result = dict(_SEER_CANCER_STATS[canonical])
+                result["cancer_type"] = canonical
+                result["source"] = "NCI SEER Cancer Stat Facts 2024 (seer.cancer.gov) — US Public Domain"
+                result["citation"] = "National Cancer Institute. SEER Cancer Stat Facts. Bethesda, MD. https://seer.cancer.gov/statfacts/"
+                return result
+
+    # Direct substring match
     for key, data in _SEER_CANCER_STATS.items():
-        if cancer_type.lower() in key.lower() or key.lower() in cancer_type.lower():
+        if ct_l in key.lower() or key.lower() in ct_l:
             result = dict(data)
             result["cancer_type"] = key
             result["source"] = "NCI SEER Cancer Stat Facts 2024 (seer.cancer.gov) — US Public Domain"
             result["citation"] = "National Cancer Institute. SEER Cancer Stat Facts. Bethesda, MD. https://seer.cancer.gov/statfacts/"
             return result
+
     return None
 
 
