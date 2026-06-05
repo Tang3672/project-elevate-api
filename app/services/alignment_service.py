@@ -561,10 +561,12 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
             format_aggregated_sources,
         )
 
-        # Chapter data service — specialized databases for each report section
+        # Multi-Source Retrieval Pipeline (MSRP) — runs in parallel with other fetches
+        # Implements Adaptive RAG + CRAG quality gating across 38+ sources
+        from app.services.retrieval_pipeline import run_retrieval_pipeline
         from app.services.chapter_data_service import get_all_chapter_data, format_all_chapter_data
 
-        ci, pub_data, strategic_intel, aggregated_sources, chapter_data = await asyncio.gather(
+        ci, pub_data, strategic_intel, aggregated_sources, chapter_data, pipeline_result = await asyncio.gather(
             get_full_competitive_intelligence(
                 condition=disease_name,
                 disease_keywords=disease_keywords,
@@ -587,10 +589,39 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
                 subcategory_id=sub_expert_id or "drug_amr",
                 idea=idea,
             ),
+            run_retrieval_pipeline(
+                disease_name=disease_name,
+                therapeutic_area=ta_for_deriv or "other",
+                subcategory_id=sub_expert_id or "drug_amr",
+                idea=idea,
+                max_total_sec=12.0,
+            ),
             return_exceptions=True
         )
 
-        # Inject chapter-specific database data into researcher context
+        # CRAG quality gating: inject MSRP pipeline results first (highest quality)
+        # CRAG principle: evaluate retrieved data quality before injecting
+        if not isinstance(pipeline_result, Exception) and pipeline_result:
+            from app.services.retrieval_pipeline import RetrievalResult
+            pr: RetrievalResult = pipeline_result
+            avg_coverage = sum(pr.coverage_by_chapter.values()) / max(1, len(pr.coverage_by_chapter))
+            logger.info(
+                "MSRP: %d facts | %d sources | %.0f%% coverage | tier %d | %.0fms | cache %.0f%%",
+                len(pr.facts), len(pr.sources_called), avg_coverage * 100,
+                pr.tiers_reached, pr.total_latency_ms, pr.cache_hit_rate * 100,
+            )
+            # CRAG quality gate: only inject if coverage is meaningful (>20%)
+            if avg_coverage > 0.20 and pr.context_blocks:
+                pipeline_ctx = "\n\n=== RETRIEVAL PIPELINE (MSRP) — AUTHORITATIVE DATABASE FACTS ===\n"
+                pipeline_ctx += f"Coverage: {avg_coverage:.0%} | Sources: {len(pr.sources_called)} | Cache hit: {pr.cache_hit_rate:.0%}\n"
+                pipeline_ctx += "INSTRUCTION: Use these database-grounded facts. They override Claude's training data.\n"
+                pipeline_ctx += "\n".join(pr.context_blocks.values())
+                researcher_ctx = pipeline_ctx + "\n\n" + researcher_ctx  # Prepend = higher priority
+        else:
+            if isinstance(pipeline_result, Exception):
+                logger.warning("MSRP pipeline failed (non-fatal): %s", pipeline_result)
+
+        # Chapter data service: additional chapter-specific context
         if not isinstance(chapter_data, Exception) and chapter_data:
             researcher_ctx = researcher_ctx + "\n" + format_all_chapter_data(chapter_data)
             logger.info("Chapter data service: injected %d context blocks", len(chapter_data))
