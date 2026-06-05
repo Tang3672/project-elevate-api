@@ -525,6 +525,260 @@ DISEASE_POPULATIONS: dict[str, int] = {
 }
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# EXPANDED UNIVERSE — 300+ additional diseases across all specialties
+# Covers: common cancers without subtype qualifiers, women's health, pediatrics,
+# transplant, allergy, sleep, reproductive, gastroenterology, endocrinology,
+# infectious disease specifics, and major rare diseases not already included
+# ──────────────────────────────────────────────────────────────────────────────
+_EXPANDED: List[DiseaseEntry] = [
+
+    # ── ONCOLOGY — major common cancers and subtypes not yet covered ──────────
+    ("Non-Small Cell Lung Cancer (EGFR-mutant)", "oncology", "phase3", 8, 180_000, "Osimertinib 1st-line; T790M resistance mechanisms; RET/MET co-alterations"),
+    ("Non-Small Cell Lung Cancer (ALK-positive)", "oncology", "phase3", 6, 180_000, "Lorlatinib 1st-line; G1202R mutation resistance; next-gen ALK inhibitors"),
+    ("Non-Small Cell Lung Cancer (RET fusion)",  "oncology", "phase3", 3, 180_000, "Selpercatinib/pralsetinib approved; combination strategies"),
+    ("Non-Small Cell Lung Cancer (MET exon 14)", "oncology", "phase3", 3, 180_000, "Tepotinib/capmatinib approved; resistance via KRAS/EGFR bypass"),
+    ("Non-Small Cell Lung Cancer (NTRK fusion)", "oncology", "phase2", 2, 200_000, "Larotrectinib/entrectinib approved; resistance via kinase domain mutations"),
+    ("Breast Cancer (HER2-positive, brain mets)", "oncology", "phase2", 4, 200_000, "Tucatinib + T-DM1 cross CNS; unmet need for leptomeningeal disease"),
+    ("Breast Cancer (triple-negative, early stage)", "oncology", "phase3", 5, 180_000, "Pembrolizumab neoadjuvant approved; residual disease strategies"),
+    ("Breast Cancer (hereditary BRCA, prevention)", "oncology", "phase2", 2, 150_000, "Olaparib adjuvant; BRCA carriers with <5yr risk window"),
+    ("Colorectal Cancer (BRAF V600E)", "oncology", "phase3", 3, 180_000, "Encorafenib+cetuximab approved; triplet combinations emerging"),
+    ("Colorectal Cancer (HER2-amplified)", "oncology", "phase2", 2, 200_000, "Tucatinib+trastuzumab approved; ADC opportunities growing"),
+    ("Colorectal Cancer (early-onset, <50yr)", "oncology", "phase2", 4, 150_000, "Rising incidence; microbiome/diet mechanisms; distinct biology"),
+    ("Gastric Cancer (PD-L1 positive, 1st line)", "oncology", "phase3", 4, 180_000, "Nivolumab+chemo approved; claudin 18.2 next frontier"),
+    ("Gastric Cancer (Claudin 18.2+)", "oncology", "phase3", 2, 200_000, "Zolbetuximab Phase 3 positive; ADC pipeline large"),
+    ("Pancreatic Cancer (BRCA-mutant, maintenance)", "oncology", "phase3", 2, 150_000, "Olaparib maintenance approved; novel PARP+DDR combinations"),
+    ("Hepatocellular Carcinoma (1st line)", "oncology", "phase3", 5, 150_000, "Atezo+bev and durva+tremelimumab approved; TKI combinations"),
+    ("Renal Cell Carcinoma (clear cell, IO+TKI)", "oncology", "phase3", 6, 180_000, "Multiple combos approved; sequencing after IO-progression"),
+    ("Renal Cell Carcinoma (non-clear cell)", "oncology", "phase2", 2, 180_000, "Papillary/chromophobe excluded from major trials; FH/SDHA targets"),
+    ("Bladder Cancer (cisplatin-ineligible, 1st line)", "oncology", "phase3", 4, 180_000, "Enfortumab+pembro approved; FGFR3-targeted combinations"),
+    ("Bladder Cancer (non-muscle-invasive, high-risk)", "oncology", "phase3", 5, 100_000, "BCG shortage; IL-15/nadofaragene and N-803 approved 2023"),
+    ("Head and Neck Cancer (HPV-positive)", "oncology", "phase2", 4, 150_000, "Different biology from HPV-neg; IO response correlation varies"),
+    ("Thyroid Cancer (medullary)", "oncology", "phase3", 3, 180_000, "Vandetanib/cabozantinib; RET-specific selpercatinib approved"),
+    ("Thymoma / Thymic Epithelial Tumors", "oncology", "phase2", 2, 120_000, "Amivantamab activity; lensitinib; small rare population"),
+    ("Uterine/Endometrial Cancer (advanced)", "oncology", "phase3", 4, 150_000, "Dostarlimab+chemo approved dMMR; pMMR still needs solutions"),
+    ("Anal Cancer (locally advanced)", "oncology", "phase2", 2, 120_000, "Nivolumab+chemo; EGFR-targeted approaches; HPV-driven biology"),
+    ("Testicular Cancer (refractory GCT)", "oncology", "phase2", 3, 150_000, "Carboplatin salvage standard; VEGFR/checkpoint approaches"),
+    ("Meningioma (grade 2/3)", "oncology", "phase2", 1, 100_000, "No systemic therapy approved; focal RT limited; PI3K/CDK4/6 targets"),
+    ("Pediatric High-Grade Glioma (DIPG/DMG)", "oncology", "phase2", 1, 150_000, "H3K27M mutation 80%; ONC201 in trials; extreme unmet need"),
+    ("Pediatric Neuroblastoma (ALK-mutant)", "oncology", "phase2", 2, 150_000, "Lorlatinib in trials for ALK-mutant; immunotherapy + differentiation"),
+    ("Pediatric Medulloblastoma (MYCN-amplified)", "oncology", "phase2", 2, 120_000, "WNT subgroup curable; MYCN-driven SHH subtype needs novel approaches"),
+    ("Pediatric Rhabdomyosarcoma (metastatic)", "oncology", "phase2", 2, 150_000, "Vinorelbine-based regimens; IGF1R and CDK4/6 approaches"),
+    ("Kaposi Sarcoma (advanced)", "oncology", "phase2", 3, 80_000, "VEGF-driven; pomalidomide active; HIV-associated and classic forms"),
+    ("Primary CNS Lymphoma (PCNSL)", "oncology", "phase2", 3, 150_000, "MTX-based regimens; BTK inhibitors (ibrutinib/zanubrutinib) active"),
+    ("Cutaneous Squamous Cell Carcinoma (advanced)", "oncology", "phase3", 3, 150_000, "Cemiplimab approved; combination IO approaches"),
+    ("Merkel Cell Carcinoma (recurrent)", "oncology", "phase3", 2, 200_000, "Avelumab/pembrolizumab approved; high unmet in relapsed setting"),
+    ("Chromophobe RCC / Oncocytoma", "oncology", "phase2", 1, 120_000, "Excluded from most RCC trials; mTOR inhibitors; distinct biology"),
+
+    # ── WOMEN'S HEALTH ────────────────────────────────────────────────────────
+    ("Endometriosis (moderate-severe)", "immunology", "phase3", 4, 12_000, "Elagolix/linzagolix approved; non-hormonal disease-modifying agents needed"),
+    ("Uterine Fibroids (symptomatic)", "immunology", "phase3", 5, 8_000, "Relugolix combo approved; non-hormonal/non-surgical approaches"),
+    ("Polycystic Ovary Syndrome (PCOS)", "metabolic", "phase3", 3, 5_000, "Metformin/OCP standard; insulin sensitizers + GLP-1 entering trials"),
+    ("Premature Ovarian Insufficiency", "immunology", "phase2", 2, 15_000, "HRT standard; FSH receptor agonists; fertility preservation"),
+    ("Preeclampsia (prevention)", "cardiovascular", "phase3", 2, 5_000, "Aspirin 81mg reduces risk; VEGF/sFlt-1 balance therapeutic target"),
+    ("Gestational Diabetes", "metabolic", "phase2", 2, 5_000, "Lifestyle; metformin; GLP-1 safety in pregnancy being studied"),
+    ("Vulvodynia / Vestibulodynia", "cns", "phase2", 1, 5_000, "Poorly understood chronic pain; TRPV1/nerve growth factor targets"),
+    ("Female Sexual Dysfunction (HSDD)", "cns", "phase2", 2, 8_000, "Bremelanotide/flibanserin approved; melanocortin 4 receptor targets"),
+
+    # ── PEDIATRIC CONDITIONS ──────────────────────────────────────────────────
+    ("Attention Deficit Hyperactivity Disorder (pediatric)", "cns", "phase3", 15, 3_000, "Stimulants standard; non-stimulant viloxazine; digital therapeutics"),
+    ("Autism Spectrum Disorder (core symptoms)", "cns", "phase2", 1, 8_000, "No core symptom therapy approved; oxytocin/GABA/mGluR targets"),
+    ("Juvenile Idiopathic Arthritis (systemic)", "immunology", "phase3", 6, 40_000, "IL-1/IL-6 inhibitors; JAK inhibitors; biologic sequencing"),
+    ("Pediatric Inflammatory Bowel Disease", "immunology", "phase3", 5, 40_000, "Adult biologics extended; pediatric-specific dosing/endpoints"),
+    ("Type 1 Diabetes (prevention)", "metabolic", "phase3", 1, 10_000, "Teplizumab delays onset in at-risk; BCG/other immune modulation"),
+    ("Pediatric Acute Lymphoblastic Leukemia (relapsed)", "oncology", "phase3", 4, 200_000, "Blinatumomab/CAR-T approved; CNS prophylaxis refinement"),
+    ("Neonatal Sepsis", "amr_infectious", "phase2", 4, 10_000, "Ampicillin+gentamicin standard; novel antibacterial + immunotherapy"),
+    ("Congenital Heart Disease (complex)", "cardiovascular", "phase2", 3, 50_000, "Surgical standard; cardiac regeneration/gene therapy approaches"),
+    ("Epidermolysis Bullosa (severe)", "rare_disease", "phase3", 1, 200_000, "Beremagene geperpavec (B-VEC) approved 2023; gene therapy wave"),
+    ("Kawasaki Disease (refractory)", "immunology", "phase2", 2, 10_000, "IVIG standard; IL-1 inhibitors for refractory; coronary artery protection"),
+    ("Pediatric Nephrotic Syndrome (FSGS)", "renal_urology", "phase2", 2, 30_000, "Sparsentan approved; APOL1-targeting approaches"),
+
+    # ── INFECTIOUS DISEASE ────────────────────────────────────────────────────
+    ("HIV (treatment-naive, long-acting)", "amr_infectious", "phase3", 15, 25_000, "Cabotegravir+rilpivirine 2-monthly; 6-monthly lenacapavir emerging"),
+    ("HIV (reservoir eradication/cure)", "amr_infectious", "phase2", 1, 50_000, "Shock-and-kill; silencing strategies; no approved cure therapy"),
+    ("Chronic Hepatitis B (functional cure)", "amr_infectious", "phase2", 5, 8_000, "NrtIs suppress; capsid inhibitors + RNAi approaching functional cure"),
+    ("Chronic Hepatitis Delta (HDV)", "amr_infectious", "phase3", 1, 50_000, "Bulevirtide approved in EU; lonafarnib; extreme unmet need"),
+    ("Clostridioides difficile (recurrent CDI)", "amr_infectious", "phase3", 4, 8_000, "Bezlotoxumab reduces recurrence; LBP microbiome therapies (Vowst)"),
+    ("Tuberculosis (drug-resistant MDR/XDR)", "amr_infectious", "phase3", 3, 15_000, "BPaL regimen 6-month cure; novel nitroimidazoles; WHO priority"),
+    ("Invasive Aspergillosis (immunocompromised)", "amr_infectious", "phase2", 5, 25_000, "Voriconazole/isavuconazole standard; ibrexafungerp for breakthrough"),
+    ("Candida auris (invasive)", "amr_infectious", "phase3", 2, 30_000, "Olorofim approved 2023; rezafungin; extreme multidrug resistance"),
+    ("Respiratory Syncytial Virus (adult/elderly)", "vaccine", "phase3", 2, 300, "Arexvy/Abrysvo approved 2023; nirsevimab for pediatric protection"),
+    ("Influenza (high-dose/adjuvanted, elderly)", "vaccine", "phase3", 8, 200, "Fluzone HD/Fluad approved; mRNA universal flu vaccine phase 3"),
+    ("Mpox (severe immunocompromised)", "amr_infectious", "phase2", 2, 5_000, "Tecovirimat + JYNNEOS; immunocompromised patients at highest risk"),
+    ("Dengue Fever (vaccine-preventable)", "vaccine", "phase3", 1, 250, "Dengvaxia limited use; TAK-003 Qdenga broader indication"),
+    ("Malaria (preventive + treatment)", "vaccine", "phase3", 3, 500, "RTS,S/R21 approved; tafenoquine for P. vivax; endectocides"),
+    ("West Nile Virus Encephalitis", "amr_infectious", "phase2", 0, 20_000, "No approved therapy; monoclonal antibody/antiviral approaches"),
+    ("Chagas Disease (chronic cardiac)", "amr_infectious", "phase2", 2, 5_000, "Benznidazole/nifurtimox for acute; chronic cardiac phase underserved"),
+    ("Leishmaniasis (visceral)", "amr_infectious", "phase2", 2, 8_000, "Liposomal amphotericin B; miltefosine; WHO neglected disease"),
+
+    # ── CARDIOVASCULAR (expanded) ─────────────────────────────────────────────
+    ("Hypertrophic Cardiomyopathy (obstructive)", "cardiovascular", "phase3", 2, 50_000, "Mavacamten approved; aficamten in trials; myosin inhibitor class"),
+    ("Dilated Cardiomyopathy (LMNA-mutant)", "cardiovascular", "phase2", 1, 30_000, "SGLT2/sacubitril standard; gene therapy targeting lamin A/C"),
+    ("Cardiac Amyloidosis (ATTR)", "cardiovascular", "phase3", 3, 50_000, "Tafamidis approved; patisiran/vutrisiran approved for ATTR-CM; eplontersen"),
+    ("Pulmonary Hypertension (Group 3, WHO)", "cardiovascular", "phase2", 2, 30_000, "No approved PAH therapy for lung disease-associated PH; inhaled prostacyclins"),
+    ("Peripheral Artery Disease (critical limb ischemia)", "cardiovascular", "phase3", 3, 20_000, "SGLT2i reduces MACE; revascularization plus gene therapy (HGF)"),
+    ("Spontaneous Coronary Artery Dissection (SCAD)", "cardiovascular", "phase2", 1, 15_000, "Mostly young women; underlying connective tissue disease; fibromuscular dysplasia"),
+    ("Cardiac Sarcoidosis", "immunology", "phase2", 2, 30_000, "Corticosteroid standard; TNF inhibitors in small series"),
+    ("Venous Thromboembolism (recurrent prevention)", "cardiovascular", "phase3", 5, 8_000, "NOAC standard; factor XI inhibitors (asundexian) for safer anticoagulation"),
+
+    # ── METABOLIC / ENDOCRINE (expanded) ─────────────────────────────────────
+    ("Type 1 Diabetes (automated insulin delivery)", "metabolic", "phase3", 5, 10_000, "Closed-loop systems (Control-IQ, Omnipod 5); ultra-rapid insulin analogs"),
+    ("Hypoglycemia (severe recurrent)", "metabolic", "phase2", 2, 15_000, "Glucagon kits standard; dasiglucagon nasal; SGLT2 cessation approaches"),
+    ("Acromegaly (treatment-resistant)", "metabolic", "phase3", 3, 25_000, "Octreotide/lanreotide standard; pasireotide/pegvisomant; paltusotine oral"),
+    ("Cushing Disease (recurrent)", "metabolic", "phase3", 3, 30_000, "Osilodrostat/pasireotide approved; relacorilant (GR antagonist) in trials"),
+    ("Primary Hyperoxaluria Type 1 (PH1)", "rare_disease", "phase3", 1, 200_000, "Lumasiran approved (RNAi to reduce oxalate); nedosiran coming"),
+    ("Lysosomal Acid Lipase Deficiency (LALD)", "rare_disease", "phase3", 1, 200_000, "Sebelipase alfa approved; ERT challenges; gene therapy wave"),
+    ("Transthyretin Amyloidosis (ATTRv, hereditary)", "rare_disease", "phase3", 3, 150_000, "Patisiran/inotersen/eplontersen approved; vutrisiran 3-monthly"),
+    ("Adiposity Hypoventilation Syndrome (OHS)", "respiratory", "phase2", 2, 10_000, "PAP therapy; weight loss; GLP-1 emerging as disease-modifying"),
+
+    # ── RESPIRATORY (expanded) ────────────────────────────────────────────────
+    ("Asthma (uncontrolled type 2)", "immunology", "phase3", 8, 25_000, "IL-4/13/5 biologics approved; tezepelumab thymic stromal lymphopoietin target"),
+    ("Asthma (non-type 2, neutrophilic)", "respiratory", "phase2", 3, 15_000, "Corticosteroid-dependent; no approved biologic; CXCR2 antagonists"),
+    ("COPD (eosinophilic exacerbations)", "respiratory", "phase3", 6, 10_000, "Dupilumab approved 2024; mepolizumab trial data positive"),
+    ("COPD (alpha-1 antitrypsin deficiency)", "rare_disease", "phase3", 3, 80_000, "Augmentation therapy IV; inhaled formulations + gene therapy"),
+    ("Idiopathic Pulmonary Fibrosis (progressive)", "respiratory", "phase3", 3, 40_000, "Pirfenidone/nintedanib approved; autotaxin inhibitors (ziritaxestat withdrawn); TGFB targets"),
+    ("Pleuroparenchymal Fibroelastosis (PPFE)", "respiratory", "phase2", 0, 30_000, "Rare ILD variant; no approved therapy; antifibrotic candidates being studied"),
+    ("Bronchiectasis (non-CF)", "respiratory", "phase3", 2, 15_000, "Inhaled antibiotics (tobramycin, colistin); brensocatib (DPP1 inhibitor)"),
+    ("Primary Ciliary Dyskinesia (advanced)", "respiratory", "phase2", 0, 30_000, "No approved disease-modifying therapy; airway clearance devices only"),
+    ("Hypersensitivity Pneumonitis (chronic)", "respiratory", "phase2", 1, 25_000, "Antigen avoidance; nintedanib active; immunosuppression for progressive"),
+
+    # ── GASTROENTEROLOGY / HEPATOLOGY (expanded) ──────────────────────────────
+    ("Primary Sclerosing Cholangitis (PSC)", "immunology", "phase2", 0, 50_000, "No approved disease-modifying therapy; PPAR/FXR agonists in trials"),
+    ("Primary Biliary Cholangitis (PBC, second-line)", "immunology", "phase3", 2, 70_000, "Ursodiol standard; obeticholic acid/elafibranor approved 2nd line"),
+    ("Autoimmune Hepatitis (refractory)", "immunology", "phase2", 2, 20_000, "Azathioprine/steroids; budesonide; JAK inhibitors in refractory forms"),
+    ("Wilson's Disease", "rare_disease", "phase3", 3, 30_000, "Chelation standard; ALXN2075/fosdenopterin; liver transplant curative"),
+    ("Celiac Disease (refractory type 2)", "immunology", "phase2", 1, 30_000, "Gluten-free diet insufficient; latiglutenase/TG2 inhibitors in trials"),
+    ("Short Bowel Syndrome (IF-associated liver disease)", "rare_disease", "phase3", 2, 200_000, "Teduglutide approved; lanreotide; parenteral nutrition weaning"),
+    ("Achalasia (refractory)", "gi_hepatology", "phase2", 2, 15_000, "Per-oral endoscopic myotomy (POEM); botulinum toxin; no drug therapy"),
+    ("Gastroparesis (diabetic)", "metabolic", "phase3", 2, 8_000, "Metoclopramide standard; relamorelin/prucalopride; gastric neurostimulator"),
+    ("Eosinophilic Esophagitis (EoE)", "immunology", "phase3", 2, 30_000, "Dupilumab approved 2022; cendakimab/budesonide; dietary approaches"),
+    ("Functional Dyspepsia (Rome IV)", "gi_hepatology", "phase2", 3, 5_000, "Proton pump inhibitors; mirtazapine; FDgard; gut-brain axis targets"),
+    ("Intestinal Behcet's Disease", "immunology", "phase2", 2, 40_000, "TNF inhibitors; ustekinumab; limited evidence base"),
+
+    # ── RENAL / UROLOGY (expanded) ────────────────────────────────────────────
+    ("IgA Nephropathy (progressive)", "immunology", "phase3", 2, 30_000, "Sparsentan approved; iptacopan/atrasentan; budesonide targeted release"),
+    ("Membranous Nephropathy (anti-PLA2R+)", "immunology", "phase3", 2, 40_000, "Rituximab standard; obinutuzumab; PLA2R-targeted therapies"),
+    ("Lupus Nephritis (class III/IV)", "immunology", "phase3", 3, 50_000, "Voclosporin+belimumab approved; obinutuzumab/anifrolumab active"),
+    ("ANCA-associated Vasculitis (refractory)", "immunology", "phase3", 3, 50_000, "Avacopan approved 2021; ixekizumab; B-cell depletion strategies"),
+    ("Polycystic Kidney Disease (ADPKD)", "rare_disease", "phase3", 2, 40_000, "Tolvaptan approved; mTOR inhibitors failed; bardoxolone in trials"),
+    ("Hyperoxaluria (secondary, enteric)", "metabolic", "phase2", 1, 30_000, "Pyridoxine for primary; oxalobacter bacteria; dietary modifications"),
+    ("Bladder Pain Syndrome (IC/BPS)", "renal_urology", "phase2", 3, 5_000, "Intravesical therapies; pentosan polysulfate; LiRIS device"),
+    ("Overactive Bladder (neurogenic)", "cns", "phase3", 5, 4_000, "Mirabegron/onabotulinumtoxin A approved; vibegron; device approaches"),
+    ("Benign Prostatic Hyperplasia (surgical alternatives)", "renal_urology", "phase3", 8, 5_000, "Alpha blockers/5ARIs; Rezum/UroLift devices; PAE procedures"),
+    ("Chronic Kidney Disease (CKD progression)", "metabolic", "phase3", 4, 8_000, "SGLT2/finerenone slows progression; atrasentan in IgA; BAR502"),
+
+    # ── MUSCULOSKELETAL (expanded) ────────────────────────────────────────────
+    ("Osteoporosis (treatment-resistant)", "metabolic", "phase3", 8, 20_000, "Romosozumab/abaloparatide approved; next-generation cathepsin K inhibitors"),
+    ("Osteoarthritis (knee, structural modification)", "immunology", "phase3", 3, 8_000, "No DMOAD approved; FGF18 (sprifermin); IL-1/CGRP targets; gene therapy"),
+    ("Ankylosing Spondylitis (active, bio-naive)", "immunology", "phase3", 6, 40_000, "IL-17/TNF inhibitors approved; JAK inhibitors; MRGPRX4 itch targets"),
+    ("Diffuse Idiopathic Skeletal Hyperostosis (DISH)", "musculoskeletal", "phase2", 0, 5_000, "NSAIDs only; BMP/FGF pathway understanding emerging; unmet need"),
+    ("Fibromyalgia (refractory)", "cns", "phase2", 3, 5_000, "Pregabalin/duloxetine/milnacipran standard; TRP channel antagonists; LDN"),
+    ("Complex Regional Pain Syndrome (CRPS)", "cns", "phase2", 2, 8_000, "Multimodal pain; ketamine infusion; spinal cord stimulation; CGRP targets"),
+    ("Dupuytren's Disease (progressive)", "musculoskeletal", "phase2", 2, 5_000, "Collagenase injection standard; nintedanib showing activity"),
+    ("Tendinopathy (achilles/patellar, chronic)", "musculoskeletal", "phase2", 2, 3_000, "PRP injections; extracorporeal shockwave; TGFβ/BMP growth factor biologics"),
+
+    # ── DERMATOLOGY (expanded) ────────────────────────────────────────────────
+    ("Atopic Dermatitis (moderate-severe, pediatric)", "immunology", "phase3", 5, 30_000, "Dupilumab/tralokinumab approved; JAK inhibitors; pediatric dosing gap"),
+    ("Prurigo Nodularis (moderate-severe)", "immunology", "phase3", 1, 40_000, "Dupilumab approved 2022; nemolizumab; IL-31/TSLP pathway targets"),
+    ("Alopecia Areata (severe, >50% scalp loss)", "immunology", "phase3", 2, 20_000, "Baricitinib/ritlecitinib approved; hair follicle immune privilege restoration"),
+    ("Vitiligo (progressive)", "immunology", "phase3", 1, 15_000, "Ruxolitinib cream approved 2022; melanocyte transplantation; afamelanotide"),
+    ("Hidradenitis Suppurativa (moderate-severe)", "immunology", "phase3", 2, 50_000, "Adalimumab/secukinumab approved; bimekizumab Phase 3 positive"),
+    ("Chronic Urticaria (refractory antihistamine)", "immunology", "phase3", 3, 25_000, "Omalizumab approved; ligelizumab Phase 3 failed; bruton's tyrosine kinase"),
+    ("Bullous Pemphigoid (elderly)", "immunology", "phase3", 2, 30_000, "Super-potent topical steroids; dupilumab/omalizumab emerging data"),
+    ("Pemphigus Vulgaris (relapsing)", "immunology", "phase3", 3, 50_000, "Rituximab standard; efgartigimod (FcRn inhibitor) approved"),
+    ("Ichthyosis (lamellar/congenital)", "rare_disease", "phase2", 1, 50_000, "No systemic approved; retinoids topical; gene therapy coming"),
+    ("Rosacea (ocular, refractory)", "immunology", "phase3", 4, 5_000, "Ivermectin/brimonidine topical; opzelura; laser; IL-1 pathway"),
+    ("Cutaneous Lupus (SCLE/DLE)", "immunology", "phase2", 2, 20_000, "Hydroxychloroquine standard; anifrolumab active in skin; BIIB059"),
+    ("Keloid Scarring (recurrent)", "dermatology", "phase2", 2, 5_000, "Intralesional steroids/5-FU; nintedanib systemic; anti-TGFβ biologics"),
+
+    # ── MENTAL HEALTH (expanded) ──────────────────────────────────────────────
+    ("Anorexia Nervosa (severe)", "cns", "phase2", 1, 15_000, "Only olanzapine has modest evidence; no FDA-approved treatment"),
+    ("Binge Eating Disorder (BED)", "cns", "phase3", 1, 5_000, "Lisdexamfetamine approved; GLP-1 emerging as appetite regulator"),
+    ("Generalized Anxiety Disorder (refractory)", "cns", "phase2", 5, 5_000, "SSRIs/SNRIs standard; buspirone; GABA-A positive modulators; FAAH"),
+    ("Social Anxiety Disorder (SAD)", "cns", "phase2", 3, 5_000, "SSRIs/venlafaxine standard; oxytocin; psychedelic-assisted therapy"),
+    ("Borderline Personality Disorder", "cns", "phase2", 0, 8_000, "No FDA-approved pharmacotherapy; DBT gold standard; GLP-1 satiety/impulsivity"),
+    ("Trichotillomania / Body-Focused Repetitive Behaviors", "cns", "phase2", 1, 5_000, "N-acetylcysteine; olanzapine; habit reversal therapy; glutamate modulation"),
+    ("Insomnia Disorder (chronic)", "cns", "phase3", 6, 3_000, "Lemborexant/daridorexant (orexin); digital CBT-I; novel non-benzodiazepines"),
+    ("Restless Legs Syndrome (refractory)", "cns", "phase2", 5, 5_000, "DA agonists; augmentation problem; α2δ ligands; iron supplementation"),
+
+    # ── OPHTHALMOLOGY (expanded) ──────────────────────────────────────────────
+    ("Glaucoma (normal-tension)", "ophthalmology", "phase2", 4, 3_000, "IOP-lowering standard; neuroprotection unproven; netarsudil/latanoprost"),
+    ("Diabetic Retinopathy (non-proliferative)", "ophthalmology", "phase3", 3, 5_000, "Faricimab/aflibercept active; systemic GLP-1 may reduce progression"),
+    ("Retinitis Pigmentosa (RP, inherited)", "rare_disease", "phase2", 1, 50_000, "Voretigene (RPE65) approved; rod/cone gene therapy wave expanding"),
+    ("Corneal Dystrophy (CHED/Fuchs)", "ophthalmology", "phase2", 1, 20_000, "Endothelial keratoplasty gold standard; y-27632 eye drops regeneration"),
+    ("Age-Related Macular Degeneration (dry, early)", "ophthalmology", "phase3", 2, 5_000, "No approved systemic; AREDS supplements; complement inhibitors (pegcetacoplan)"),
+    ("Uveitis (non-infectious, posterior)", "immunology", "phase3", 3, 30_000, "Adalimumab approved; sirolimus implant; faricimab/brolucizumab"),
+    ("Thyroid Eye Disease (mild-moderate)", "immunology", "phase3", 2, 200_000, "Teprotumumab approved; linsitinib; less invasive alternatives to surgery"),
+
+    # ── ALLERGY / IMMUNOLOGY ──────────────────────────────────────────────────
+    ("Food Allergy (peanut, PPOIT prevention)", "immunology", "phase3", 1, 5_000, "Palforzia approved; omalizumab as adjunct; tolerance induction protocols"),
+    ("Hereditary Angioedema (recurrent attacks)", "rare_disease", "phase3", 4, 200_000, "Lanadelumab/garadacimab prophylaxis; abelacimab; denitrification not practical"),
+    ("Mastocytosis (advanced systemic)", "rare_disease", "phase3", 1, 150_000, "Avapritinib approved for D816V; ripretinib; KIT-directed therapies"),
+    ("Eosinophilic Granulomatosis with Polyangiitis (EGPA)", "immunology", "phase3", 2, 40_000, "Mepolizumab approved; benralizumab in trials; B-cell depleting approaches"),
+    ("Common Variable Immunodeficiency (CVID)", "rare_disease", "phase3", 2, 30_000, "IVIG/SCIG standard; subcutaneous facilitated; B-cell reconstitution"),
+    ("Hyper-IgE Syndrome (STAT3-mutant)", "rare_disease", "phase2", 0, 50_000, "No approved specific therapy; IVIG + antibiotics; JAK inhibition under study"),
+
+    # ── ENDOCRINOLOGY ─────────────────────────────────────────────────────────
+    ("Hypothyroidism (treatment-resistant, T3 deficiency)", "metabolic", "phase2", 2, 3_000, "Levothyroxine + liothyronine combo; slow-release T3; thyroid tissue engineering"),
+    ("Addison's Disease (adrenal insufficiency)", "metabolic", "phase2", 2, 5_000, "Hydrocortisone standard; once-daily modified-release (Plenadren); pump systems"),
+    ("Hypoparathyroidism (chronic)", "metabolic", "phase3", 2, 50_000, "Palopegteriparatide (TransCon PTH) approved 2024; long-acting PTH analogs"),
+    ("Hyperparathyroidism (persistent/recurrent)", "metabolic", "phase3", 3, 15_000, "Cinacalcet standard; denosumab for hypercalcemia; surgical residual disease"),
+    ("Carcinoid Tumors / NET (progressive)", "oncology", "phase3", 4, 80_000, "Octreotide LAR/lanreotide approved; everolimus; 177Lu-DOTATATE approved"),
+
+    # ── HEMATOLOGY (expanded) ─────────────────────────────────────────────────
+    ("Aplastic Anemia (severe, relapsed)", "hematology", "phase3", 3, 80_000, "Eltrombopag standard; eltanexor (XPO1); Allo-SCT for young patients"),
+    ("Paroxysmal Nocturnal Hemoglobinuria (PNH)", "rare_disease", "phase3", 4, 400_000, "Ravulizumab/pegcetacoplan approved; iptacopan (factor B) 2023"),
+    ("Warm Autoimmune Hemolytic Anemia (wAIHA)", "hematology", "phase3", 3, 50_000, "Rituximab/steroids standard; sutimlimab (complement) approved; PI3K delta"),
+    ("Immune Thrombocytopenic Purpura (chronic ITP)", "hematology", "phase3", 6, 80_000, "Eltrombopag/romiplostim/fostamatinib approved; rilzabrutinib emerging"),
+    ("Thrombotic Thrombocytopenic Purpura (acquired)", "hematology", "phase3", 2, 100_000, "Caplacizumab approved (anti-VWF nanobody); immune suppression"),
+    ("Cold Agglutinin Disease (CAD)", "hematology", "phase3", 2, 200_000, "Sutimlimab approved 2022; iptacopan; pegcetacoplan"),
+    ("Beta-Thalassemia (transfusion-dependent)", "rare_disease", "phase3", 3, 200_000, "Luspatercept/beti-cel/lovotibeglogene approved; gene editing curative"),
+    ("Hemophilia A (inhibitor, factor replacement)", "rare_disease", "phase3", 4, 400_000, "Emicizumab approved; fitusiran; valoctocogene (BioMarin gene therapy)"),
+    ("Hemophilia B (gene therapy eligible)", "rare_disease", "phase3", 3, 300_000, "Etranacogene (Hemgenix) approved; fitusiran; fidanacogene dezaparvovec"),
+
+    # ── NEUROMUSCULAR (expanded) ──────────────────────────────────────────────
+    ("Myasthenia Gravis (generalized, anti-AChR)", "immunology", "phase3", 4, 50_000, "Efgartigimod/rozanolixizumab approved; FcRn inhibitors; complement (zilucoplan)"),
+    ("Lambert-Eaton Myasthenic Syndrome (LEMS)", "immunology", "phase2", 2, 30_000, "Amifampridine approved; immune suppression; VGCC-targeted approaches"),
+    ("Multifocal Motor Neuropathy (MMN)", "immunology", "phase2", 2, 50_000, "IVIG standard; subcutaneous Ig; no disease-modifying agent approved"),
+    ("Chronic Inflammatory Demyelinating Polyneuropathy (CIDP)", "immunology", "phase3", 3, 50_000, "Efgartigimod SC approved 2023; avacopan; IVIG 10g subcutaneous"),
+    ("Stiff Person Syndrome (progressive)", "immunology", "phase2", 2, 30_000, "IVIG/diazepam standard; rituximab; anti-GAD65 autoantibody target"),
+    ("Transverse Myelitis (NMO spectrum)", "immunology", "phase3", 4, 100_000, "Inebilizumab/satralizumab/ublituximab approved; eculizumab for severe"),
+    ("Inclusion Body Myositis (IBM)", "immunology", "phase2", 0, 30_000, "No approved therapy; arimoclomol failed; follistatin/ACE-031 muscle loss"),
+
+    # ── TRANSPLANT / GRAFT ────────────────────────────────────────────────────
+    ("Kidney Transplant Rejection (antibody-mediated)", "immunology", "phase3", 2, 50_000, "No approved AMR therapy; avacopan + daratumumab in trials; complement targets"),
+    ("Liver Transplant (primary non-function prevention)", "immunology", "phase2", 2, 30_000, "Machine perfusion standard; C1-esterase inhibitor; ex-vivo reconditioning"),
+    ("Graft-versus-Host Disease (chronic)", "immunology", "phase3", 3, 80_000, "Belumosudil/ibrutinib/ruxolitinib approved; KD025; JAK inhibitors"),
+    ("Organ Preservation (extended criteria donors)", "immunology", "phase2", 1, 30_000, "Normothermic machine perfusion approved devices; ex-vivo gene editing"),
+
+    # ── DEVICE / DIAGNOSTIC OPPORTUNITIES ────────────────────────────────────
+    ("Early Cancer Detection (multi-cancer blood test)", "diagnostic", "phase3", 1, 1_000, "Galleri/Shield approved; cfDNA + methylation; massive population screening"),
+    ("Sepsis Rapid Diagnostics (blood culture-free)", "diagnostic", "phase3", 2, 2_000, "T2Biosystems/GenMark; BCID panels; host-response biomarker (InSep)"),
+    ("Cardiac Biomarker (high-sensitivity troponin, ED rule-out)", "diagnostic", "phase3", 5, 500, "hs-cTnI standard; 0-hour/1-hour protocols; AI integration"),
+    ("Alzheimer Blood Test (p-tau 217)", "diagnostic", "phase3", 1, 1_000, "Lumipulse/Elecsys approved; plasma p-tau217 vs PET/CSF; triage tool"),
+    ("Continuous Glucose Monitor (factory-calibrated, 15-day)", "device", "phase3", 4, 6_000, "Dexcom G7/Libre 3 approved; 15-day next; gestational DM application"),
+    ("Wearable Cardiac Monitor (AI-interpreted, 30-day)", "device", "phase3", 5, 2_000, "Zio patch/MCOT standard; AI-extended wear; atrial fibrillation screening"),
+    ("Implantable Glucose Monitor (no fingerstick, 6-month)", "device", "phase2", 1, 8_000, "Eversense approved but limited; next-gen fully implantable"),
+    ("Retinal Imaging AI (diabetic retinopathy screening)", "diagnostic", "phase3", 2, 500, "IDx-DR FDA cleared; optic disc/AMD AI; telemedicine integration"),
+    ("Neuromodulation (vagus nerve, heart failure)", "device", "phase3", 2, 30_000, "CardioFit trial; ANTHEM-HFrEF; autonomic rebalancing devices"),
+    ("Smart Inhaler (adherence + spirometry)", "device", "phase3", 3, 1_000, "Propeller/Adherium cleared; AI exacerbation prediction; sensor integration"),
+
+    # ── SLEEP MEDICINE ────────────────────────────────────────────────────────
+    ("Obstructive Sleep Apnea (CPAP-intolerant)", "device", "phase3", 3, 20_000, "Inspire hypoglossal nerve stimulation; erenumab/tirzepatide reducing AHI"),
+    ("Central Sleep Apnea (HF-associated)", "cardiovascular", "phase3", 2, 15_000, "Remede system approved; adaptive servo-ventilation; cardiac optimization"),
+    ("Idiopathic Hypersomnia", "cns", "phase3", 1, 10_000, "Sodium oxybate for idiopathic hypersomnia approved 2021; clarithromycin; GABA-A"),
+    ("REM Sleep Behavior Disorder (prodromal PD)", "cns", "phase2", 2, 5_000, "Clonazepam standard; melatonin; α-synuclein vaccine trials via RBD biomarker"),
+
+    # ── PAIN / ANESTHESIA ─────────────────────────────────────────────────────
+    ("Chronic Low Back Pain (discogenic)", "cns", "phase3", 5, 5_000, "NSAID/opioid standard; intradiscal biologics (GDF-5, PRP); neuromodulation"),
+    ("Postherpetic Neuralgia (PHN)", "cns", "phase3", 4, 5_000, "Gabapentinoids standard; capsaicin patch; sodium channel Nav1.7 inhibitors"),
+    ("Chemotherapy-Induced Peripheral Neuropathy (CIPN)", "cns", "phase2", 1, 5_000, "Duloxetine only evidence; no approved prevention; VEGF/BDNF neuroprotection"),
+    ("Diabetic Peripheral Neuropathy (painful DPN)", "metabolic", "phase3", 3, 5_000, "Duloxetine/pregabalin/tapentadol standard; CGRP receptor antagonists"),
+    ("Cluster Headache (chronic, refractory)", "cns", "phase3", 3, 20_000, "Galcanezumab approved for episodic; CGRP/PACAP pathway; sphenopalatine ganglion"),
+    ("Trigeminal Neuralgia (refractory medical)", "cns", "phase2", 2, 5_000, "Carbamazepine standard; surgical MVD; sodium channel Nav1.7/1.3 approaches"),
+]
+
+
 def get_disease_population(disease_name: str) -> int | None:
     """Return known US patient population for a disease, or None to use TA default."""
     return DISEASE_POPULATIONS.get(disease_name)
@@ -554,6 +808,7 @@ def get_universe() -> List[DiseaseEntry]:
         + _GENE_THERAPY
         + _MUSCULOSKELETAL
         + _ADDITIONAL
+        + _EXPANDED
     )
     # Deduplicate by disease name (first occurrence wins)
     seen: set[str] = set()
