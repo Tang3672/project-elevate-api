@@ -495,22 +495,26 @@ _DISEASE_ENRICHMENT_DB: dict[str, dict] = {
 
     # ── DIGITAL HEALTH / DEVICES ──────────────────────────────────────────
     "Sepsis (AI early detection)": {
-        "population": 1_700_000,      # CDC: ~1.7M adults with sepsis/yr in US
+        # CRITICAL UNIT FIX: SaMD enterprise market = hospital SITES, not patients.
+        # ~6,000 ICU-equipped hospitals × $80K/yr = $480M TAM (not 1.7M patients × $80K = $136B)
+        # Using 6,000 as population unit with $80K/site gives correct $480M TAM.
+        "population": 6_000,          # ICU-equipped US hospitals (AHA 2024: ~6,120 total, ~6K with ICU)
         "biomarker_fraction": None,
         "has_biomarker": False,
-        "annual_cost": 80_000,        # Hospital enterprise SaaS license
-        "formulary_coverage": 0.62,   # CMS CED coverage (limited AI reimbursement)
-        "pa_approval_rate": 0.95,
-        "meps_fill_rate": 1.0,        # Institutional, not patient adherence
-        "meps_adherence": 1.0,
-        "population_source": "CDC Vital Signs: Sepsis estimates (sepsis.gov)",
-        "pricing_source": "Enterprise SaaS benchmark (Viz.ai, Aidoc analogy: $80K/site/yr)",
+        "annual_cost": 80_000,        # Per-site enterprise SaaS annual license
+        "formulary_coverage": 0.20,   # CMS: only ~15-20% of cleared AI SaMD have any reimbursement
+        "pa_approval_rate": 0.90,     # Once covered, hospital procurement proceeds
+        "meps_fill_rate": 0.35,       # Hospital adoption rate (not Rx fill): ~35% at 5yr
+        "meps_adherence": 0.80,       # Renewal/retention after year 1
+        "population_source": "AHA Annual Survey 2024: ~6,000 ICU-equipped US hospitals (enterprise SaaS unit)",
+        "pricing_source": "Enterprise SaaS benchmark: Viz.ai ~$80K/site/yr; Bipartisan Policy 2024",
+        "note": "Unit = hospital sites not patients. 1.7M sepsis patients is a misleading denominator for enterprise software.",
     },
     "Type 1 Diabetes (CGM/automated insulin)": {
-        "population": 1_600_000,      # ~1.6M T1D in US (JDRF estimates)
+        "population": 1_600_000,      # T1D: patient population IS the right unit (prescriptions)
         "biomarker_fraction": None,
         "has_biomarker": False,
-        "annual_cost": 6_000,         # CGM sensor annual cost (Dexcom G7)
+        "annual_cost": 6_000,         # CGM sensor annual cost (Dexcom G7) — per patient
         "formulary_coverage": 0.88,
         "pa_approval_rate": 0.82,
         "meps_fill_rate": 0.82,

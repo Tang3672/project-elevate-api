@@ -248,13 +248,20 @@ _SUBCATEGORY_PROFILES: dict[str, _ScoringProfile] = {
         ptrs_mult=1.55, value_ceiling_usd=15_000_000_000,
         note="IVD: fast 510k/De Novo clearance; TAM = test volume × CLFS rate (not drug pricing)",
     ),
-    # SaMD/digital health: lowest regulatory barrier BUT lowest reimbursement certainty.
-    # CMS NCD/LCD coverage determines whether TAM materialises.
+    # SaMD/digital health: FDA clearance is easy but COMMERCIAL REALIZATION is very hard.
+    # Key corrections vs drugs:
+    #  - TAM unit = hospital sites or health systems, NOT patient population
+    #  - CMS coverage rate ~15-20% of cleared AI devices get any reimbursement (Bipartisan Policy)
+    #  - Hospital budget cycles 12-18 months, EHR integration 6-18 months
+    #  - TTO feedback: AI devices often fail commercially despite clinical validation
+    # Adjustments: raise opportunity weight (real unmet need), cut probability (commercial)
+    # heavily penalize value (hospital market << patient prevalence implies)
     "digital_health": _ScoringProfile(
-        w_opp=0.35, w_prob=0.25, w_val=0.28, w_inn=0.12,
-        ptrs_mult=1.60, value_ceiling_usd=8_000_000_000,
+        w_opp=0.38, w_prob=0.20, w_val=0.32, w_inn=0.10,
+        ptrs_mult=0.70,           # FDA clearance easy; COMMERCIAL adoption is the hard part
+        value_ceiling_usd=2_000_000_000,   # Enterprise SaaS: ~$2B ceiling (realistic for hospital AI)
         commercial_dominant=False,
-        note="SaMD: fast FDA clearance but reimbursement uncertainty (CMS NCD/LCD needed for TAM)",
+        note="SaMD: easy FDA clearance but CMS coverage ~15-20%, hospital budget cycles, EHR integration 6-18mo",
     ),
     # Vaccines: public health value vs commercial value diverge. ACIP recommendation
     # drives both access and revenue. Probability depends on immunogenicity endpoint.
