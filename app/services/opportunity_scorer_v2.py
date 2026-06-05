@@ -1131,21 +1131,56 @@ async def run_discovery_engine_v2(top_n: int = 25, funding_pathway: str = "comme
 
     async def _score_one_inner(opp, funding_pathway):
         disease, ta, phase, approved, cost, notes = opp
-        _, pop, biomarker, modality, _old_dalys = _DISEASE_OVERRIDES.get(
+
+        # ── Database-backed enrichment (replaces hardcoded _TA_DEFAULTS) ──────────
+        # Uses: NCI SEER, cBioPortal GENIE, Orphanet, CMS Part D/B, AHRQ MEPS,
+        #       CMS MA Formulary files — all pre-loaded, zero API latency
+        from app.services.disease_data_enricher import get_enrichment_data
+        enrichment = get_enrichment_data(disease, ta)
+
+        # Override TA defaults with enriched data from specialized sources
+        pop      = enrichment.us_patient_population
+        cost     = enrichment.annual_treatment_cost   # CMS-grounded pricing
+        biomarker = enrichment.has_biomarker
+        # Subcategory-aware modality (from soft routing)
+        sub_id   = enrichment.subcategory_id
+        modality = (
+            "gene_cell_therapy" if "gene_therapy" in sub_id
+            else "biologic"     if "biologic" in sub_id
+            else "diagnostic"   if "diagnostic" in sub_id
+            else "digital_health" if "digital" in sub_id
+            else "medical_device" if "device" in sub_id
+            else "vaccine_immunotherapy" if "vaccine" in sub_id
+            else "drug_small_molecule"
+        )
+
+        # Realized TAM factor from formulary + MEPS (new — key differentiator)
+        realized_tam_factor = enrichment.realized_tam_factor
+
+        # Legacy fallback for any field that enricher didn't fill
+        _, _legacy_pop, _legacy_biomarker, _legacy_modality, _old_dalys = _DISEASE_OVERRIDES.get(
             disease, _TA_DEFAULTS.get(ta, _TA_DEFAULTS["other"])
         )
+        if pop <= 0:
+            pop = _legacy_pop
+        if not biomarker:
+            biomarker = _legacy_biomarker
+
         # DALYs — commercial-safe first (WHO GHO/DB), GBD only as R&D fallback
         dalys, daly_source = await _get_commercial_safe_dalys(disease, ta)
         if dalys is None:
-            dalys = _old_dalys  # last resort: hardcoded estimate from _DISEASE_OVERRIDES
+            dalys = _old_dalys
             daly_source = "hardcoded"
-        # Real US prevalence: universe_builder per-disease dict → static file → TA default
+
+        # Real US prevalence: universe_builder → enricher → static file → TA default
         try:
             from app.services.universe_builder import get_disease_population
             known_pop = get_disease_population(disease)
+            if known_pop and known_pop > 0:
+                pop = known_pop
         except Exception:
-            known_pop = None
-        pop = known_pop or _PREVALENCE_DISEASE.get(disease) or _PREVALENCE_TA.get(ta) or pop
+            pass
+        pop = pop or _PREVALENCE_DISEASE.get(disease) or _PREVALENCE_TA.get(ta) or _legacy_pop
         # ── Market Sizing: 5-stage engine (Bass + BIA + DoT + Gross-to-Net) ──────
         # 1. Try curated expert TAM first (tam_calculator.py)
         from app.services.tam_calculator import calculate_tam, format_tam
@@ -1191,10 +1226,26 @@ async def run_discovery_engine_v2(top_n: int = 25, funding_pathway: str = "comme
                 modality=modality,
                 funding_pathway=funding_pathway,
                 dalys=dalys if dalys and dalys > 0 else None,
-                tam_peak_revenue=tam["peak_revenue_usd"] if tam else None,
+                # Apply formulary + MEPS realized TAM adjustment
+                tam_peak_revenue=(tam["peak_revenue_usd"] * realized_tam_factor) if tam else None,
                 is_first_in_class=first_in_class,
+                soft_weights={sub_id: 1.0},   # Use enrichment-derived subcategory
             )
             r["daly_source"] = daly_source
+            # Surface enrichment data for the frontend
+            r["enrichment"] = {
+                "subcategory_id":      enrichment.subcategory_id,
+                "population_source":   enrichment.population_source,
+                "pricing_source":      enrichment.pricing_source,
+                "formulary_coverage":  enrichment.formulary_coverage,
+                "pa_approval_rate":    enrichment.pa_approval_rate,
+                "meps_fill_rate":      enrichment.meps_fill_rate,
+                "meps_adherence":      enrichment.meps_adherence_rate,
+                "realized_tam_factor": realized_tam_factor,
+                "biomarker_eligible":  enrichment.biomarker_eligible,
+                "biomarker_fraction":  enrichment.biomarker_fraction,
+                "cache_hit":           enrichment.cache_hit,
+            }
             # TAM fields for the frontend
             if tam:
                 r["us_tam_usd"]        = round(tam["us_tam_usd"])
