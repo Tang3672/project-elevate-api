@@ -445,6 +445,175 @@ DATA_SOURCES = [
         requires_key=True, key_source="https://console.anthropic.com/",
     ),
 
+    # ── NEW SOURCES — WAVE 2 ─────────────────────────────────────────────────
+
+    DataSource(
+        source_id="pubchem",
+        name="PubChem — Drug Structure & Bioactivity",
+        category="regulatory",
+        commercial_status="CLEAR",
+        license_type="US Public Domain (NCBI/NLM)",
+        api_endpoint="https://pubchem.ncbi.nlm.nih.gov/rest/pug/",
+        connector_file="ingestion/connectors/pubchem.py",
+        unique_data="Drug molecular properties (MW, logP, TPSA), Lipinski Ro5 oral bioavailability, IC50/Ki bioassay data, structural analogues, patent linkages. No other free source covers drug chemistry for market sizing.",
+        attribution='Source: "PubChem. National Library of Medicine. pubchem.ncbi.nlm.nih.gov"',
+        restrictions="None (public domain).",
+        rate_limit="5 req/sec; NCBI API key recommended",
+        requires_key=False, key_source="https://www.ncbi.nlm.nih.gov/account/",
+    ),
+
+    DataSource(
+        source_id="uniprot",
+        name="UniProt — Drug Target Protein Biology",
+        category="regulatory",
+        commercial_status="ALLOWED",
+        license_type="CC BY 4.0 — commercial use YES",
+        api_endpoint="https://rest.uniprot.org/uniprotkb/search",
+        connector_file="ingestion/connectors/uniprot.py",
+        unique_data="Canonical protein sequences, druggability assessment (kinase/GPCR/secreted), tissue expression, disease associations, active site annotation, cross-refs to ChEMBL targets. Critical for modality recommendation (small molecule vs antibody vs ASO).",
+        attribution='Source: "UniProt Consortium. uniprot.org. CC BY 4.0."',
+        restrictions="Attribution required.",
+        rate_limit="None documented; 1 req/sec recommended",
+        requires_key=False, key_source=None,
+    ),
+
+    DataSource(
+        source_id="reactome",
+        name="Reactome — Biological Pathway Database",
+        category="regulatory",
+        commercial_status="ALLOWED",
+        license_type="CC BY 4.0 — commercial use YES",
+        api_endpoint="https://reactome.org/ContentService/data/",
+        connector_file="ingestion/connectors/reactome.py",
+        unique_data="Curated biological pathways with drug annotations. Disease pathway context for mechanism-of-action narratives. Identifies undrugged pathway steps (white space analysis). No other free source maps drugs to precise biological pathways.",
+        attribution='Source: "Reactome. reactome.org. CC BY 4.0."',
+        restrictions="Attribution required.",
+        rate_limit="None documented",
+        requires_key=False, key_source=None,
+    ),
+
+    DataSource(
+        source_id="string_db",
+        name="STRING — Protein Interaction Networks",
+        category="regulatory",
+        commercial_status="ALLOWED",
+        license_type="CC BY 4.0 — commercial use YES",
+        api_endpoint="https://string-db.org/api/json/network",
+        connector_file="ingestion/connectors/string_db.py",
+        unique_data="Protein-protein interaction network (11,759 species). Off-target risk (hub proteins = polypharmacology). Combination therapy rationale. Resistance mechanism identification. No other free source provides PPI networks commercially.",
+        attribution='Source: "STRING v12.0. string-db.org. CC BY 4.0."',
+        restrictions="Attribution required.",
+        rate_limit="None documented; 1 req/sec recommended",
+        requires_key=False, key_source=None,
+    ),
+
+    DataSource(
+        source_id="cms_open_payments",
+        name="CMS Open Payments (Sunshine Act)",
+        category="economic",
+        commercial_status="CLEAR",
+        license_type="US Public Domain (Sunshine Act 42 U.S.C. § 1320a-7h)",
+        api_endpoint="https://openpaymentsdata.cms.gov/api/1/datastore/query/",
+        connector_file="ingestion/connectors/cms_open_payments.py",
+        unique_data="Physician KOL identification by drug/company payment. Research site identification (who runs trials). Company spend by drug class. Geographic KOL distribution. Competitive intelligence: which KOLs is competitor paying?",
+        attribution='Source: "CMS Open Payments. openpaymentsdata.cms.gov. Sunshine Act data."',
+        restrictions="Cannot imply CMS endorsement. NPI/physician names are public under Sunshine Act.",
+        rate_limit="Socrata standard; free app token removes limit",
+        requires_key=False, key_source="https://openpaymentsdata.cms.gov/developer",
+    ),
+
+    DataSource(
+        source_id="cms_prescriber_part_d",
+        name="CMS Part D Prescriber-Level Data",
+        category="economic",
+        commercial_status="CLEAR",
+        license_type="US Public Domain",
+        api_endpoint="https://data.cms.gov/resource/3z4d-vmhm.json",
+        connector_file="ingestion/connectors/cms_prescriber.py",
+        unique_data="Provider-level Part D prescribing: claims per NPI per drug. Real-world market share (competitive claims comparison). Geographic prescribing heatmap. Prescriber concentration (top 10% write 50%+ of Rx). Closest free analogue to IQVIA MIDAS data.",
+        attribution='Source: "CMS Medicare Part D Prescribers. data.cms.gov."',
+        restrictions="Cannot imply CMS endorsement. NPI data is public.",
+        rate_limit="Socrata standard; free app token recommended",
+        requires_key=False, key_source="https://data.cms.gov/developer",
+    ),
+
+    DataSource(
+        source_id="ahrq_meps",
+        name="AHRQ MEPS — Medical Expenditure Panel Survey",
+        category="economic",
+        commercial_status="CLEAR",
+        license_type="US Public Domain",
+        api_endpoint=None,  # Flat files only; no REST API
+        connector_file="ingestion/connectors/ahrq_meps.py",
+        unique_data="Out-of-pocket cost burden per disease. Real-world treatment discontinuation rates. Rx fill rates by condition (adjusts theoretical TAM downward). Insurance gap quantification. 'Realized TAM' = theoretical × fill_rate × adherence.",
+        attribution='Source: "AHRQ MEPS. meps.ahrq.gov. Agency for Healthcare Research and Quality."',
+        restrictions="None (public domain). Microdata requires DUA; we use published summary statistics only.",
+        rate_limit="N/A (pre-loaded published summaries)",
+        requires_key=False, key_source=None,
+    ),
+
+    DataSource(
+        source_id="oecd_health",
+        name="OECD Health Statistics",
+        category="economic",
+        commercial_status="ALLOWED",
+        license_type="CC BY 4.0 — commercial use YES",
+        api_endpoint="https://stats.oecd.org/SDMX-JSON/data/HEALTH_STAT/",
+        connector_file="ingestion/connectors/oecd_health.py",
+        unique_data="Pharmaceutical spending per capita for 37 countries. International drug price comparisons (US vs EU5 vs Japan vs Canada). Global TAM multiplier computation (US TAM × OECD ratios = Global TAM). No other free source gives commercial-safe international market sizing inputs.",
+        attribution='Source: "OECD Health Statistics 2023. stats.oecd.org. CC BY 4.0."',
+        restrictions="Attribution required. Cannot imply OECD endorsement.",
+        rate_limit="None documented",
+        requires_key=False, key_source=None,
+    ),
+
+    DataSource(
+        source_id="grants_gov",
+        name="Grants.gov — Federal Grant Opportunities",
+        category="economic",
+        commercial_status="CLEAR",
+        license_type="US Public Domain",
+        api_endpoint="https://apply07.grants.gov/grantsws/rest/opportunities/search/",
+        connector_file="ingestion/connectors/grants_gov.py",
+        unique_data="ALL open federal grant solicitations (forecasted + posted). BARDA BAAs before awards. ARPA-H opportunities. DoD CDMRP disease programs ($15M-$120M/year per disease). NIH Reporter shows awarded grants; Grants.gov shows what will be funded next.",
+        attribution='Source: "Grants.gov. US Department of Health and Human Services."',
+        restrictions="None (public domain).",
+        rate_limit="None documented",
+        requires_key=False, key_source=None,
+    ),
+
+    # ── BLOCKED / DO NOT USE ─────────────────────────────────────────────────
+
+    DataSource(
+        source_id="disgenet_blocked",
+        name="DisGeNET — BLOCKED (License Changed 2023)",
+        category="regulatory",
+        commercial_status="BLOCKED",
+        license_type="CC BY-NC 4.0 (changed from CC BY 4.0 in 2023) — NON-COMMERCIAL ONLY",
+        api_endpoint="https://www.disgenet.org/api/",
+        connector_file=None,
+        unique_data="Disease-gene associations. DO NOT USE — license changed to non-commercial in 2023.",
+        attribution="N/A — BLOCKED",
+        restrictions="PROHIBITED. Use Open Targets (already integrated) for same data commercially.",
+        rate_limit="N/A",
+        requires_key=False, key_source=None,
+    ),
+
+    DataSource(
+        source_id="hpo_blocked",
+        name="Human Phenotype Ontology (HPO) — RESTRICTED",
+        category="regulatory",
+        commercial_status="BLOCKED",
+        license_type="Custom JAX license — NOT CC0. Commercial use requires written permission.",
+        api_endpoint="https://hpo.jax.org/api/",
+        connector_file=None,
+        unique_data="Disease phenotype terms. RESTRICTED — use Monarch Initiative (CC0) instead.",
+        attribution="N/A — BLOCKED without written agreement from JAX",
+        restrictions="PROHIBITED without JAX written permission. Use Monarch Initiative (monarchinitiative.org) as CC0 alternative.",
+        rate_limit="N/A",
+        requires_key=False, key_source=None,
+    ),
+
     DataSource(
         source_id="openai_embeddings",
         name="OpenAI Embeddings API",
@@ -469,13 +638,21 @@ BLOCKED_SOURCES = [ds for ds in DATA_SOURCES if ds.commercial_status == "BLOCKED
 
 # Sources requiring immediate action (missing API keys or not yet implemented)
 NEEDS_ACTION = [
-    {"source": "openfda", "action": "Get free API key to raise rate limit from 1K to 120K req/day", "url": "https://open.fda.gov/apis/authentication/"},
-    {"source": "nci_seer", "action": "Register for free SEER API key to access cancer incidence data", "url": "https://api.seer.cancer.gov/keys"},
-    {"source": "sec_edgar", "action": "Add org name + email to User-Agent header in sec_edgar.py", "url": None},
-    {"source": "cms_part_d", "action": "Get free Socrata app token to remove rate limits", "url": "https://data.cms.gov/developer"},
-    {"source": "cms_nadac", "action": "Implement connector — high-value acquisition price data not yet integrated", "url": "https://data.medicaid.gov/dataset/4bec4d37-"},
-    {"source": "pharmgkb", "action": "Implement flat-file download connector — pharmacogenomics data not yet integrated", "url": "https://www.pharmgkb.org/downloads"},
-    {"source": "eu_ctis", "action": "Implement EU clinical trial connector (beta API)", "url": "https://euclinicaltrials.eu/api/v1/"},
+    # API keys (free, immediate)
+    {"source": "openfda",             "action": "Get free API key → raises limit 1K→120K req/day",           "url": "https://open.fda.gov/apis/authentication/"},
+    {"source": "nci_seer",            "action": "Register for free SEER API key (cancer incidence data)",     "url": "https://api.seer.cancer.gov/keys"},
+    {"source": "cms_part_d",          "action": "Get free Socrata app token → removes rate cap",              "url": "https://data.cms.gov/developer"},
+    {"source": "cms_open_payments",   "action": "Get free Socrata app token for Open Payments queries",        "url": "https://openpaymentsdata.cms.gov/developer"},
+    {"source": "cms_prescriber_part_d","action": "Get free Socrata app token for prescriber data",            "url": "https://data.cms.gov/developer"},
+    # Code changes needed
+    {"source": "sec_edgar",           "action": "Add org name + email to User-Agent header in sec_edgar.py",  "url": None},
+    # Not yet implemented (high priority)
+    {"source": "cms_nadac",           "action": "Implement NADAC connector — acquisition-level drug pricing",  "url": "https://data.medicaid.gov/dataset/4bec4d37-"},
+    {"source": "pharmgkb",            "action": "Implement PharmGKB flat-file connector — pharmacogenomics",  "url": "https://www.pharmgkb.org/downloads"},
+    {"source": "eu_ctis",             "action": "Implement EU clinical trial connector (beta API)",            "url": "https://euclinicaltrials.eu/api/v1/"},
+    # Blocked — check and remove any usage
+    {"source": "disgenet_blocked",    "action": "AUDIT: confirm no code calls disgenet.org — license is now NC", "url": None},
+    {"source": "hpo_blocked",         "action": "AUDIT: confirm no code uses HPO terms — use Monarch instead",  "url": "https://api.monarchinitiative.org/v3/api/"},
 ]
 
 
