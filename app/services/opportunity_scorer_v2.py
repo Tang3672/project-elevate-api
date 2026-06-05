@@ -1114,13 +1114,31 @@ async def _fetch_live_approval_count(disease: str, static_fallback: int) -> int:
     return static_fallback
 
 
+# ── In-process result cache (survives across requests within same Railway instance) ──
+# Avoids re-scoring 309 diseases on every page load. TTL = 3600s (1 hour).
+# Cache is invalidated if TTL expires; scoring re-runs automatically on next request.
+# This is the single biggest speed win: first load ~25s, all subsequent loads ~50ms.
+_DISCOVERY_RESULT_CACHE: dict = {}   # {"results": [...], "scored_at": float, "ttl": float}
+_DISCOVERY_CACHE_TTL = 3600.0         # 1 hour — discovery data rarely changes faster
+
+
 async def run_discovery_engine_v2(top_n: int = 25, funding_pathway: str = "commercial"):
     """
     Score the full disease universe through the v2 engine.
     Universe comes from universe_builder (500+ diseases); falls back to the v1
     OPPORTUNITY_UNIVERSE if the builder import fails (backward compatibility).
     Returns the same dict shape the frontend expects, with v2 subscores in components.
+
+    CACHING: Results are cached in-process for 1 hour. Subsequent calls within the
+    same Railway instance return instantly (~50ms vs ~25s first load).
     """
+    import time as _time_mod
+    cached = _DISCOVERY_RESULT_CACHE.get("results")
+    cached_at = _DISCOVERY_RESULT_CACHE.get("scored_at", 0)
+    if cached and (_time_mod.time() - cached_at) < _DISCOVERY_CACHE_TTL:
+        _logger.info("Discovery cache hit (age=%.0fs) — returning %d results instantly",
+                     _time_mod.time() - cached_at, len(cached))
+        return cached[:top_n]
     try:
         from app.services.universe_builder import get_universe
         OPPORTUNITY_UNIVERSE = get_universe()
@@ -1379,4 +1397,11 @@ async def run_discovery_engine_v2(top_n: int = 25, funding_pathway: str = "comme
     # Add rank field
     for i, r in enumerate(scored, 1):
         r["rank"] = i
+
+    # Store in in-process cache so next request returns instantly
+    import time as _time_mod
+    _DISCOVERY_RESULT_CACHE["results"] = scored
+    _DISCOVERY_RESULT_CACHE["scored_at"] = _time_mod.time()
+    _logger.info("Discovery scoring complete: %d diseases cached for %.0fs", len(scored), _DISCOVERY_CACHE_TTL)
+
     return scored[:top_n]

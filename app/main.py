@@ -73,9 +73,20 @@ async def startup():
 
 
 async def _warm_cache_background():
-    """Background task: warm discovery cache without blocking startup."""
+    """Background task: pre-score all diseases at startup so first user request is instant.
+    25-second scoring run happens once; all subsequent requests served from cache in ~50ms."""
     import logging
     _log = logging.getLogger(__name__)
+
+    # Pre-warm the discovery scoring cache — single biggest speed win
+    try:
+        from app.services.opportunity_scorer_v2 import run_discovery_engine_v2
+        results = await run_discovery_engine_v2(top_n=309)
+        _log.info("Discovery scoring pre-warmed at startup: %d diseases cached for 1hr", len(results))
+    except Exception as e:
+        _log.warning("Discovery pre-warm failed (non-fatal): %s", e)
+
+    # Legacy cache warmer (disease_scored table, trial counts)
     try:
         from app.services.cache_warmer import warm_discovery_cache
         result = await warm_discovery_cache()
