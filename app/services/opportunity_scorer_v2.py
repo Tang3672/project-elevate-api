@@ -1321,7 +1321,15 @@ async def run_discovery_engine_v2(top_n: int = 25, funding_pathway: str = "comme
             logging.getLogger(__name__).error(f"v2 score failed for {disease}: {e}")
             return None
 
-    results = await _asyncio.gather(*[score_one(o) for o in OPPORTUNITY_UNIVERSE],
+    # Cap concurrency at 20 — scoring 739+ diseases with unlimited concurrency
+    # spikes memory (numpy arrays + scipy per task) and triggers OOM on Railway.
+    _sem = _asyncio.Semaphore(20)
+
+    async def score_one_bounded(opp):
+        async with _sem:
+            return await score_one(opp)
+
+    results = await _asyncio.gather(*[score_one_bounded(o) for o in OPPORTUNITY_UNIVERSE],
                                     return_exceptions=True)
     scored = [r for r in results if r is not None and not isinstance(r, Exception)]
 
