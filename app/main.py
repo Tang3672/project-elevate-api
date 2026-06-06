@@ -34,36 +34,44 @@ app.add_middleware(RateLimitMiddleware)
 
 @app.on_event("startup")
 async def startup():
-    await init_db()
-    await ensure_demand_signals_table()
-    from app.db.user_repository import init_user_tables
-    await init_user_tables()
-    from app.db.watchlist_repository import init_watchlist_tables
-    await init_watchlist_tables()
-    from app.services.pi_memory_service import init_pi_memory_table
-    await init_pi_memory_table()
-    # Canonical entity tables (MONDO/RxNorm/WHO GHO backbone)
-    from app.db.schema_ontology import init_ontology_tables
-    await init_ontology_tables()
-    # LOA success-rate priors (BIO 2021 + Wong 2019)
-    from app.db.schema_priors import init_priors_tables
-    await init_priors_tables()
-    # Disease aggregate table
-    from app.db.disease_aggregate import ensure_aggregate_table
-    await ensure_aggregate_table()
-    # Full pre-scored universe table (disease_scored)
-    try:
-        from app.db.database import get_pool
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            from app.services.universe_expander import prescored_universe_table
-            await prescored_universe_table(conn)
-    except Exception:
-        pass
-
-    # Pre-warm discovery cache in background (non-blocking)
-    # Loads trial/approval counts from DB into L1 cache; fetches missing from APIs
     import asyncio as _asyncio
+    # Fire all initialization in the background so uvicorn starts serving
+    # the /health endpoint immediately — Railway's 30s window is too tight
+    # for 8 sequential DB schema calls on a cold-start DB connection.
+    _asyncio.create_task(_init_background())
+
+
+async def _init_background():
+    import logging, asyncio as _asyncio
+    _log = logging.getLogger(__name__)
+    try:
+        await init_db()
+        await ensure_demand_signals_table()
+        from app.db.user_repository import init_user_tables
+        await init_user_tables()
+        from app.db.watchlist_repository import init_watchlist_tables
+        await init_watchlist_tables()
+        from app.services.pi_memory_service import init_pi_memory_table
+        await init_pi_memory_table()
+        from app.db.schema_ontology import init_ontology_tables
+        await init_ontology_tables()
+        from app.db.schema_priors import init_priors_tables
+        await init_priors_tables()
+        from app.db.disease_aggregate import ensure_aggregate_table
+        await ensure_aggregate_table()
+        try:
+            from app.db.database import get_pool
+            pool = await get_pool()
+            async with pool.acquire() as conn:
+                from app.services.universe_expander import prescored_universe_table
+                await prescored_universe_table(conn)
+        except Exception:
+            pass
+        _log.info("DB initialization complete")
+    except Exception as e:
+        _log.error("DB initialization failed (non-fatal): %s", e)
+
+    # Pre-warm discovery cache
     _asyncio.create_task(_warm_cache_background())
 
     # Start the ingestion scheduler if enabled
