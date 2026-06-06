@@ -71,36 +71,10 @@ async def _init_background():
     except Exception as e:
         _log.error("DB initialization failed (non-fatal): %s", e)
 
-    # Pre-warm discovery cache
-    _asyncio.create_task(_warm_cache_background())
-
     # Start the ingestion scheduler if enabled
     if settings.ENABLE_SCHEDULER:
         from app.scheduler.ingestion_scheduler import init_scheduler
         init_scheduler()
-
-
-async def _warm_cache_background():
-    """Background task: pre-score all diseases at startup so first user request is instant.
-    25-second scoring run happens once; all subsequent requests served from cache in ~50ms."""
-    import logging
-    _log = logging.getLogger(__name__)
-
-    # Pre-warm the discovery scoring cache — single biggest speed win
-    try:
-        from app.services.opportunity_scorer_v2 import run_discovery_engine_v2
-        results = await run_discovery_engine_v2(top_n=309)
-        _log.info("Discovery scoring pre-warmed at startup: %d diseases cached for 1hr", len(results))
-    except Exception as e:
-        _log.warning("Discovery pre-warm failed (non-fatal): %s", e)
-
-    # Legacy cache warmer (disease_scored table, trial counts)
-    try:
-        from app.services.cache_warmer import warm_discovery_cache
-        result = await warm_discovery_cache()
-        _log.info("Discovery cache warm-up: %s", result)
-    except Exception as e:
-        _log.warning("Discovery cache warm-up failed (non-fatal): %s", e)
 
 @app.on_event("shutdown")
 async def shutdown():
