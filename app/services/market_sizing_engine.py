@@ -47,9 +47,12 @@ try:
     from scipy.integrate import solve_ivp
     from scipy.special import gamma as gamma_fn
     _SCIPY_OK = True
+    # numpy.trapz removed in NumPy 2.0; trapezoid is the replacement
+    _np_trapz = getattr(np, "trapezoid", None) or getattr(np, "trapz", None)
 except ImportError:
     _SCIPY_OK = False
     np = None
+    _np_trapz = None
     solve_ivp = None
     def gamma_fn(x: float) -> float:
         # Stirling approximation fallback — accurate to <1% for x > 1
@@ -167,7 +170,7 @@ def expected_dot_gompertz(alpha: float, gamma: float, t_max: float = 40.0) -> fl
         return max(0.5, (math.log(max(alpha, 1e-9)) / max(gamma, 1e-9)) * -1)
     t_pts = np.linspace(0, t_max, 2000)
     s_pts = np.array([gompertz_survival(t, alpha, gamma) for t in t_pts])
-    return float(np.trapz(s_pts, t_pts))
+    return float(_np_trapz(s_pts, t_pts))
 
 
 def poly_hazard_survival(t, phases: list[dict]):
@@ -200,7 +203,7 @@ def poly_hazard_survival(t, phases: list[dict]):
             rate = ph.get("rate", 0.1)
             h = weight * rate * np.ones_like(t)
         H += h
-    H_cum = np.array([np.trapz(H[:i+1], t[:i+1]) if i > 0 else 0.0 for i in range(len(t))])
+    H_cum = np.array([_np_trapz(H[:i+1], t[:i+1]) if i > 0 else 0.0 for i in range(len(t))])
     return np.exp(-H_cum)
 
 
@@ -213,7 +216,7 @@ def expected_dot_poly_hazard(phases: list[dict], t_max: float = 20.0) -> float:
         return 3.0  # reasonable CAR-T fallback
     t_pts = np.linspace(0, t_max, 2000)
     s_pts = poly_hazard_survival(t_pts, phases)
-    return float(np.trapz(s_pts, t_pts))
+    return float(_np_trapz(s_pts, t_pts))
 
 
 # ── Disease-specific survival parameterization ────────────────────────────────
