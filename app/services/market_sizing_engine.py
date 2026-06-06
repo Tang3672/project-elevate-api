@@ -47,7 +47,7 @@ try:
     from scipy.integrate import solve_ivp
     from scipy.special import gamma as gamma_fn
     _SCIPY_OK = True
-    # numpy.trapz removed in NumPy 2.0; use trapezoid with fallback
+    # numpy.trapz removed in NumPy 2.0; trapezoid is the replacement
     _np_trapz = getattr(np, "trapezoid", None) or getattr(np, "trapz", None)
 except ImportError:
     _SCIPY_OK = False
