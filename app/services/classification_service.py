@@ -35,7 +35,7 @@ PRIMARY CATEGORIES:
   Service+Technology Packages, Platform+Consulting
 """
 
-CLASSIFICATION_SYSTEM_PROMPT = f"""You are a healthcare innovation analyst for Project Elevate.
+CLASSIFICATION_SYSTEM_PROMPT = f"""You are a healthcare innovation analyst for Medlevate.
 Your job is to analyze free-text submissions from hospital workers describing unmet needs,
 and classify them into structured data.
 

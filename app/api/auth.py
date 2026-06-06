@@ -17,7 +17,7 @@ GET  /api/v1/auth/drafts          — list drafts
 DELETE /api/v1/auth/drafts/{id}   — delete a draft
 """
 import logging
-from fastapi import APIRouter, HTTPException, Depends, Header
+from fastapi import APIRouter, HTTPException, Request, Depends, Header
 from typing import Optional, List
 
 from app.models.user import (
@@ -30,6 +30,7 @@ from app.services.auth_service import (
     create_access_token, verify_access_token,
     verify_google_token,
 )
+from app.db.database import get_pool
 from app.db.user_repository import (
     create_user, get_user_by_email, get_user_by_id,
     get_user_by_google_id, update_user_google_id,
@@ -69,8 +70,38 @@ async def get_optional_user(authorization: Optional[str] = Header(None)) -> Opti
 # ── Register ──────────────────────────────────────────────────────────────────
 
 @router.post("/register", response_model=AuthResponse)
-async def register(payload: RegisterRequest):
+async def register(payload: RegisterRequest, request: Request):
     """Create a new account with email + password."""
+    # Password strength validation — check all rules, return all failures at once
+    pw = payload.password
+    import re
+    errors = []
+    if len(pw) < 8:
+        errors.append("At least 8 characters")
+    if not any(c.isupper() for c in pw):
+        errors.append("At least one uppercase letter (A-Z)")
+    if not any(c.islower() for c in pw):
+        errors.append("At least one lowercase letter (a-z)")
+    if not any(c.isdigit() for c in pw):
+        errors.append("At least one number (0-9)")
+    if not re.search(r"[!@#$%^&*()_+=\[\]{};:|,.<>/?`~-]", pw):
+        errors.append("At least one special character (!@#$%^&*...)")
+    if errors:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "Password does not meet requirements",
+                "requirements_failed": errors,
+                "all_requirements": [
+                    "At least 8 characters",
+                    "At least one uppercase letter (A-Z)",
+                    "At least one lowercase letter (a-z)",
+                    "At least one number (0-9)",
+                    "At least one special character (!@#$%^&*...)"
+                ]
+            }
+        )
+
     existing = await get_user_by_email(payload.email)
     if existing:
         raise HTTPException(status_code=409, detail="Email already registered")
@@ -83,6 +114,15 @@ async def register(payload: RegisterRequest):
     )
     if not user:
         raise HTTPException(status_code=409, detail="Email already registered")
+
+    # Send verification email
+    try:
+        from app.services.email_verification import create_verification_token, send_verification_email
+        base_url = str(request.base_url).rstrip('/')
+        ver_token = await create_verification_token(user['id'])
+        await send_verification_email(user['email'], user.get('name',''), ver_token, base_url)
+    except Exception as e:
+        logger.warning(f"Verification email failed: {e}")
 
     token = create_access_token(user['id'], user['email'])
     return AuthResponse(
@@ -103,6 +143,20 @@ async def login(payload: LoginRequest):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     if not verify_password(payload.password, user['password_hash']):
         raise HTTPException(status_code=401, detail="Invalid email or password")
+    # Check email verification — skip for dev accounts
+    DEV_EMAILS = {"test@projectelevate.io", "ijw91021@gmail.com", "admin@projectelevate.io"}
+    if not user.get('email_verified', False) and user['email'] not in DEV_EMAILS:
+        raise HTTPException(
+            status_code=403,
+            detail="Please verify your email before logging in. Check your inbox."
+        )
+    # Block unverified accounts (skip for dev emails)
+    DEV_EMAILS = {"test@projectelevate.io", "ijw91021@gmail.com", "admin@projectelevate.io"}
+    if not user.get('email_verified', False) and user.get('email') not in DEV_EMAILS:
+        raise HTTPException(
+            status_code=403,
+            detail="Please verify your email before logging in. Check your inbox for a verification link."
+        )
 
     token = create_access_token(user['id'], user['email'])
     return AuthResponse(
@@ -114,6 +168,17 @@ async def login(payload: LoginRequest):
 
 
 # ── Google OAuth ──────────────────────────────────────────────────────────────
+
+
+
+@router.get("/verify-email")
+async def verify_email(token: str):
+    """Verify email via token link."""
+    from app.services.email_verification import verify_token
+    user_id = await verify_token(token)
+    if not user_id:
+        raise HTTPException(status_code=400, detail="Invalid or expired verification link. Please register again.")
+    return {"message": "Email verified! You can now log in to Medlevate."}
 
 @router.post("/google", response_model=AuthResponse)
 async def google_auth(payload: GoogleAuthRequest):
@@ -178,7 +243,7 @@ async def create_report(
     current_user: dict = Depends(get_current_user),
 ):
     """Save a PI report."""
-    return await save_report(
+    saved = await save_report(
         user_id      = current_user['id'],
         name         = payload.name,
         product_type = payload.product_type,
@@ -186,6 +251,18 @@ async def create_report(
         report_data  = payload.report_data,
         pathogen     = payload.pathogen,
     )
+    # Async memory extraction — non-blocking, never fails the save
+    try:
+        import asyncio
+        from app.services.pi_memory_service import extract_and_store_memory
+        asyncio.create_task(extract_and_store_memory(
+            user_id     = current_user['id'],
+            idea        = payload.idea,
+            report_data = payload.report_data,
+        ))
+    except Exception:
+        pass
+    return saved
 
 
 @router.get("/reports", response_model=List[SavedReportSummary])
@@ -264,3 +341,144 @@ async def remove_draft(
     if not deleted:
         raise HTTPException(status_code=404, detail="Draft not found")
     return {"deleted": True}
+
+
+@router.post("/change-password")
+async def change_password(request: Request, current_user: dict = Depends(get_current_user)):
+    """Change password for logged-in user."""
+    body = await request.json()
+    current_pw = body.get("current_password", "")
+    new_pw     = body.get("new_password", "")
+
+    user = await get_user_by_id(current_user["id"])
+    if not user or not user.get("password_hash"):
+        raise HTTPException(status_code=400, detail="Cannot change password for OAuth accounts")
+
+    if not verify_password(current_pw, user["password_hash"]):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+
+    import re
+    errors = []
+    if len(new_pw) < 8:                                    errors.append("At least 8 characters")
+    if not any(c.isupper() for c in new_pw):               errors.append("At least one uppercase letter")
+    if not any(c.islower() for c in new_pw):               errors.append("At least one lowercase letter")
+    if not any(c.isdigit() for c in new_pw):               errors.append("At least one number")
+    if not re.search(r"[!@#$%^&*()_+=\[\]{};:|,.<>/?`~-]", new_pw): errors.append("At least one special character")
+    if errors:
+        raise HTTPException(status_code=400, detail={"message": "Password requirements not met", "requirements_failed": errors})
+
+    hashed = hash_password(new_pw)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE users SET password_hash=$1 WHERE id=$2", hashed, current_user["id"])
+
+    return {"message": "Password updated successfully"}
+
+
+# ── EARLY ACCESS WAITLIST ──────────────────────────────────────────────────────
+
+@router.post("/waitlist")
+async def submit_waitlist(body: dict):
+    """
+    Save an early access request. No auth required — anyone can submit.
+    Stores in waitlist table + sends email notification to admin.
+    """
+    name        = (body.get("name") or "").strip()[:100]
+    email       = (body.get("email") or "").strip()[:200]
+    institution = (body.get("institution") or "").strip()[:200]
+    role        = (body.get("role") or "").strip()[:100]
+    plan        = (body.get("plan") or "starter").strip()[:50]
+    message     = (body.get("message") or "").strip()[:1000]
+
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="Valid email required")
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        # Create table if not exists
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS waitlist (
+                id          SERIAL PRIMARY KEY,
+                name        TEXT,
+                email       TEXT NOT NULL,
+                institution TEXT,
+                role        TEXT,
+                plan        TEXT DEFAULT 'starter',
+                message     TEXT,
+                created_at  TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+        # Check for duplicate
+        existing = await conn.fetchrow("SELECT id FROM waitlist WHERE lower(email)=lower($1)", email)
+        if not existing:
+            await conn.execute("""
+                INSERT INTO waitlist (name, email, institution, role, plan, message)
+                VALUES ($1,$2,$3,$4,$5,$6)
+            """, name or None, email, institution or None, role or None, plan, message or None)
+
+    # Send notifications (always — even for duplicates so admin is aware)
+    try:
+        from app.services.email_service import send_email
+        admin_email = "ijw91021@gmail.com"
+
+        # 1. Notify Isaac immediately
+        await send_email(
+            to=admin_email,
+            subject=f"🚀 Early access request — {name or email} ({plan} plan)",
+            body=f"""New early access request for Medlevate:
+
+Name:        {name or '(not provided)'}
+Email:       {email}
+Institution: {institution or '(not provided)'}
+Role:        {role or '(not provided)'}
+Plan:        {plan}
+Message:     {message or '(none)'}
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+View all submissions:
+https://web-staging-production-9c6a.up.railway.app/api/v1/auth/waitlist/admin?key=elevate_admin_2026
+
+Reply to this person: {email}
+━━━━━━━━━━━━━━━━━━━━━━━━
+""",
+        )
+
+        # 2. Send confirmation to the person who submitted
+        if name:
+            await send_email(
+                to=email,
+                subject="You're on the Medlevate early access list",
+                body=f"""Hi {name.split()[0]},
+
+Thanks for requesting early access to Medlevate!
+
+We'll set up your {plan.title()} account and reach out within 24 hours.
+
+In the meantime, you can create a free account and start exploring the platform:
+https://medlevate.netlify.app/app.html?register=1
+
+— The Medlevate Team
+ijw91021@gmail.com
+""",
+            )
+    except Exception as e:
+        logger.warning("Email notification failed: %s", e)
+
+    return {"status": "success", "message": "You're on the list! We'll be in touch within 24 hours."}
+
+
+@router.get("/waitlist/admin")
+async def view_waitlist(key: str = ""):
+    """View all waitlist submissions. Protected by simple key."""
+    if key != "elevate_admin_2026":
+        raise HTTPException(status_code=403, detail="Invalid key")
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT id, name, email, institution, role, plan, message, created_at
+            FROM waitlist ORDER BY created_at DESC
+        """)
+    return {
+        "count": len(rows),
+        "submissions": [dict(r) for r in rows]
+    }

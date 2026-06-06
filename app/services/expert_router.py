@@ -44,19 +44,71 @@ class RouterResult:
     routing_method:    str            # "auto" | "pi_confirmed" | "claude_override"
 
 
-ROUTER_SYSTEM = """You are a medical domain classifier. Given a description of a healthcare product or innovation, classify it into exactly ONE of these domains:
+ROUTER_SYSTEM = """You are a precision medical domain classifier for a Mixture-of-Experts system. Given a healthcare innovation, classify it into exactly ONE subcategory from the list below. Be specific — choose the most granular match, not the broadest.
 
-- antibiotic_amr: antibiotics, antimicrobials, resistance (CRE, MRSA, C. diff, Acinetobacter), beta-lactams, BLI combinations, antifungals
-- oncology: cancer, tumors, carcinomas, immunotherapy, CAR-T, ADC, targeted therapy, checkpoint inhibitors, any cancer type
-- cardiology: heart disease, cardiac, cardiovascular, heart failure, AFib, hypertension, coronary artery disease, cardiac devices, cardiac monitoring
-- neurology_cns: neurological diseases, CNS, Alzheimer's, Parkinson's, MS, epilepsy, ALS, stroke, migraine, CNS drugs, brain devices
-- metabolic_diabetes: diabetes (T1D, T2D), obesity, glucose monitoring, CGM, insulin, GLP-1, SGLT2, metabolic syndrome, NASH, CKD related to diabetes
-- mental_health: psychiatric conditions, depression, anxiety, PTSD, schizophrenia, bipolar, addiction, psychedelics, digital mental health, telepsychiatry
+SMALL MOLECULE DRUGS:
+- drug_amr: IV/oral antibiotics, beta-lactam/BLI combos, antifungals, antivirals for resistant pathogens (CRE, MRSA, VRE, Candida auris, C. diff)
+- drug_amr_community: oral antibiotics for community-acquired infections (ABSSSI, CAP, UTI, STI), not hospital/ICU
+- drug_oncology: small molecule kinase inhibitors, PARP inhibitors, chemotherapy, oral targeted therapy for solid tumors or hematologic cancers
+- drug_cns_neurodegen: Alzheimer's, Parkinson's, ALS, FTD, HD — neurodegeneration drugs (not psychiatric)
+- drug_cns_acute: epilepsy, migraine, stroke, headache, acute CNS conditions
+- drug_metabolic: GLP-1/SGLT2/DPP4 for T2D/obesity, NASH/MASH, metabolic syndrome, lipid disorders (statins, PCSK9)
+- drug_cardiovascular: heart failure (HFrEF/HFpEF), atrial fibrillation, hypertension, anticoagulants, coronary artery disease
+- drug_immunology: small molecules for RA, psoriasis, IBD, lupus, atopic dermatitis (JAK inhibitors, PDE4i, S1P modulators)
+- drug_respiratory: asthma, COPD, IPF, PAH, cystic fibrosis (inhaled and oral)
+- drug_rare_disease: orphan small molecules for rare/ultra-rare genetic disorders
+- drug_mental_health: antidepressants, antipsychotics, anxiolytics, ADHD, addiction, psychedelics for psychiatric indications
+- drug_infectious_non_amr: antiviral (HIV, HCV, HBV, CMV, RSV), antimalarial, antiparasitic — NOT resistance-focused
 
-Respond ONLY with valid JSON:
-{"domain": "<domain_id>", "confidence": <0.0-1.0>, "reasoning": "<one sentence>"}
+BIOLOGICS:
+- biologic_oncology: monoclonal antibodies, checkpoint inhibitors, bispecifics, ADCs for cancer
+- biologic_immunology: TNF inhibitors, IL-6/IL-17/IL-23 antibodies, fusion proteins for autoimmune/inflammatory
+- biologic_hematology: antibodies/proteins for sickle cell, hemophilia, MDS, leukemia/lymphoma (not small molecule)
+- biologic_rare_disease: enzyme replacement, protein replacement for rare metabolic/lysosomal diseases
+- biologic_cardiology: PCSK9 inhibitors, antibodies for cardiac conditions
 
-If the idea spans multiple domains, pick the PRIMARY domain the innovation targets."""
+GENE & CELL THERAPY:
+- gene_therapy_rare: AAV gene therapy for rare monogenic diseases (SMA, DMD, hemophilia, retinal)
+- gene_therapy_hematology: gene editing/therapy for hemoglobinopathies (SCD, thal), hemophilia, MDS
+- gene_therapy_oncology: CAR-T, TCR-T, TIL therapy for solid tumors or hematologic cancers
+- gene_therapy_cns: AAV/ASO/siRNA for CNS diseases (Huntington, SCA, prion, rare CNS)
+- gene_therapy_rna: mRNA therapeutics, ASOs, siRNA, RNAi for any indication (non-vaccine)
+
+DEVICES:
+- device_cardiovascular: cardiac stents, pacemakers, ICD, EP ablation catheters, TAVI, heart failure devices
+- device_neurology: DBS, spinal cord stimulation, BCI, vagus nerve stimulation, neuromodulation
+- device_surgical_orthopedic: spinal implants, joint replacement, orthopedic fixation
+- device_metabolic: insulin pumps, CGM, artificial pancreas (hardware, not software)
+- device_surgical_general: surgical robots, laparoscopic devices, wound care, general surgical implants
+- device_ophthalmology: IOLs, glaucoma drainage, retinal devices, ophthalmic surgical tools
+
+DIAGNOSTICS:
+- diagnostic_molecular_lab: lab-based NGS panels, PCR, NAAT, liquid biopsy, genomic tests requiring CLIA lab
+- diagnostic_companion: FDA co-approved companion diagnostics linked to specific targeted therapies
+- diagnostic_poc: point-of-care tests (lateral flow, rapid antigen, bedside devices, CLIA-waived)
+- diagnostic_imaging_ai: AI algorithms for radiology (CT, MRI, X-ray), pathology slide analysis, echocardiography AI
+- diagnostic_biomarker: blood/urine/CSF biomarker tests (not genomic) for disease monitoring or dx
+
+DIGITAL HEALTH / SaMD:
+- digital_cds: AI clinical decision support integrated into hospital EHR workflow (sepsis, deterioration, drug dosing)
+- digital_rpm: remote patient monitoring platforms (wearable sensors, cardiac monitoring, COPD management)
+- digital_therapeutic: prescription digital therapeutics (FDA-cleared DTx for CBT, substance abuse, chronic disease)
+- digital_samd_radiology: standalone AI imaging analysis software for radiology/pathology (not EHR-embedded)
+
+VACCINES & IMMUNOTHERAPY:
+- vaccine_prophylactic: preventive vaccines for infectious diseases (RSV, flu, COVID, pneumococcal, meningococcal)
+- vaccine_cancer_immuno: therapeutic cancer vaccines, neoantigen vaccines, tumor-infiltrating lymphocyte therapies
+- vaccine_infectious_therapeutic: therapeutic vaccines for chronic infections (HIV, HBV, HPV treatment)
+
+PLATFORMS:
+- other_crispr: CRISPR-Cas9, base editing, prime editing tools/platforms for any indication
+- other_microbiome: live biotherapeutic products (LBPs), microbiome modulation, FMT
+- other_delivery: novel drug delivery platforms (LNPs, nanoparticles, antibody conjugates excluding ADCs)
+
+Respond ONLY with valid JSON (no explanation outside JSON):
+{"domain": "<domain_id>", "confidence": <0.0-1.0>, "reasoning": "<one sentence explaining key classification signals>"}
+
+Pick the MOST SPECIFIC matching subcategory. When in doubt between broad and specific, choose specific."""
 
 
 async def classify_with_claude(idea: str) -> tuple[str, float, str]:
@@ -85,30 +137,140 @@ async def classify_with_claude(idea: str) -> tuple[str, float, str]:
                 if text.startswith("json"):
                     text = text[4:]
             data = json.loads(text.strip())
-            domain     = data.get("domain", "antibiotic_amr")
+            domain     = data.get("domain", "drug_amr")
             confidence = float(data.get("confidence", 0.7))
             reasoning  = data.get("reasoning", "")
-            # Validate domain exists
-            if domain not in EXPERT_REGISTRY:
-                domain = _keyword_classify(idea)
+            # Map granular router domain → expert profile domain
+            if domain in _ROUTER_TO_EXPERT:
+                domain = _ROUTER_TO_EXPERT[domain]
+            elif domain not in EXPERT_REGISTRY:
+                domain = _ROUTER_TO_EXPERT.get(_keyword_classify(idea), "drug_amr")
+                if domain not in EXPERT_REGISTRY:
+                    domain = "drug_amr"
             return domain, confidence, reasoning
     except Exception as e:
         logger.warning(f"Claude router failed: {e} — falling back to keyword classification")
-        domain = _keyword_classify(idea)
+        raw = _keyword_classify(idea)
+        domain = _ROUTER_TO_EXPERT.get(raw, raw)
+        if domain not in EXPERT_REGISTRY:
+            domain = "drug_amr"
         return domain, 0.6, "Classified by keyword matching (Claude router unavailable)"
 
 
+_ROUTER_KEYWORD_MAP: dict[str, list[str]] = {
+    "drug_amr":               ["antibiotic","antimicrobial","beta-lactam","carbapenem","ceftazidime","avibactam","meropenem","colistin","cre","mrsa","vre","esbl","acinetobacter","klebsiella","pseudomonas","hospital-acquired","ventilator-associated","bacteremia","sepsis drug","iv antibiotic","gram-negative","gram-positive resistant"],
+    "drug_amr_community":     ["oral antibiotic","community-acquired","absssi","skin infection","uti","urinary tract","pneumonia outpatient","sexually transmitted","gonorrhea","chlamydia","strep","community mrsa"],
+    "drug_oncology":          ["kinase inhibitor","parp","tyrosine kinase","solid tumor small molecule","oral cancer","ras inhibitor","kras","braf","mek","cdk4","cdk6","palbociclib","ribociclib","chemotherapy","oral targeted"],
+    "drug_cns_neurodegen":    ["alzheimer","parkinson","als ","amyloid","tau","alpha-synuclein","neurodegeneration","huntington","frontotemporal","prion","lewy body"],
+    "drug_cns_acute":         ["epilepsy","seizure","migraine","stroke","acute cns","headache","anti-epileptic","anticonvulsant"],
+    "drug_metabolic":         ["glp-1","semaglutide","sglt2","dpp4","metformin","insulin sensitizer","obesity drug","nash","mash","lipid","statin","pcsk9 small","metabolic drug"],
+    "drug_cardiovascular":    ["heart failure drug","hfref","hfpef","atrial fibrillation drug","anticoagulant","antihypertensive","ace inhibitor","arb ","sacubitril","entresto","coronary drug"],
+    "drug_immunology":        ["jak inhibitor","jak1","jak2","tyk2","pde4","s1p modulator","ozanimod","ozanimod","small molecule autoimmune","oral immunology"],
+    "drug_respiratory":       ["asthma drug","copd drug","ipf","pulmonary fibrosis","cystic fibrosis cftr","tezacaftor","ivacaftor","inhaled","bronchodilator","pah "],
+    "drug_rare_disease":      ["rare disease drug","orphan drug","enzyme replacement small","lysosomal small","gaucher small","fabry small","phenylketonuria","pku"],
+    "drug_mental_health":     ["antidepressant","ssri","snri","antipsychotic","anxiolytic","adhd drug","bipolar drug","addiction treatment","psilocybin","ketamine","mdma","psychiatric","schizophrenia drug"],
+    "drug_infectious_non_amr":["antiviral","hiv drug","hcv drug","hbv drug","cmv","rsv antiviral","influenza antiviral","antimalarial","antiparasitic","herpetic","chronic viral"],
+    "biologic_oncology":      ["checkpoint inhibitor","pd-1","pd-l1","ctla-4","her2 antibody","adc","antibody-drug conjugate","bispecific","cancer antibody","monoclonal antibody cancer","t-dxd","enhertu"],
+    "biologic_immunology":    ["tnf inhibitor","il-6","il-17","il-23","il-4","il-13","il-31","dupilumab","secukinumab","ixekizumab","ustekinumab","autoimmune biologic","inflammatory biologic"],
+    "biologic_hematology":    ["sickle cell biologic","hemophilia antibody","mds biologic","lymphoma antibody","leukemia biologic","blinatumomab","elotuzumab","daratumumab","anti-cd"],
+    "biologic_rare_disease":  ["enzyme replacement","elosulfase","alglucosidase","agalsidase","imiglucerase","protein replacement","rare biologic","lysosomal biologic"],
+    "biologic_cardiology":    ["pcsk9 antibody","evolocumab","alirocumab","inclisiran","cardiac biologic","heart antibody"],
+    "gene_therapy_rare":      ["aav9","aav8","aav5","aav ","aav-","gene therapy","gene replacement","gene correction","sma gene","sma type","spinal muscular atrophy","dmd gene","duchenne gene","hemophilia gene","retinal gene","lca ","zolgensma","luxturna","gene rare","monogenic gene","aav delivered","aav-based","gene editing rare","exon skipping","exon-skipping","dystrophin restore","morpholino"],
+    "gene_therapy_hematology":["sickle cell gene","thalassemia gene","casgevy","lyfgenia","hemoglobinopathy gene","gene editing blood","base editing blood","gene therapy blood","bcl11a","globin gene"],
+    "gene_therapy_oncology":  ["car-t","car t","tcr therapy","til therapy","tumor-infiltrating","kymriah","yescarta","breyanzi","cilta-cel","ide-cel","adoptive cell","t cell cancer gene","engineered t cell"],
+    "gene_therapy_cns":       ["huntington gene","spinocerebellar ataxia","prion gene","rett gene","cns gene therapy","gene editing brain","aav cns","intrathecal gene","neurological gene therapy"],
+    "gene_therapy_rna":       ["antisense oligonucleotide","aso ","sirna","rnai","mrna therapeutic","lnp rna","inotersen","patisiran","givosiran","lumasiran","inclisiran rna","rna therapy","base editing","prime editing","exon skipping aso","rna interference"],
+    "device_cardiovascular":  ["cardiac stent","pacemaker","icd defibrillator","tavi","tavr","structural heart","ep catheter","ablation catheter","cardiac device","left atrial appendage","watchman","heart valve device"],
+    "device_neurology":       ["deep brain stimulation","dbs ","spinal cord stimulator","scs ","vagus nerve","bci ","brain computer interface","neuromodulation device","neuropace","medtronic brain"],
+    "device_surgical_orthopedic":["spinal implant","vertebral","spinal fusion device","joint replacement","orthopedic implant","hip implant","knee implant","trauma fixation"],
+    "device_metabolic":       ["insulin pump","cgm device","continuous glucose monitor","artificial pancreas","dexcom","omnipod","freestyle libre","glucose device"],
+    "device_surgical_general":["surgical robot","laparoscopic device","robotic surgery","wound device","hernia mesh","general surgical implant","davinci"],
+    "device_ophthalmology":   ["iol","intraocular lens","glaucoma drain","retinal implant","ophthalmic device","eye implant","intravitreal device","cochlear implant","cochlear device","hearing implant","hearing device"],
+    "diagnostic_molecular_lab":["ngs panel","next-generation sequencing","liquid biopsy","genomic test","pcr test","naat","molecular lab","whole exome","whole genome","clia lab","foundationone","guardant"],
+    "diagnostic_companion":   ["companion diagnostic","cdx","fda-approved companion","biomarker test linked","her2 test","egfr test","pd-l1 test","msi test","braf test"],
+    "diagnostic_poc":         ["point-of-care","rapid test","lateral flow","poc test","clia-waived","bedside test","rapid antigen","home test","dipstick","fingerstick"],
+    "diagnostic_imaging_ai":  ["radiology ai","pathology ai","ct scan ai","mri ai","x-ray algorithm","echocardiography ai","imaging algorithm","slide analysis","digital pathology ai"],
+    "diagnostic_biomarker":   ["blood biomarker","urine biomarker","csf biomarker","serum test","troponin","bnp","crp test","biomarker test","non-genomic biomarker"],
+    "digital_cds":            ["clinical decision support","cds ","ehr integration","sepsis alert","deterioration alert","drug dosing algorithm","epic integration","hospital workflow ai","nurse alert","sepsis detection","early warning score","deterioration prediction","ai icu","ai hospital","samd","saas hospital","health system ai"],
+    "digital_rpm":            ["remote patient monitoring","rpm platform","wearable monitor","cardiac monitoring","copd monitoring","telehealth monitor","connected care","home monitoring"],
+    "digital_therapeutic":    ["digital therapeutic","dtx","prescription digital","cbt digital","substance abuse app","mental health app","chronic disease app","pear therapeutics","somryst"],
+    "digital_samd_radiology": ["radiology samd","pathology samd","imaging samd","ai radiology standalone","diagnostic ai software","image analysis software"],
+    "vaccine_prophylactic":   ["prophylactic vaccine","preventive vaccine","rsv vaccine","flu vaccine","covid vaccine","pneumococcal","meningococcal","hpv vaccine","mmr","acip vaccine"],
+    "vaccine_cancer_immuno":  ["cancer vaccine","neoantigen vaccine","therapeutic cancer vaccine","mrna cancer","personalized vaccine","mrna-4157","til vaccine","tumor vaccine"],
+    "vaccine_infectious_therapeutic":["hiv vaccine therapeutic","hbv therapeutic vaccine","hpv therapeutic","hepatitis therapeutic vaccine"],
+    "other_crispr":           ["crispr","cas9","base editor","prime editor","crispr tool","gene editing platform","beam therapeutics","prime medicine"],
+    "other_microbiome":       ["microbiome","live biotherapeutic","lbp","fmt","fecal transplant","gut bacteria","microbiota","seres","ferring rebiotix"],
+    "other_delivery":         ["lnp platform","lipid nanoparticle","nanoparticle delivery","drug delivery platform","targeted delivery","antibody conjugate non-adc"],
+}
+
+# Mapping from router domain IDs to sub_expert_id in expert_profiles_v2
+_ROUTER_TO_EXPERT: dict[str, str] = {
+    "drug_amr":                    "drug_amr",
+    "drug_amr_community":          "drug_amr",
+    "drug_oncology":               "drug_oncology",
+    "drug_cns_neurodegen":         "drug_cns",
+    "drug_cns_acute":              "drug_cns",
+    "drug_metabolic":              "drug_metabolic",
+    "drug_cardiovascular":         "drug_cardiology",
+    "drug_immunology":             "drug_immunology",
+    "drug_respiratory":            "drug_infectious_non_amr",
+    "drug_rare_disease":           "drug_rare_disease",
+    "drug_mental_health":          "drug_mental_health",
+    "drug_infectious_non_amr":     "drug_infectious_non_amr",
+    "biologic_oncology":           "biologic_oncology",
+    "biologic_immunology":         "biologic_immunology",
+    "biologic_hematology":         "biologic_hematology",
+    "biologic_rare_disease":       "biologic_rare_disease",
+    "biologic_cardiology":         "biologic_cardiology",
+    "gene_therapy_rare":           "gene_therapy_rare",
+    "gene_therapy_hematology":     "gene_therapy_hematology",
+    "gene_therapy_oncology":       "gene_therapy_oncology",
+    "gene_therapy_cns":            "gene_therapy_cns",
+    "gene_therapy_rna":            "gene_therapy_rna",
+    "device_cardiovascular":       "device_cardiovascular",
+    "device_neurology":            "device_neurology",
+    "device_surgical_orthopedic":  "device_neurology",
+    "device_metabolic":            "device_metabolic",
+    "device_surgical_general":     "device_cardiovascular",
+    "device_ophthalmology":        "device_cardiovascular",
+    "diagnostic_molecular_lab":    "diagnostic_molecular",
+    "diagnostic_companion":        "diagnostic_companion",
+    "diagnostic_poc":              "diagnostic_molecular",
+    "diagnostic_imaging_ai":       "digital_cds",
+    "diagnostic_biomarker":        "diagnostic_molecular",
+    "digital_cds":                 "digital_cds",
+    "digital_rpm":                 "digital_rpm",
+    "digital_therapeutic":         "digital_therapeutic",
+    "digital_samd_radiology":      "digital_cds",
+    "vaccine_prophylactic":        "vaccine_prophylactic",
+    "vaccine_cancer_immuno":       "vaccine_cancer_immuno",
+    "vaccine_infectious_therapeutic": "vaccine_prophylactic",
+    "other_crispr":                "other_crispr",
+    "other_microbiome":            "other_microbiome",
+    "other_delivery":              "other_delivery",
+}
+
+
 def _keyword_classify(idea: str) -> str:
-    """Fast keyword-based fallback classifier."""
+    """Fast keyword-based fallback classifier using granular subcategory keywords."""
     idea_lower = idea.lower()
-    all_keywords = get_all_keywords()
-    scores = {}
-    for domain_id, keywords in all_keywords.items():
+    scores: dict[str, int] = {}
+    for domain_id, keywords in _ROUTER_KEYWORD_MAP.items():
         score = sum(1 for kw in keywords if kw in idea_lower)
         if score > 0:
             scores[domain_id] = score
     if not scores:
-        return "antibiotic_amr"  # default
+        # Ultimate fallback: try legacy expert registry
+        try:
+            all_keywords = get_all_keywords()
+            for domain_id, keywords in all_keywords.items():
+                score = sum(1 for kw in keywords if kw in idea_lower)
+                if score > 0:
+                    scores[domain_id] = score
+        except Exception:
+            pass
+    if not scores:
+        return "drug_amr"
     return max(scores, key=scores.get)
 
 
@@ -126,7 +288,7 @@ async def route(
         logger.warning(f"Unknown PI domain '{pi_domain}' — treating as auto")
         pi_domain = "auto"
 
-    # Always classify with Claude
+    # Always classify with Claude (returns expert profile domain after mapping)
     claude_domain, confidence, reasoning = await classify_with_claude(idea)
     logger.info(f"Claude classified: {claude_domain} (confidence={confidence:.2f})")
 

@@ -389,13 +389,11 @@ async def retrieve_knowledge(
 
     logger.info(f"Retrieving knowledge: sub_expert={sub_expert_id} disease='{disease_short}' queries={len(queries)}")
 
-    # Run all searches in parallel
-    queries = queries[:3]  # Cap at 3 searches to avoid Railway timeout
-    # Run searches sequentially with small delay to avoid 429 rate limits
-    async def _run_with_delay(q, idx):
-        if idx > 0: await asyncio.sleep(1.5)
-        return await _run_single_search(q, f"{sub_expert_id}_{idx}")
-    tasks = [_run_with_delay(q, i) for i, q in enumerate(queries)]
+    # Run all searches in parallel — no sequential sleep (wastes 3-4s per report)
+    # Rate limiting handled by Anthropic API's built-in backoff, not artificial sleep
+    # Research: Perplexity uses parallel fetch with speculative cancellation
+    queries = queries[:3]  # Cap at 3 to stay within total budget
+    tasks = [_run_single_search(q, f"{sub_expert_id}_{i}") for i, q in enumerate(queries)]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     # Combine results

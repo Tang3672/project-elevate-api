@@ -325,3 +325,67 @@ async def get_all_users() -> list:
             "SELECT id, email, name FROM users ORDER BY id"
         )
         return [dict(r) for r in rows]
+
+
+async def update_user_subscription(
+    user_id:             int,
+    subscription_status: str = None,
+    trial_ends_at=None,
+    stripe_customer_id:  str = None,
+):
+    """Update user subscription fields."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        if stripe_customer_id:
+            await conn.execute(
+                "UPDATE users SET stripe_customer_id = $1 WHERE id = $2",
+                stripe_customer_id, user_id
+            )
+        if subscription_status:
+            await conn.execute(
+                "UPDATE users SET subscription_status = $1 WHERE id = $2",
+                subscription_status, user_id
+            )
+        if trial_ends_at:
+            await conn.execute(
+                "UPDATE users SET trial_ends_at = $1 WHERE id = $2",
+                trial_ends_at, user_id
+            )
+
+
+async def get_user_by_stripe_customer_id(stripe_customer_id: str):
+    """Find user by Stripe customer ID."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM users WHERE stripe_customer_id = $1",
+            stripe_customer_id
+        )
+        return dict(row) if row else None
+
+
+async def get_user_by_id(user_id: int):
+    """Get user by ID."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT * FROM users WHERE id = $1", user_id)
+        return dict(row) if row else None
+
+
+async def increment_free_report_count(user_id: int):
+    """Increment the free report counter for a user."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE users SET free_reports_used = free_reports_used + 1 WHERE id = $1",
+            user_id
+        )
+
+async def get_free_reports_used(user_id: int) -> int:
+    """Get how many free reports a user has used."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT free_reports_used FROM users WHERE id = $1", user_id
+        )
+        return row['free_reports_used'] if row else 0

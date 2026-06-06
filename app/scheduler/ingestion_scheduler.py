@@ -46,6 +46,26 @@ def init_scheduler():
         misfire_grace_time=3600,
     )
 
+    # ── Weekly Sunday 2am: canonical data pipeline (FDA/NIH/WHO GHO/OpenAlex) ─
+    scheduler.add_job(
+        _run_weekly_canonical,
+        CronTrigger(day_of_week="sun", hour=2, minute=0),
+        id="weekly_canonical",
+        name="Weekly canonical ETL (FDA approvals, NIH grants, WHO GHO, OpenAlex, Open Targets)",
+        replace_existing=True,
+        misfire_grace_time=7200,
+    )
+
+    # ── Monthly 1st 3am: ontology refresh ────────────────────────────────────
+    scheduler.add_job(
+        _run_monthly_ontology,
+        CronTrigger(day=1, hour=3, minute=0),
+        id="monthly_ontology",
+        name="Monthly MONDO + RxNorm ontology refresh",
+        replace_existing=True,
+        misfire_grace_time=14400,
+    )
+
     # ── Monthly: safety and quality signals ──────────────────────────────────
     scheduler.add_job(
         _run_monthly_safety,
@@ -64,6 +84,21 @@ def init_scheduler():
         name="Quarterly CDC PLACES + Census SAHIE + HRSA connectors",
         replace_existing=True,
         misfire_grace_time=14400,
+    )
+
+    # ── Nightly 2:30am UTC: batch-score full 10,000-disease universe ──────────
+    # Phase 1: full engine on 739+ curated diseases → persists sam_usd + all
+    #          sub-scores to disease_scored, refreshes in-process cache.
+    # Phase 2: TA-default scoring for remaining MONDO diseases (~9,000+).
+    # Runs after midnight so live trial/approval caches are warm from daytime
+    # traffic; results are available instantly for the morning user surge.
+    scheduler.add_job(
+        _run_nightly_batch_scoring,
+        CronTrigger(hour=2, minute=30),
+        id="nightly_batch_scoring",
+        name="Nightly batch scoring: 10,000-disease universe → disease_scored",
+        replace_existing=True,
+        misfire_grace_time=3600,
     )
 
     scheduler.start()
@@ -97,12 +132,36 @@ async def _run_monthly_safety():
     ])
 
 
+async def _run_weekly_canonical():
+    logger.info("⏰ Running weekly canonical ETL pipeline")
+    from app.ingestion.etl_orchestrator import run_weekly_etl
+    from app.core.config import settings
+    await run_weekly_etl(api_key_fda=getattr(settings, "FDA_API_KEY", ""))
+
+
+async def _run_monthly_ontology():
+    logger.info("⏰ Running monthly ontology refresh")
+    from app.ingestion.etl_orchestrator import run_ontology_etl
+    await run_ontology_etl(bulk=False)
+
+
 async def _run_quarterly_baseline():
     logger.info("⏰ Running quarterly baseline connectors")
     await run_pipeline(connector_names=[
         "cdc_places",
         "census_sahie",
     ])
+
+
+async def _run_nightly_batch_scoring():
+    logger.info("⏰ Running nightly batch scoring (10,000-disease universe)")
+    from app.services.universe_expander import run_nightly_batch_scoring
+    result = await run_nightly_batch_scoring()
+    logger.info(
+        "Nightly batch complete: %d curated + %d MONDO = %d total in %.0fs",
+        result["phase1_curated"], result["phase2_mondo"],
+        result["total"], result["elapsed_seconds"],
+    )
 
 
 def _log_next_runs():

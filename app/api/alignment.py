@@ -1,3 +1,4 @@
+from datetime import datetime
 """
 Alignment API v2
 ================
@@ -8,11 +9,12 @@ GET  /api/v1/alignment/examples     — example ideas
 """
 
 import logging
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 from typing import Optional
 
 from app.services.alignment_service import generate_alignment_report, generate_pi_report
+from app.api.auth import get_current_user
 from app.models.alignment import AlignmentReport, PIReport
 
 logger = logging.getLogger(__name__)
@@ -28,12 +30,10 @@ class PIReportRequest(BaseModel):
         description="Description of the product — what it does, who it's for, what it solves")
     product_type: str = Field(default="other",
         description="antibiotic | medical_device | software | diagnostic | other")
+    funding_pathway: Optional[str] = Field(default="commercial",
+        description="commercial | sbir | basic_science — controls report framing")
     target_pathogen: Optional[str] = Field(default=None,
         description="For antibiotics: primary target pathogen (e.g. MRSA, CRE, C. difficile)")
-    disease_domain: str = Field(default="auto",
-        description="auto | antibiotic_amr | oncology | cardiology | neurology_cns | metabolic_diabetes | mental_health")
-    tier1_category: str = Field(default="drug_small_molecule",
-        description="drug_small_molecule | biologic | gene_cell_therapy | medical_device | diagnostic | digital_health | vaccine_immunotherapy | other_platform")
     disease_domain: str = Field(default="auto",
         description="auto | antibiotic_amr | oncology | cardiology | neurology_cns | metabolic_diabetes | mental_health")
     tier1_category: str = Field(default="drug_small_molecule",
@@ -53,7 +53,7 @@ async def check_alignment(payload: AlignmentRequest):
 
 
 @router.post("/pi-report", response_model=PIReport)
-async def get_pi_report(payload: PIReportRequest):
+async def get_pi_report(payload: PIReportRequest, current_user = Depends(get_current_user)):
     """
     Full PI go-to-market intelligence report.
 
@@ -64,11 +64,82 @@ async def get_pi_report(payload: PIReportRequest):
 
     Takes 20-40 seconds.
     """
+    # ── Server-side quota enforcement (BEFORE calling Claude) ─────────────────
+    # This is the real gate — frontend checks are just UX. Without this,
+    # anyone who bypasses the frontend can burn Anthropic API tokens freely.
+    _dev_emails = {"test@projectelevate.io", "ijw91021@gmail.com",
+                   "admin@projectelevate.io", "oneonesie100@gmail.com"}
+    _PLAN_LIMITS = {
+        "basic":        5,   # Explorer $49
+        "starter":      20,  # Innovator $149
+        "professional": None, # Institution $799 — unlimited
+        "active":       None,
+        "trialing":     None,
+    }
+
+    try:
+        if current_user and current_user.get("email") not in _dev_emails:
+            from app.db.user_repository import get_user_by_id
+            user = await get_user_by_id(current_user["id"])
+            if user:
+                sub_status = user.get("subscription_status", "none")
+                plan       = user.get("plan", "none")
+                used       = user.get("free_reports_used", 0) or 0
+                limit      = _PLAN_LIMITS.get(plan) or _PLAN_LIMITS.get(sub_status)
+
+                # Early access period: grant 10 free analyses to anyone on the waitlist
+                # Remove this block when billing is live
+                on_waitlist = False
+                try:
+                    from app.db.database import get_pool
+                    pool = await get_pool()
+                    async with pool.acquire() as conn:
+                        wl = await conn.fetchrow(
+                            "SELECT id FROM waitlist WHERE lower(email)=lower($1)",
+                            current_user.get("email","")
+                        )
+                        on_waitlist = bool(wl)
+                except Exception:
+                    pass
+
+                early_access_limit = 10  # free analyses for waitlist members
+                if on_waitlist and used < early_access_limit:
+                    limit = early_access_limit  # override with early access allowance
+
+                if limit is not None and used >= limit:
+                    raise HTTPException(
+                        status_code=402,
+                        detail={
+                            "error": "quota_exceeded",
+                            "message": f"You've used all {limit} analyses on your plan. Upgrade to continue.",
+                            "used": used,
+                            "limit": limit,
+                        }
+                    )
+    except HTTPException:
+        raise
+    except Exception as quota_e:
+        logger.warning("Quota check failed (non-fatal): %s", quota_e)
+
     try:
         idea = payload.idea
         if payload.target_pathogen:
             idea = f"{idea}\n\nTarget pathogen: {payload.target_pathogen}"
-        return await generate_pi_report(idea, payload.product_type, payload.disease_domain, getattr(payload, "tier1_category", "drug_small_molecule"))
+        report = await generate_pi_report(
+            idea, payload.product_type, payload.disease_domain,
+            payload.tier1_category, funding_pathway=payload.funding_pathway,
+        )
+        # Increment usage counter after successful report
+        try:
+            if current_user and current_user.get("email") not in _dev_emails:
+                from app.db.user_repository import get_user_by_id, increment_free_report_count
+                user = await get_user_by_id(current_user["id"])
+                status = user.get("subscription_status", "none") if user else "none"
+                if status not in ("active", "trialing"):
+                    await increment_free_report_count(current_user["id"])
+        except Exception as inc_e:
+            logger.warning(f"Failed to increment report count: {inc_e}")
+        return report
     except ValueError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
@@ -114,3 +185,610 @@ async def get_examples():
             },
         ]
     }
+
+
+@router.get("/pi-report/mock")
+async def mock_pi_report():
+    """Mock endpoint for frontend testing — returns sample report without calling Claude."""
+    return {
+        "executive_summary": "This novel beta-lactam targets MRSA outpatient skin infections with an estimated 119,247 annual U.S. cases [SOURCE: CDC AR Threats 2019 | https://www.cdc.gov/antimicrobial-resistance/data-research/threats/index.html]. The QIDP pathway provides +5 years exclusivity and Priority Review, with a $180-320M development cost and $285M addressable U.S. market.",
+        "expert_domain": "drug_amr",
+        "expert_name": "AMR / Antibiotic Drug Expert",
+        "model_version": "mock-1.0",
+        "generated_at": "2026-05-17T00:00:00Z",
+        "signals_searched": 12788,
+        "disease_intelligence": {
+            "condition": "Methicillin-resistant Staphylococcus aureus (MRSA) skin and soft tissue infections",
+            "data_points": [
+                {"metric": "Annual U.S. MRSA infections", "value": "119,247", "year": "2019", "source": "CDC AR Threats Report", "source_url": "https://www.cdc.gov/antimicrobial-resistance/data-research/threats/index.html"},
+                {"metric": "Annual U.S. MRSA deaths", "value": "19,832", "year": "2019", "source": "CDC AR Threats Report", "source_url": "https://www.cdc.gov/antimicrobial-resistance/data-research/threats/index.html"},
+                {"metric": "SSTI proportion of MRSA infections", "value": "~60%", "year": "2022", "source": "IDSA SSTI Guidelines", "source_url": "https://www.idsociety.org/practice-guideline/skin-and-soft-tissue-infections/"},
+                {"metric": "Outpatient MRSA SSTI annual cases", "value": "~70,000", "year": "2022", "source": "CDC Outpatient Surveillance", "source_url": "https://www.cdc.gov/mrsa/community/index.html"}
+            ],
+            "resistance_profile": "MRSA resistance mediated by mecA gene (PBP2a). Community-MRSA (USA300 clone) dominates outpatient SSTIs. Resistance to beta-lactams is near-universal; novel agents must bind PBP2a or use non-beta-lactam mechanism.",
+            "pipeline_status": "Current standard: TMP-SMX (generic, oral), doxycycline (generic, oral). IV options: vancomycin (generic), daptomycin (Cubicin), linezolid (Zyvox/generic). Delafloxacin (Baxdela) approved 2017 for ABSSSI.",
+            "unmet_need_summary": "No novel oral MRSA-active agent approved since delafloxacin (2017); resistance to TMP-SMX rising to 15-20% in some regions, leaving limited outpatient options."
+        },
+        "literature_citations": [
+            {"title": "Clinical Practice Guidelines by IDSA for Skin and Soft Tissue Infections", "authors": "Stevens DL et al.", "journal": "Clinical Infectious Diseases", "year": "2014", "pmid": "24947530", "source_url": "https://pubmed.ncbi.nlm.nih.gov/24947530/", "relevance": "Stevens et al. (Clin Infect Dis, 2014) established TMP-SMX and doxycycline as first-line oral therapy for uncomplicated MRSA SSTIs, directly defining the standard of care your novel agent must improve upon to justify premium pricing and formulary adoption."},
+            {"title": "Delafloxacin versus Moxifloxacin for Acute Bacterial Skin and Skin Structure Infections", "authors": "Kingsley J et al.", "journal": "New England Journal of Medicine", "year": "2017", "pmid": "28537196", "source_url": "https://pubmed.ncbi.nlm.nih.gov/28537196/", "relevance": "The SOLO I/II trials (Kingsley et al., NEJM 2017) demonstrated non-inferiority of delafloxacin vs vancomycin/linezolid in 1,510 ABSSSI patients using the 48-72 hour early clinical response endpoint now required by FDA — this trial design is the direct regulatory precedent for your Phase 3 program."},
+            {"title": "Prevalence of community-associated methicillin-resistant Staphylococcus aureus", "authors": "Hersh AL et al.", "journal": "JAMA", "year": "2008", "pmid": "18577731", "source_url": "https://pubmed.ncbi.nlm.nih.gov/18577731/", "relevance": "Hersh et al. (JAMA, 2008) documented the explosive rise of CA-MRSA in U.S. emergency departments, with SSTI visit rates tripling from 1993-2005. This establishes the epidemiological trend supporting the 70,000 annual outpatient MRSA SSTI estimate used in the TAM calculation above."}
+        ],
+        "market_sizing": {
+            "steps": [
+                {"label": "Annual U.S. MRSA infections", "value": 119247, "unit": "patients", "source": "CDC AR Threats Report 2019", "source_url": "https://www.cdc.gov/antimicrobial-resistance/data-research/threats/index.html", "notes": "All MRSA infections including hospital and community"},
+                {"label": "Outpatient SSTI subset", "value": 70000, "unit": "patients", "source": "CDC Community MRSA Surveillance", "source_url": "https://www.cdc.gov/mrsa/community/index.html", "notes": "~60% of MRSA infections are SSTIs; ~60% managed outpatient"},
+                {"label": "Average WAC per oral course", "value": 1200, "unit": "USD", "source": "Baxdela/delafloxacin pricing (comparator)", "source_url": "https://www.accessdata.fda.gov/drugsatfda_docs/label/2017/208610s000lbl.pdf", "notes": "Premium oral MRSA agent pricing benchmark"},
+                {"label": "Year 5 market penetration", "value": 35, "unit": "percent", "source": "Industry benchmark for novel antibiotics", "source_url": "https://www.idsociety.org/practice-guideline/skin-and-soft-tissue-infections/", "notes": "Conservative estimate for novel branded oral antibiotic"}
+            ],
+            "formula": "(70,000 outpatient MRSA SSTI patients x $1,200 WAC x 35% penetration) = $29.4M Year 5 U.S. revenue",
+            "total_addressable_market_usd": 84000000,
+            "serviceable_market_usd": 29400000,
+            "methodology_note": "TAM assumes 100% of outpatient MRSA SSTIs captured at WAC pricing. SAM reflects realistic Year 5 market share given generic TMP-SMX competition and formulary access timelines."
+        },
+        "regulatory_pathway": {
+            "recommended_pathway": "NDA 505(b)(1) with QIDP designation under GAIN Act 2012",
+            "pathway_rationale": "MRSA is explicitly listed as a qualifying pathogen under the GAIN Act. QIDP provides +5 years exclusivity, Priority Review (6 months), and automatic Fast Track eligibility for an oral ABSSSI agent.",
+            "total_timeline_estimate": "6-8 years from IND to approval",
+            "total_cost_estimate": "$120-220M total development cost",
+            "designations": [
+                {"name": "Qualified Infectious Disease Product (QIDP)", "description": "Statutory designation under GAIN Act 2012 for antibiotics targeting serious infections.", "benefit": "+5 years added to existing exclusivity, Priority Review (6-month target), automatic Fast Track eligibility.", "eligibility": "Antibiotics targeting MRSA qualify under CDC Urgent Threat pathogen list.", "how_to_apply": "Submit QIDP request to FDA CDER at least 90 days before NDA submission.", "timeline": "FDA response within 60 days; apply before Phase 3 initiation.", "source": "FDA QIDP Guidance", "source_url": "https://www.fda.gov/drugs/development-resources/qualified-infectious-disease-product-qidp-designation", "priority": "recommended"},
+                {"name": "Fast Track Designation", "description": "Automatic with QIDP; allows rolling NDA submission and increased FDA interactions.", "benefit": "Rolling review reduces total review time; more frequent FDA meetings reduce regulatory risk.", "eligibility": "Granted automatically with QIDP designation.", "how_to_apply": "Automatic with QIDP; can also request independently.", "timeline": "60-day FDA response.", "source": "FDA Fast Track Guidance", "source_url": "https://www.fda.gov/patients/fast-track-breakthrough-therapy-accelerated-approval-priority-review/fast-track", "priority": "recommended"}
+            ],
+            "clinical_trial_requirements": [
+                {"phase": "Phase 1", "patient_count": "60-80", "duration": "12-18 months", "estimated_cost": "$8-12M", "key_endpoints": ["Single/multiple ascending dose PK", "Safety and tolerability", "Food effect", "Drug-drug interactions"], "fda_guidance_document": "General Clinical Pharmacology Guidance", "source_url": "https://www.fda.gov/drugs/guidance-documents-regulatory-information/antibacterial-drugs", "success_probability": "85-90%"},
+                {"phase": "Phase 2", "patient_count": "150-200", "duration": "18-24 months", "estimated_cost": "$20-35M", "key_endpoints": ["Clinical success at Day 48-72 (ABSSSI)", "Microbiological eradication", "PK/PD target attainment"], "fda_guidance_document": "ABSSSI Guidance 2013", "source_url": "https://www.fda.gov/regulatory-information/search-fda-guidance-documents/acute-bacterial-skin-and-skin-structure-infections-developing-drugs-treatment", "success_probability": "50-60%"},
+                {"phase": "Phase 3", "patient_count": "600-900", "duration": "24-30 months", "estimated_cost": "$80-150M", "key_endpoints": ["Early clinical response at 48-72 hours (primary)", "Investigator assessment at Day 14", "Non-inferiority margin of 10% vs comparator"], "fda_guidance_document": "ABSSSI Guidance 2013", "source_url": "https://www.fda.gov/regulatory-information/search-fda-guidance-documents/acute-bacterial-skin-and-skin-structure-infections-developing-drugs-treatment", "success_probability": "55-65%"}
+            ],
+            "key_friction_points": [
+                "Generic TMP-SMX ($4/course) creates extreme price pressure — novel agent must justify 300x premium through superior efficacy or resistance profile data",
+                "ABSSSI Phase 3 enrollment requires rapid enrollment across 40-60 sites; 48-72 hour primary endpoint means tight operational execution",
+                "Antimicrobial stewardship programs restrict novel antibiotics to failure cases — KOL engagement and compelling clinical data required for formulary access"
+            ],
+            "loopholes_and_strategies": [
+                "Target TMP-SMX-resistant MRSA as enriched enrollment population — reduces sample size and strengthens differentiation claim vs generic standard of care",
+                "Pursue ABSSSI as lead indication: fastest enrollment, clearest endpoint, largest outpatient market; expand to other MRSA indications post-approval via sNDA",
+                "Apply for CARB-X funding (up to $4.5M Phase 1) if mechanism is novel — reduces equity dilution through Phase 1"
+            ],
+            "funding_programs": [
+                "CARB-X: up to $4.5M Phase 1, $12M Phase 2 for novel mechanisms only. Does NOT fund Phase 3. Apply at carb-x.org twice yearly.",
+                "NIH NIAID DMID: $5-50M clinical development contracts for MRSA as priority pathogen. RFPs at niaid.nih.gov quarterly.",
+                "BARDA Broad Spectrum Antimicrobials: $50-200M for late-stage development. Requires prior Phase 1 safety data. BAA at medicalcountermeasures.gov."
+            ]
+        },
+        "market_access": {
+            "primary_channel": "Outpatient pharmacy via physician prescription; primary prescribers are emergency medicine, urgent care, and primary care physicians",
+            "buyer_segments": [
+                {"segment_name": "Emergency Departments (~5,000 facilities)", "buyer_count": "~5,000", "decision_maker": "P&T Committee, Formulary Director", "price_per_unit": "$800-1,500/course", "annual_spend_per_facility": "$50,000-200,000", "access_mechanism": "Hospital formulary addition required; ASP approval for ED prescribing", "timeline_to_access": "12-18 months post-approval", "source": "CMS Hospital Data", "source_url": "https://www.cms.gov/Research-Statistics-Data-and-Systems/Statistics-Trends-and-Reports/Medicare-Provider-Charge-Data"},
+                {"segment_name": "Urgent Care Centers (~12,000 facilities)", "buyer_count": "~12,000", "decision_maker": "Medical Director, Group Purchasing", "price_per_unit": "$800-1,200/course", "annual_spend_per_facility": "$20,000-80,000", "access_mechanism": "Direct prescribing without formulary restriction; GPO contract listing accelerates adoption", "timeline_to_access": "6-12 months post-approval", "source": "UCAOA Market Data", "source_url": "https://www.ucaoa.org/"}
+            ],
+            "key_opinion_leaders": [
+                "Dr. Henry Chambers, UCSF - MRSA clinical trials, ABSSSI trial design",
+                "Dr. Vance Fowler, Duke University - Staphylococcal infections outcomes research"
+            ],
+            "reimbursement_pathway": "Outpatient oral antibiotic: covered under Part D pharmacy benefit. NTAP does not apply to outpatient drugs. Payer prior auth expected for branded agent given generic alternatives; outcomes-based contract may accelerate coverage.",
+            "first_commercial_step": "Submit dossier to top 5 PBMs (Express Scripts, CVS Caremark, OptumRx, Prime, MedImpact) 6 months pre-approval for formulary placement negotiation.",
+            "international_opportunities": [
+                "EU: EMA centralized procedure; MRSA prevalence highest in Romania, Greece, Italy — priority markets for launch",
+                "Japan: PMDA approval; hospital-acquired MRSA high burden, premium pricing achievable"
+            ]
+        },
+        "market_geography": {
+            "description": "MRSA SSTIs concentrated in urban areas with high community transmission. Highest burden in Southeast U.S., urban Northeast, and California. Emergency department visits for SSTIs highest in states with high uninsured rates.",
+            "top_states": ["California", "Texas", "Florida", "New York", "Georgia"],
+            "scope": "national"
+        },
+        "recommended_next_steps": [
+            "Submit QIDP designation request to FDA CDER with MRSA justification citing CDC Urgent Threat status — target 60-day response before IND filing",
+            "Apply to CARB-X for Phase 1 non-dilutive funding (up to $4.5M) if mechanism is novel; next application window at carb-x.org",
+            "Schedule pre-IND meeting with FDA Division of Anti-Infectives to align on ABSSSI trial design, NI margin, and TMP-SMX-resistant enrichment strategy",
+            "Establish MIC surveillance data against contemporary TMP-SMX-resistant MRSA isolates via CDC AR Lab Network partnership",
+            "Engage Dr. Chambers (UCSF) and Dr. Fowler (Duke) as clinical advisors for Phase 2/3 trial design and KOL network development"
+        ],
+        "supporting_evidence": [],
+        "hospital_need_matches": [],
+        "sources": [
+            {"number": 1, "name": "CDC AR Threats Report 2019", "url": "https://www.cdc.gov/antimicrobial-resistance/data-research/threats/index.html", "accessed": "2026-05-17"},
+            {"number": 2, "name": "IDSA SSTI Clinical Practice Guidelines", "url": "https://www.idsociety.org/practice-guideline/skin-and-soft-tissue-infections/", "accessed": "2026-05-17"},
+            {"number": 3, "name": "FDA QIDP Designation Guidance", "url": "https://www.fda.gov/drugs/development-resources/qualified-infectious-disease-product-qidp-designation", "accessed": "2026-05-17"},
+            {"number": 4, "name": "FDA ABSSSI Guidance 2013", "url": "https://www.fda.gov/regulatory-information/search-fda-guidance-documents/acute-bacterial-skin-and-skin-structure-infections-developing-drugs-treatment", "accessed": "2026-05-17"},
+            {"number": 5, "name": "PubMed: IDSA SSTI Guidelines", "url": "https://pubmed.ncbi.nlm.nih.gov/24947530/", "accessed": "2026-05-17"},
+            {"number": 6, "name": "PubMed: Delafloxacin Phase 3 Trial", "url": "https://pubmed.ncbi.nlm.nih.gov/28537196/", "accessed": "2026-05-17"}
+        ],
+        "strategic_playbook": [
+            {
+                "strategy": "LPAD approval for resistant subset then label expansion",
+                "example": "Pfizer - Aztreonam-avibactam (Emblaveo)",
+                "what_they_did": "Sought approval specifically for NDM-producing organisms no other drug covers, then planned sNDA expansion to broader gram-negative indications post-commercialization.",
+                "how_to_apply": "If your antibiotic covers a resistance mechanism with no approved alternative, file LPAD for that niche first. Broader expansion follows with real-world evidence.",
+                "source_url": "https://pubmed.ncbi.nlm.nih.gov/36223745/"
+            },
+            {
+                "strategy": "BARDA partnership before Phase 3 to eliminate dilutive financing",
+                "example": "Paratek Pharmaceuticals - Omadacycline (Nuzyra)",
+                "what_they_did": "Secured $216M BARDA contract to fund both Phase 3 trials (CABP and ABSSSI) before raising equity. Approved 2018 with minimal dilution during most expensive development stage.",
+                "how_to_apply": "Submit BARDA TechWatch pre-application before Phase 2 completion. Frame as national security asset if pathogen is on CDC urgent threat list.",
+                "source_url": "https://www.medicalcountermeasures.gov/barda/cbrn/omadacycline/"
+            },
+            {
+                "strategy": "Antibiotic-BLI combination packaging to create new patentable entity from off-patent drug",
+                "example": "AstraZeneca/Pfizer - Ceftazidime-avibactam (Avycaz)",
+                "what_they_did": "Licensed avibactam BLI and combined with off-patent ceftazidime. Created new patentable combination with QIDP designation. AZ sold US rights to Pfizer for $1.6B in 2016.",
+                "how_to_apply": "If developing a BLI, identify which off-patent beta-lactams best complement your inhibitor spectrum. The combination becomes a new patentable entity with independent IP.",
+                "source_url": "https://pubmed.ncbi.nlm.nih.gov/26063370/"
+            }
+        ],
+        "limitations": "Market sizing based on 2019 CDC surveillance data; actual MRSA SSTI incidence may vary. Pricing assumptions derived from delafloxacin comparator and subject to payer negotiation."
+    }
+
+
+@router.post("/market-sizing-derivation")
+async def get_market_sizing_derivation(body: dict):
+    """
+    Returns the full structured market sizing derivation — all 8 steps with
+    citations, formulas, and explanations — as JSON for direct frontend rendering.
+    Bypasses Claude so numbers are deterministic and always sourced.
+    """
+    try:
+        from app.services.market_sizing_derivation_service import (
+            generate_market_sizing_derivation, MarketSizingDerivation
+        )
+        from dataclasses import asdict
+        idea     = body.get("idea", "")
+        pt       = body.get("product_type", "other")
+        disease  = body.get("disease_name", "")
+        ta       = body.get("therapeutic_area", "other")
+        pop      = int(body.get("us_patient_population", 0))
+        if not idea:
+            raise HTTPException(status_code=400, detail="idea required")
+        deriv = generate_market_sizing_derivation(
+            idea=idea, product_type=pt, disease_name=disease,
+            therapeutic_area=ta, us_patient_population=pop,
+        )
+        return asdict(deriv)
+    except Exception as e:
+        logger.error("Market sizing derivation failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Discovery Engine Endpoints ────────────────────────────────────────────────
+
+@router.get("/discovery/opportunities")
+async def get_opportunities(
+    top_n: int = 100,
+    search: str = "",
+    current_user = Depends(get_current_user),
+):
+    """
+    Return ranked biomedical opportunities.
+    Reads from disease_scored table (full universe) when available,
+    falls back to live v2 engine for the curated 309.
+    """
+    # Strategy: Live v2 engine for curated 309 (expert TAM, EXCEPTIONAL tiers)
+    # + disease_scored DB for extended MONDO universe (search only when >1000 entries)
+    curated_opps = []
+    extended_total = 0
+
+    # Always run live v2 for the curated 309 (highest quality)
+    try:
+        from app.services.opportunity_scorer_v2 import run_discovery_engine_v2
+        curated_opps = await run_discovery_engine_v2(top_n=max(top_n, 309))
+    except Exception as e_v2:
+        logger.error("v2 engine failed: %s", e_v2)
+        try:
+            from app.services.opportunity_scorer import run_discovery_engine
+            curated_opps = await run_discovery_engine(top_n=top_n)
+        except Exception:
+            curated_opps = []
+
+    curated_names = {o["disease"].lower() for o in curated_opps}
+
+    # If searching or extended universe is ready, supplement with disease_scored
+    if search or True:  # always check for extended diseases
+        try:
+            from app.db.database import get_pool
+            pool = await get_pool()
+            async with pool.acquire() as conn:
+                extended_total = await conn.fetchval(
+                    "SELECT COUNT(*) FROM disease_scored WHERE data_source != 'universe_builder'"
+                ) or 0
+
+                if search:
+                    # Search curated first
+                    curated_filtered = [o for o in curated_opps
+                                        if search.lower() in o["disease"].lower()
+                                        or search.lower() in (o.get("notes") or "").lower()]
+                    # Also search extended universe
+                    ext_rows = await conn.fetch("""
+                        SELECT * FROM disease_scored
+                        WHERE (lower(disease_label) LIKE lower($1)
+                               OR lower(notes) LIKE lower($1))
+                          AND lower(disease_label) NOT IN
+                              (SELECT lower(disease_label) FROM disease_scored WHERE data_source='universe_builder')
+                        ORDER BY score DESC NULLS LAST LIMIT $2
+                    """, f"%{search}%", top_n)
+
+                    ext_opps = [_row_to_opp(row, i + len(curated_filtered))
+                                for i, row in enumerate(ext_rows, 1)]
+                    all_opps = curated_filtered + ext_opps
+                    # Re-sort by score
+                    all_opps.sort(key=lambda x: x["score"], reverse=True)
+                    for i, o in enumerate(all_opps, 1):
+                        o["rank"] = i
+                    return {
+                        "opportunities": all_opps[:top_n],
+                        "generated_at":  datetime.utcnow().isoformat(),
+                        "algorithm":     f"Expert 309 + {extended_total:,} MONDO diseases",
+                        "total_scored":  len(all_opps),
+                        "universe_size": 309 + extended_total,
+                    }
+
+                elif extended_total > 100:
+                    # No search: return curated top-N (best quality)
+                    for i, o in enumerate(curated_opps[:top_n], 1):
+                        o["rank"] = i
+                    return {
+                        "opportunities": curated_opps[:top_n],
+                        "generated_at":  datetime.utcnow().isoformat(),
+                        "algorithm":     f"Expert 309 + {extended_total:,} MONDO (search to explore all)",
+                        "total_scored":  len(curated_opps[:top_n]),
+                        "universe_size": 309 + extended_total,
+                    }
+        except Exception as e_db:
+            logger.debug("disease_scored supplement failed: %s", e_db)
+
+    # Fallback — return curated universe with accurate count
+    curated_size = len(curated_opps)
+    try:
+        from app.services.universe_expander_v2 import get_all_diseases_for_batch_scoring
+        total_known = len(get_all_diseases_for_batch_scoring())
+    except Exception:
+        total_known = curated_size
+    for i, o in enumerate(curated_opps[:top_n], 1):
+        o["rank"] = i
+    return {
+        "opportunities": curated_opps[:top_n],
+        "generated_at":  datetime.utcnow().isoformat(),
+        "algorithm":     f"Expert {curated_size} curated diseases",
+        "total_scored":  len(curated_opps[:top_n]),
+        "universe_size": total_known,
+    }
+
+
+def _row_to_opp(row, rank: int) -> dict:
+    """Convert a disease_scored DB row to the frontend opportunity dict."""
+    score = float(row["score"] or 0)
+    return {
+        "rank":             rank,
+        "disease":          row["disease_label"],
+        "therapeutic_area": row["therapeutic_area"] or "other",
+        "score":            round(score, 1),
+        "tier":             row["tier"] or "MODERATE",
+        "tier_color":       _tier_color(row["tier"]),
+        "score_raw":        round(score, 2),
+        "ptrs":             0,
+        "confidence_low":   round(score * 0.82, 1),
+        "confidence_high":  round(score * 1.18, 1),
+        "notes":            row["notes"] or "",
+        "phase":            "phase2",
+        "components": {
+            "opportunity": round(float(row["opportunity"] or 0), 1),
+            "probability": round(float(row["probability"] or 0), 1),
+            "value":       round(float(row["value_score"] or 0), 1),
+        },
+        "subscores": {
+            "opportunity": round(float(row["opportunity"] or 0), 1),
+            "probability": round(float(row["probability"] or 0), 1),
+            "value":       round(float(row["value_score"] or 0), 1),
+            "innovation":  0,
+        },
+        "us_tam_fmt":       row["us_tam_fmt"] or "",
+        "peak_revenue_fmt": row["peak_revenue_fmt"] or "",
+        "funding_pathway":  "commercial",
+    }
+
+
+def _tier_color(tier: str) -> str:
+    return {"EXCEPTIONAL": "#059669", "HIGH": "#0891b2",
+            "MODERATE": "#d97706", "LOW": "#dc2626"}.get(tier or "", "#6366f1")
+
+
+@router.post("/discovery/score")
+async def score_custom_opportunity(
+    body: dict,
+    current_user = Depends(get_current_user),
+):
+    """Score a custom opportunity provided by the user."""
+    from app.services.opportunity_scorer import score_opportunity
+    try:
+        result = await score_opportunity(
+            disease_name=body.get("disease_name", ""),
+            therapeutic_area=body.get("therapeutic_area", "default"),
+            development_phase=body.get("development_phase", "preclinical"),
+            approved_treatments_count=body.get("approved_treatments_count"),
+            competitor_trial_count=body.get("competitor_trial_count"),
+            annual_treatment_cost_usd=body.get("annual_treatment_cost_usd"),
+            us_patient_population=body.get("us_patient_population"),
+            designations=body.get("designations", []),
+            order_of_entry=body.get("order_of_entry"),
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+@router.post("/idea-builder")
+async def idea_builder(body: dict):
+    """
+    Idea Builder: market → innovator direction.
+    Takes innovator profile (modality, stage, constraint, differentiator)
+    + selected market opportunities, returns 3 matched ideas with refined
+    idea statements generated by Claude Haiku.
+
+    Public endpoint — no auth required (just idea generation, no quota hit).
+    """
+    modality       = body.get("modality", "intervention")
+    stage          = body.get("stage", "")
+    constraint     = body.get("constraint", "")
+    differentiator = body.get("differentiator", "")
+    markets        = body.get("markets", [])[:3]
+
+    if not markets:
+        raise HTTPException(status_code=400, detail="At least one market required")
+
+    # Build a compact prompt for Claude Haiku (fast + cheap)
+    market_str = "\n".join(
+        f"- {m.get('disease','?')}: {m.get('ta','').replace('_',' ')} market, TAM {m.get('tam','?')}, score {m.get('score',50):.0f}/100"
+        for m in markets
+    )
+
+    prompt = f"""You are a medical market intelligence expert helping a health innovator refine their idea.
+
+INNOVATOR PROFILE:
+- Innovation type: {modality}
+- Development stage: {stage}
+- Primary constraint: {constraint}
+- Key differentiator: {differentiator}
+
+TOP MARKET OPPORTUNITIES (from our 49-source database):
+{market_str}
+
+Generate exactly 3 refined idea concepts matching this innovator to these markets.
+Return ONLY valid JSON (no markdown):
+{{
+  "ideas": [
+    {{
+      "disease": "<disease name from the list>",
+      "therapeutic_area": "<ta from the list>",
+      "tam": "<TAM from the list>",
+      "match_score": <integer 60-95>,
+      "refined_idea": "<1-2 sentence specific idea statement connecting their modality + differentiator to this disease. Be concrete about mechanism or approach. Under 180 chars.>",
+      "fit_reason": "<under 60 chars: why their modality fits this TA>",
+      "opportunity": "<under 50 chars: key unmet need in this market>",
+      "fast_path": "<under 70 chars: fastest regulatory or funding path given their constraint>"
+    }}
+  ]
+}}
+
+Order by match_score descending. Make the refined_idea statements specific and compelling, not generic."""
+
+    try:
+        import httpx
+        from app.core.config import settings
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            r = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key":         settings.ANTHROPIC_API_KEY,
+                    "anthropic-version": "2023-06-01",
+                    "content-type":      "application/json",
+                },
+                json={
+                    "model":      "claude-haiku-4-5-20251001",
+                    "max_tokens": 1000,
+                    "messages":   [{"role": "user", "content": prompt}],
+                },
+            )
+            r.raise_for_status()
+            raw = r.json()["content"][0]["text"].strip()
+            # Clean JSON if wrapped in markdown
+            if raw.startswith("```"):
+                raw = raw.split("```")[1]
+                if raw.startswith("json"):
+                    raw = raw[4:]
+            import json as _json
+            data = _json.loads(raw.strip())
+            return data
+    except Exception as e:
+        logger.warning("Idea builder Claude call failed: %s", e)
+        # Fallback: return structured ideas without AI
+        return {
+            "ideas": [
+                {
+                    "disease": m.get("disease", "?"),
+                    "therapeutic_area": m.get("ta", ""),
+                    "tam": m.get("tam", "—"),
+                    "match_score": max(60, int(m.get("score", 65))),
+                    "refined_idea": f"A {modality} targeting {m.get('disease','?')} with {differentiator.lower()} — positioned for {stage.split('—')[0].strip()} development addressing an unmet clinical need.",
+                    "fit_reason": f"{modality} validated in this therapeutic area",
+                    "opportunity": "High unmet need, limited approved options",
+                    "fast_path": "Seek FDA expedited designation early",
+                }
+                for m in markets
+            ]
+        }
+
+
+@router.post("/competitive-sweep")
+async def competitive_sweep(
+    body: dict,
+    current_user = Depends(get_current_user),
+):
+    """
+    Sweep openFDA, ClinicalTrials.gov, and OpenAlex for named competitors.
+    Returns structured competitive landscape: named products, advantages,
+    white space gaps, and differentiation levers.
+    """
+    import asyncio
+    from app.services.competitor_sweep_service import sweep_competitors, to_dict
+
+    disease    = body.get("disease_name", body.get("idea", "")[:80])
+    keywords   = body.get("keywords", [])
+    ta         = body.get("therapeutic_area", "other")
+    pt         = body.get("product_type", "drug_small_molecule")
+
+    if not disease:
+        raise HTTPException(status_code=400, detail="disease_name or idea required")
+
+    if not keywords:
+        keywords = [w for w in disease.split() if len(w) > 4][:5]
+
+    try:
+        loop = asyncio.get_event_loop()
+        landscape = await loop.run_in_executor(
+            None,
+            lambda: sweep_competitors(
+                disease_name=disease,
+                indication_keywords=keywords,
+                therapeutic_area=ta,
+                product_type=pt,
+            )
+        )
+        return to_dict(landscape)
+    except Exception as e:
+        logger.error("Competitive sweep failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/clarify")
+async def generate_clarifying_questions(
+    body: dict,
+    current_user = Depends(get_current_user),
+):
+    """
+    Generate 5-10 targeted clarifying questions based on the user's idea and
+    funding pathway. Mirrors the ChatGPT Deep Research pattern: ask smart
+    questions before generating the report to get structured, descriptive input.
+    """
+    import anthropic
+    from app.core.config import settings
+
+    idea = body.get("idea", "")
+    pathway = body.get("pathway", "commercial")
+    product_type = body.get("product_type", "")
+    disease_hint = body.get("disease_name", "")
+
+    if not idea or len(idea) < 20:
+        raise HTTPException(status_code=400, detail="Idea too short")
+
+    # Run live competitive sweep in parallel so the questions can reference real named competitors
+    competitive_context = ""
+    try:
+        import asyncio
+        from app.services.competitor_sweep_service import sweep_competitors, format_for_prompt
+        # Extract keywords from idea + disease hint
+        keywords = [w for w in (disease_hint or idea).split() if len(w) > 4][:4]
+        loop = asyncio.get_event_loop()
+        landscape = await loop.run_in_executor(
+            None,
+            lambda: sweep_competitors(
+                disease_name=disease_hint or idea[:60],
+                indication_keywords=keywords,
+                therapeutic_area="other",
+            )
+        )
+        if landscape.competitors:
+            competitive_context = format_for_prompt(landscape)
+    except Exception as ce:
+        logger.warning("Competitor sweep for clarify failed: %s", ce)
+
+    pathway_context = {
+        "commercial": "a commercial product seeking go-to-market strategy (TAM/SAM, FDA pathway, buyers, pricing, competitive landscape)",
+        "sbir": "an SBIR/STTR grant or licensing opportunity — needs both commercial market evidence and scientific significance for tech transfer or grant applications",
+        "basic_science": "a basic science grant (NIH R01/R21) focused on significance, innovation, and scientific impact rather than commercial market",
+    }.get(pathway, "a commercial product")
+
+    # Pull specialized data to inform what we already know vs what we need
+    data_context = ""
+    try:
+        from app.services.soft_router import soft_route
+        from app.services.disease_data_enricher import get_enrichment_data
+        routing = soft_route(idea)
+        sub_id  = routing.primary
+        enrich  = get_enrichment_data(disease_hint or idea[:50], routing.primary.split("_")[0])
+        data_context = (
+            f"\nWhat our database already knows about this market:\n"
+            f"  - Subcategory: {sub_id} ({routing.confidence:.0%} confidence)\n"
+            f"  - Known patient population: {enrich.us_patient_population:,} ({enrich.population_source[:60]})\n"
+            f"  - Typical pricing: ${enrich.annual_treatment_cost:,.0f}/yr ({enrich.pricing_source[:60]})\n"
+            f"  - Formulary coverage: {enrich.formulary_coverage:.0%} of plans\n"
+            f"  - MEPS adherence: {enrich.meps_adherence_rate:.0%} real-world\n"
+            f"  - Realized TAM factor: {enrich.realized_tam_factor:.0%} of theoretical\n"
+        )
+    except Exception:
+        pass
+
+    prompt = f"""You are conducting deep research on a health innovation before generating a market intelligence report.
+Your goal: ask the 6 most important questions that will make this specific report dramatically more accurate.
+
+THE INNOVATION:
+"{idea}"
+
+Product type: {product_type}
+{data_context}
+{competitive_context}
+
+DEEP RESEARCH PRINCIPLES (follow these exactly):
+1. We already know the rough market size and standard pricing — DO NOT ask generic "what is your market size" questions
+2. Ask what would CHANGE the formula significantly: biomarker restriction, line of therapy, specific subpopulation
+3. Reference SPECIFIC named drugs/devices as comparators — never say "competitor A"
+4. Ask about things our databases can't know: unpublished preclinical data, specific mechanism novelty, proprietary IP
+5. Each question should unlock a DIFFERENT formula parameter — no redundancy
+6. Questions must be answerable by the PI in 1 sentence based on what they know about their own work
+
+REQUIRED FORMULA PARAMETERS TO UNLOCK (one question per parameter):
+  Q1 → ELIGIBLE SUBPOPULATION: Which specific patient subset does this target?
+       (e.g., "Exon 51-skippable DMD patients" vs "all DMD", or "CRE bacteremia, not just colonization")
+  Q2 → LINE OF THERAPY / TREATMENT SETTING: Where does this fit in the clinical pathway?
+       (1st-line vs salvage, inpatient ICU vs outpatient, post-surgical vs prophylactic)
+  Q3 → CLINICAL MECHANISM NOVELTY: What is genuinely different about the mechanism?
+       (Not the disease area — specifically what does this do that approved drugs don't)
+  Q4 → DEVELOPMENT EVIDENCE: What data already exists to validate efficacy?
+       (In vitro MIC/IC50, animal model survival, Phase 1 safety, Phase 2 ORR — be specific)
+  Q5 → PRIMARY ECONOMIC BUYER: Who signs the check and what is their price sensitivity?
+       (Hospital P&T committee, specialty pharmacy PBM, patient OOP, payer formulary tier)
+  Q6 → COMPETITIVE CLINICAL ADVANTAGE: vs the single closest approved therapy, what is the measurable advantage?
+       (e.g., "vs ceftazidime-avibactam, your drug covers NDM-1 producing organisms — confirmed by MIC data?")
+
+RULES FOR OPTIONS:
+- Every option must be specific to THIS innovation and disease area — never abstract
+- Use real drug names, real organism names, real clinical endpoints
+- Options should cover the realistic range for this specific product
+- Include a "None of these — explain:" option when appropriate
+
+Return ONLY a JSON array of 6 objects. No other text.
+[{{
+  "question": "<specific question directly referencing the product's disease/mechanism>",
+  "field": "snake_case_key",
+  "options": ["<specific option with concrete detail>", "<specific option>", "<specific option>", "<specific option>"],
+  "hint": "<prompt for what additional detail would most improve the analysis>"
+}}]"""
+
+    try:
+        client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+        msg = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=2000,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = msg.content[0].text if msg.content else "[]"
+        # Extract JSON array
+        import json, re
+        match = re.search(r'\[.*\]', text, re.DOTALL)
+        if match:
+            questions = json.loads(match.group())
+            return {"questions": questions[:8], "pathway": pathway}
+        return {"questions": [], "pathway": pathway}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

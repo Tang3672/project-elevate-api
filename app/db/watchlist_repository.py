@@ -34,15 +34,15 @@ async def init_watchlist_tables():
         """)
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS user_alerts (
-                id           SERIAL PRIMARY KEY,
-                watchlist_id INTEGER NOT NULL REFERENCES user_watchlists(id) ON DELETE CASCADE,
-                user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                signal_id    INTEGER,
-                alert_type   VARCHAR(50)  NOT NULL,
-                title        TEXT         NOT NULL,
-                summary      TEXT         NOT NULL,
-                severity     VARCHAR(20)  NOT NULL DEFAULT 'medium',
-                source       VARCHAR(100) NOT NULL,
+                id                   SERIAL PRIMARY KEY,
+                watchlist_id         INTEGER NOT NULL REFERENCES user_watchlists(id) ON DELETE CASCADE,
+                user_id              INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                title                TEXT         NOT NULL,
+                body                 TEXT         NOT NULL DEFAULT '',
+                severity             VARCHAR(20)  NOT NULL DEFAULT 'medium',
+                source               VARCHAR(100) NOT NULL DEFAULT 'weekly_tracker',
+                recalculation_needed BOOLEAN      NOT NULL DEFAULT FALSE,
+                significance_score   INTEGER      NOT NULL DEFAULT 0,
                 source_url   TEXT,
                 seen         BOOLEAN      DEFAULT FALSE,
                 created_at   TIMESTAMPTZ  DEFAULT NOW()
@@ -277,3 +277,49 @@ def _row_to_alert(row) -> Alert:
         seen         = row['seen'],
         created_at   = row['created_at'],
     )
+
+
+async def get_all_active_watchlists() -> list:
+    """Get all watchlists for weekly tracker."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT * FROM user_watchlists ORDER BY created_at DESC"
+        )
+        return [dict(r) for r in rows]
+
+
+async def get_watchlists_for_user(user_id: int) -> list:
+    """Get watchlists for a specific user."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT id AS watchlist_id, user_id, name, disease_domain, product_description, keywords, last_checked, created_at FROM user_watchlists WHERE user_id = $1 ORDER BY created_at DESC",
+            user_id
+        )
+        return [dict(r) for r in rows]
+
+
+async def create_alert(
+    watchlist_id: int,
+    user_id: int,
+    title: str,
+    body: str,
+    severity: str = "medium",
+    source: str = "weekly_tracker",
+    recalculation_needed: bool = False,
+    significance_score: int = 0,
+) -> dict:
+    """Create an alert for a watchlist."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """INSERT INTO user_alerts
+               (watchlist_id, user_id, title, body, severity, source,
+                recalculation_needed, significance_score)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+               RETURNING *""",
+            watchlist_id, user_id, title, body, severity, source,
+            recalculation_needed, significance_score
+        )
+        return dict(row) if row else {}

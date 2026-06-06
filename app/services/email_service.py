@@ -25,6 +25,52 @@ from app.models.watchlist import Alert
 
 logger = logging.getLogger(__name__)
 
+
+async def send_email(to: str, subject: str, body: str, html: str = "") -> bool:
+    """
+    Generic email sender — used for waitlist notifications, alerts, etc.
+    Tries SMTP_* settings first, falls back to EMAIL_* settings.
+    """
+    host     = getattr(settings, 'SMTP_HOST', '') or getattr(settings, 'EMAIL_HOST', '')
+    port     = int(getattr(settings, 'SMTP_PORT', 0) or getattr(settings, 'EMAIL_PORT', 587))
+    user     = getattr(settings, 'SMTP_USER', '') or getattr(settings, 'EMAIL_USER', '')
+    password = getattr(settings, 'SMTP_PASS', '') or getattr(settings, 'EMAIL_PASSWORD', '')
+    from_addr = getattr(settings, 'EMAIL_FROM', '') or "Project Elevate <projectelevatetest1@gmail.com>"
+
+    if not host or not user or not password:
+        logger.warning("Email not configured — cannot send '%s'. Set SMTP_HOST/SMTP_USER/SMTP_PASS in Railway.", subject)
+        return False
+
+    try:
+        import smtplib as _smtp
+        from email.mime.multipart import MIMEMultipart as _MMP
+        from email.mime.text import MIMEText as _MMT
+
+        msg = _MMP("alternative")
+        msg["Subject"] = subject
+        msg["From"]    = from_addr
+        msg["To"]      = to
+        msg.attach(_MMT(body, "plain"))
+        if html:
+            msg.attach(_MMT(html, "html"))
+
+        # Extract bare email for SMTP envelope (SES rejects "Name <email>" format)
+        import re as _re
+        _match = _re.search(r'<(.+?)>', from_addr)
+        envelope_from = _match.group(1) if _match else from_addr
+
+        with _smtp.SMTP(host, port) as server:
+            server.ehlo()
+            server.starttls()
+            server.login(user, password)
+            server.sendmail(envelope_from, to, msg.as_string())
+
+        logger.info("Email sent to %s: %s", to, subject)
+        return True
+    except Exception as e:
+        logger.error("Failed to send email to %s: %s", to, e)
+        return False
+
 ALERT_COLORS = {
     "high":   "#D72638",
     "medium": "#B45309",
@@ -191,7 +237,7 @@ async def send_digest_email(
     try:
         msg = MIMEMultipart("alternative")
         msg["Subject"] = subject
-        msg["From"]    = getattr(settings, 'EMAIL_FROM', f"Project Elevate <{settings.EMAIL_USER}>")
+        msg["From"]    = getattr(settings, 'EMAIL_FROM', "Project Elevate <projectelevatetest1@gmail.com>")
         msg["To"]      = user_email
 
         # Plain text fallback

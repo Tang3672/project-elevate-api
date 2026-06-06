@@ -1,0 +1,193 @@
+{
+  "_meta": {
+    "purpose": "Per-source license register. Query commercial_safe before exposing any source in the production query path.",
+    "last_reviewed": "2026-06-01",
+    "reminder": "Re-verify before commercial launch. Terms change. This is not legal advice."
+  },
+  "sources": {
+    "clinicaltrials_gov": {
+      "name": "ClinicalTrials.gov",
+      "url": "https://clinicaltrials.gov/api/v2",
+      "license": "US public domain",
+      "commercial_safe": true,
+      "attribution_required": false,
+      "notes": "~50 req/min/IP. Use requests library (httpx blocked by Cloudflare bot detection)."
+    },
+    "openfda": {
+      "name": "openFDA",
+      "url": "https://api.fda.gov",
+      "license": "CC0 1.0 Universal",
+      "commercial_safe": true,
+      "attribution_required": false,
+      "notes": "240 req/min with free API key. Bulk JSON downloads at open.fda.gov/apis/downloads."
+    },
+    "fda_orange_book": {
+      "name": "FDA Orange Book",
+      "url": "https://www.fda.gov/drugs/drug-approvals-and-databases/orange-book-data-files",
+      "license": "US public domain",
+      "commercial_safe": true,
+      "attribution_required": false,
+      "notes": "Monthly ZIP download. Approved drugs + patent/exclusivity."
+    },
+    "fda_purple_book": {
+      "name": "FDA Purple Book",
+      "url": "https://purplebooksearch.fda.gov",
+      "license": "US public domain",
+      "commercial_safe": true,
+      "attribution_required": false,
+      "notes": "Licensed biologics + biosimilars/interchangeables."
+    },
+    "drugs_at_fda": {
+      "name": "Drugs@FDA",
+      "url": "https://www.fda.gov/drugs/drug-approvals-and-databases/drugsfda-data-files",
+      "license": "US public domain",
+      "commercial_safe": true,
+      "attribution_required": false,
+      "notes": "Tab-delimited ZIP, 12 tables, updated each weekday morning."
+    },
+    "nih_reporter": {
+      "name": "NIH RePORTER",
+      "url": "https://api.reporter.nih.gov",
+      "license": "US public domain",
+      "commercial_safe": true,
+      "attribution_required": false,
+      "notes": "500 records/page, 10k result cap — partition queries. Also bulk ExPORTER files."
+    },
+    "nsf_awards": {
+      "name": "NSF Award Search",
+      "url": "https://www.research.gov/awardapi-service/v1/awards.json",
+      "license": "US public domain",
+      "commercial_safe": true,
+      "attribution_required": false,
+      "notes": "Add ~200ms delay between requests."
+    },
+    "pubmed": {
+      "name": "PubMed / MEDLINE E-utilities",
+      "url": "https://eutils.ncbi.nlm.nih.gov",
+      "license": "Free (NLM) — some abstracts third-party copyright",
+      "commercial_safe": true,
+      "attribution_required": false,
+      "notes": "3 req/sec without key, 10 with free key. Abstracts may carry third-party copyright — respect per-article terms."
+    },
+    "openalex": {
+      "name": "OpenAlex",
+      "url": "https://api.openalex.org",
+      "license": "CC0",
+      "commercial_safe": true,
+      "attribution_required": false,
+      "notes": "~474M works. Best free commercial-safe bibliometric backbone. Hourly polling for updates."
+    },
+    "who_gho": {
+      "name": "WHO Global Health Observatory OData API",
+      "url": "https://ghoapi.azureedge.net/api",
+      "license": "Open — WHO Terms of Use (more permissive than ICTRP)",
+      "commercial_safe": true,
+      "attribution_required": true,
+      "notes": "2300+ indicators, no auth, JSON/XML. Commercial-safe burden proxy replacing GBD. Cite WHO."
+    },
+    "cdc_wonder": {
+      "name": "CDC WONDER",
+      "url": "https://wonder.cdc.gov",
+      "license": "US public domain",
+      "commercial_safe": true,
+      "attribution_required": false,
+      "notes": "Mortality/natality/cancer. XML-based API requires form POST. US burden proxy."
+    },
+    "cdc_places": {
+      "name": "CDC PLACES",
+      "url": "https://data.cdc.gov/resource/swc5-untb.json",
+      "license": "US public domain",
+      "commercial_safe": true,
+      "attribution_required": false,
+      "notes": "Model-based local chronic disease prevalence. Socrata API."
+    },
+    "cms_spending": {
+      "name": "CMS Medicare Part D / Part B Drug Spending",
+      "url": "https://data.cms.gov",
+      "license": "US public domain",
+      "commercial_safe": true,
+      "attribution_required": false,
+      "notes": "Gross drug cost, beneficiaries, per-claim. Excludes rebates."
+    },
+    "rxnorm_rxnav": {
+      "name": "RxNorm / RxNav API",
+      "url": "https://rxnav.nlm.nih.gov/REST",
+      "license": "Free, no license",
+      "commercial_safe": true,
+      "attribution_required": false,
+      "notes": "20 req/sec. Drug join key. Normalizes brand/generic/ingredient."
+    },
+    "mondo": {
+      "name": "MONDO Disease Ontology",
+      "url": "https://www.ebi.ac.uk/ols4/api/ontologies/mondo",
+      "license": "CC BY 4.0",
+      "commercial_safe": true,
+      "attribution_required": true,
+      "notes": "Primary disease join key. Maps OMIM/Orphanet/ICD/MeSH/SNOMED. Cite Monarch Initiative."
+    },
+    "chembl": {
+      "name": "ChEMBL",
+      "url": "https://www.ebi.ac.uk/chembl",
+      "license": "CC BY-SA 3.0",
+      "commercial_safe": true,
+      "attribution_required": true,
+      "notes": "Share-alike on derivatives. ~2.4M compounds, bioactivity, mechanisms."
+    },
+    "open_targets": {
+      "name": "Open Targets Platform",
+      "url": "https://platform.opentargets.org",
+      "license": "Apache-2.0 (code); component data varies",
+      "commercial_safe": true,
+      "attribution_required": true,
+      "notes": "Component licenses vary (ChEMBL CC BY-SA, FAERS CC0, EFO Apache-2.0). Disease IDs use EFO/MONDO."
+    },
+    "gdelt": {
+      "name": "GDELT 2.0 DOC API",
+      "url": "https://api.gdeltproject.org/api/v2/doc/doc",
+      "license": "Free",
+      "commercial_safe": true,
+      "attribution_required": false,
+      "notes": "15-min updates, 3-month rolling window, no full text (links only)."
+    },
+    "ihme_gbd": {
+      "name": "IHME Global Burden of Disease",
+      "url": "https://vizhub.healthdata.org/gbd-results/",
+      "license": "IHME Non-Commercial User Agreement",
+      "commercial_safe": false,
+      "attribution_required": true,
+      "notes": "NON-COMMERCIAL ONLY. R&D/prototyping only. License for commercial use or replace with WHO GHO + CDC WONDER."
+    },
+    "who_ictrp": {
+      "name": "WHO ICTRP",
+      "url": "https://www.who.int/clinical-trials-registry-platform",
+      "license": "Custom — explicit no-commercial clause",
+      "commercial_safe": false,
+      "attribution_required": false,
+      "notes": "PROHIBITED: 'shall not use information extracted from the ICTRP database for marketing, promotional or commercial purposes.' Use ClinicalTrials.gov + EU CTIS instead."
+    },
+    "drugbank_full": {
+      "name": "DrugBank Full Database",
+      "url": "https://go.drugbank.com",
+      "license": "CC BY-NC 4.0",
+      "commercial_safe": false,
+      "attribution_required": true,
+      "notes": "NC = non-commercial only. Only the CC0 Open Data subset (~3%) is commercial-safe. License DrugBank+ for commercial use."
+    },
+    "drugbank_open": {
+      "name": "DrugBank Open Data (CC0 subset)",
+      "url": "https://go.drugbank.com/releases/latest#open-data",
+      "license": "CC0",
+      "commercial_safe": true,
+      "attribution_required": false,
+      "notes": "Only ~3% of DrugBank content: vocabulary + structures. Safe commercially."
+    },
+    "newsapi_free": {
+      "name": "NewsAPI.org free tier",
+      "url": "https://newsapi.org",
+      "license": "No commercial use on free tier",
+      "commercial_safe": false,
+      "attribution_required": false,
+      "notes": "Free tier explicitly bars commercial use. Use GDELT + RSS feeds instead."
+    }
+  }
+}

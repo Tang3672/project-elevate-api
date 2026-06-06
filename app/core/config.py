@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     EMAIL_USER:     str = ""
     EMAIL_PASSWORD: str = ""
     EMAIL_FROM:     str = ""
+    SMTP_HOST:      str = ""
+    SMTP_PORT:      int = 587
+    SMTP_USER:      str = ""
+    SMTP_PASS:      str = ""
 
     # App
     DEBUG:            bool = True
@@ -44,6 +48,15 @@ class Settings(BaseSettings):
         case_sensitive = False
 
 
+    # ── Stripe Billing ────────────────────────────────────────────────────────
+    SMTP_PASS: str = ""
+    STRIPE_SECRET_KEY:     str = ""
+    STRIPE_WEBHOOK_SECRET: str = ""
+    STRIPE_PRICE_ID:       str = ""
+    STRIPE_BASIC_PRICE_ID:  str = ""
+    STRIPE_PRO_PRICE_ID:    str = ""
+
+
 def get_settings() -> Settings:
     s = Settings()
     # Hard override from os.environ — fixes Railway where .env doesn't exist
@@ -54,8 +67,27 @@ def get_settings() -> Settings:
             os.environ.get("ANTHROPIC_API_KEY ") or
             ""
         ).strip()
+
+    # Scan all env vars for Stripe keys (handles trailing space Railway bug)
+    for k, v in os.environ.items():
+        if k.strip() == "STRIPE_SECRET_KEY" and v.strip():
+            s.STRIPE_SECRET_KEY = v.strip()
+        if k.strip() == "STRIPE_WEBHOOK_SECRET" and v.strip():
+            s.STRIPE_WEBHOOK_SECRET = v.strip()
+        if k.strip() == "STRIPE_PRICE_ID" and v.strip():
+            s.STRIPE_PRICE_ID = v.strip()
     if not s.OPENAI_API_KEY:
         s.OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+    if not s.SMTP_HOST:
+        s.SMTP_HOST = os.environ.get("SMTP_HOST", "").strip()
+    if not s.SMTP_USER:
+        s.SMTP_USER = os.environ.get("SMTP_USER", "").strip()
+    if not s.SMTP_PASS:
+        s.SMTP_PASS = os.environ.get("SMTP_PASS", "").strip()
+    if not s.EMAIL_FROM:
+        s.EMAIL_FROM = os.environ.get("EMAIL_FROM", "").strip()
+    if not s.SMTP_PORT:
+        s.SMTP_PORT = int(os.environ.get("SMTP_PORT", 587))
     if not s.DATABASE_URL or "localhost" in s.DATABASE_URL:
         db = os.environ.get("DATABASE_URL", "")
         if db:
