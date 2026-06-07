@@ -16,8 +16,16 @@ from app.services.stripe_service import (
     construct_webhook_event, cancel_subscription
 )
 from app.db.user_repository import (
-    get_user_by_id, update_user_subscription
+    get_user_by_id, update_user_subscription, get_usage, update_user_plan
 )
+
+# Stripe price ID → internal plan name
+_PRICE_TO_PLAN = {
+    "price_explorer":    "explorer",     # replace with real Stripe price IDs
+    "price_innovator":   "innovator",
+    "price_institution": "institution",
+    # fallback pattern-matching done in _plan_from_sub() below
+}
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -75,15 +83,17 @@ async def billing_status(current_user: dict = Depends(get_current_user)):
             trial_ends_aware = trial_ends.replace(tzinfo=timezone.utc) if trial_ends.tzinfo is None else trial_ends
             is_active = now < trial_ends_aware
 
-    free_used = user.get("free_reports_used", 0)
+    usage = await get_usage(current_user["id"])
     return {
-        "subscription_status":   sub_status,
-        "is_active":             is_active,
-        "trial_ends_at":         trial_ends.isoformat() if trial_ends else None,
-        "stripe_customer_id":    stripe_id,
-        "plan":                  user.get("plan", "starter") if is_active else "none",
-        "free_reports_used":     free_used,
-        "free_reports_remaining": max(0, 1 - free_used) if not is_active else 999,
+        "subscription_status":    sub_status,
+        "is_active":              is_active,
+        "trial_ends_at":          trial_ends.isoformat() if trial_ends else None,
+        "stripe_customer_id":     stripe_id,
+        "plan":                   usage["plan"],
+        "reports_used":           usage["used"],
+        "reports_quota":          usage["quota"],
+        "reports_remaining":      usage["remaining"],
+        "reset_at":               usage["reset_at"],
     }
 
 
@@ -146,6 +156,24 @@ async def stripe_webhook(request: Request):
 
 # ── Webhook handlers ──────────────────────────────────────────────────────────
 
+def _plan_from_sub(sub: dict) -> str:
+    """Derive our plan name from a Stripe subscription object."""
+    items = sub.get("items", {}).get("data", [])
+    price_id = items[0].get("price", {}).get("id", "") if items else ""
+    if price_id in _PRICE_TO_PLAN:
+        return _PRICE_TO_PLAN[price_id]
+    # Fallback: match by price nickname or amount
+    nickname = (items[0].get("price", {}).get("nickname") or "").lower() if items else ""
+    amount   = items[0].get("price", {}).get("unit_amount", 0) if items else 0
+    if "institution" in nickname or "professional" in nickname:
+        return "institution"
+    if "innovator" in nickname or amount >= 14900:
+        return "innovator"
+    if "explorer" in nickname or amount >= 4900:
+        return "explorer"
+    return "explorer"  # safe default for any paid plan
+
+
 async def _handle_checkout_completed(session: dict):
     """User completed checkout — link Stripe customer to our user."""
     user_id     = session.get("metadata", {}).get("user_id")
@@ -154,12 +182,14 @@ async def _handle_checkout_completed(session: dict):
         logger.warning("checkout.session.completed missing user_id or customer")
         return
 
+    plan = session.get("metadata", {}).get("plan", "explorer")
     await update_user_subscription(
         user_id             = int(user_id),
         stripe_customer_id  = customer_id,
         subscription_status = "trialing",
     )
-    logger.info(f"User {user_id} linked to Stripe customer {customer_id}")
+    await update_user_plan(int(user_id), plan)
+    logger.info(f"User {user_id} linked to customer {customer_id}, plan={plan}")
 
 
 async def _handle_subscription_created(sub: dict):
@@ -179,13 +209,15 @@ async def _handle_subscription_created(sub: dict):
     from datetime import datetime, timezone
     trial_ends_at = datetime.fromtimestamp(trial_end, tz=timezone.utc) if trial_end else None
 
+    plan = _plan_from_sub(sub)
     await update_user_subscription(
         user_id             = int(user_id),
         stripe_customer_id  = customer_id,
         subscription_status = status,
         trial_ends_at       = trial_ends_at,
     )
-    logger.info(f"User {user_id} subscription created: {status}")
+    await update_user_plan(int(user_id), plan)
+    logger.info(f"User {user_id} subscription created: {status}, plan={plan}")
 
 
 async def _handle_subscription_updated(sub: dict):
@@ -201,12 +233,14 @@ async def _handle_subscription_updated(sub: dict):
     from datetime import datetime, timezone
     trial_ends_at = datetime.fromtimestamp(trial_end, tz=timezone.utc) if trial_end else None
 
+    plan = _plan_from_sub(sub)
     await update_user_subscription(
         user_id             = user_id,
         subscription_status = status,
         trial_ends_at       = trial_ends_at,
     )
-    logger.info(f"User {user_id} subscription updated: {status}")
+    await update_user_plan(user_id, plan)
+    logger.info(f"User {user_id} subscription updated: {status}, plan={plan}")
 
 
 async def _handle_subscription_deleted(sub: dict):
