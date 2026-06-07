@@ -26,13 +26,28 @@ async def init_user_tables():
             CREATE TABLE IF NOT EXISTS users (
                 id           SERIAL PRIMARY KEY,
                 email        VARCHAR(200) UNIQUE NOT NULL,
-                password_hash VARCHAR(500),        -- null for Google-only accounts
-                google_id    VARCHAR(200) UNIQUE,  -- null for email-only accounts
+                password_hash VARCHAR(500),
+                google_id    VARCHAR(200) UNIQUE,
                 name         VARCHAR(100),
                 created_at   TIMESTAMPTZ DEFAULT NOW(),
                 updated_at   TIMESTAMPTZ DEFAULT NOW()
             )
         """)
+
+        # Idempotent column additions — safe to run on every startup
+        for col_sql in [
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_name VARCHAR(50) DEFAULT 'free'",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS monthly_reports_used INTEGER DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS monthly_reset_at TIMESTAMPTZ DEFAULT (date_trunc('month', NOW()) + interval '1 month')",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_customer_id VARCHAR(200)",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_status VARCHAR(50) DEFAULT 'none'",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS trial_ends_at TIMESTAMPTZ",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS free_reports_used INTEGER DEFAULT 0",
+        ]:
+            try:
+                await conn.execute(col_sql)
+            except Exception:
+                pass
 
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS users_email_idx ON users (email)
@@ -389,3 +404,132 @@ async def get_free_reports_used(user_id: int) -> int:
             "SELECT free_reports_used FROM users WHERE id = $1", user_id
         )
         return row['free_reports_used'] if row else 0
+
+
+# ── Plan-based quota ──────────────────────────────────────────────────────────
+
+PLAN_MONTHLY_LIMITS: dict[str, int | None] = {
+    "free":        1,    # 1 total (free_reports_used), not monthly
+    "explorer":    5,
+    "innovator":   20,
+    "institution": None, # unlimited
+    "professional":None,
+}
+
+
+async def get_usage(user_id: int) -> dict:
+    """Return current plan, monthly usage, quota, and reports_remaining."""
+    from datetime import datetime, timezone
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT * FROM users WHERE id = $1", user_id)
+    if not row:
+        return {"plan": "free", "used": 0, "quota": 1, "remaining": 0}
+
+    row = dict(row)
+    plan        = row.get("plan_name") or "free"
+    sub_status  = row.get("subscription_status", "none")
+    reset_at    = row.get("monthly_reset_at")
+    used        = row.get("monthly_reports_used", 0) or 0
+    free_used   = row.get("free_reports_used", 0) or 0
+
+    # Reset monthly counter if the billing period rolled over
+    now = datetime.now(timezone.utc)
+    if reset_at:
+        reset_aware = reset_at.replace(tzinfo=timezone.utc) if reset_at.tzinfo is None else reset_at
+        if now >= reset_aware:
+            pool2 = await get_pool()
+            async with pool2.acquire() as conn2:
+                await conn2.execute("""
+                    UPDATE users SET
+                        monthly_reports_used = 0,
+                        monthly_reset_at = date_trunc('month', NOW()) + interval '1 month'
+                    WHERE id = $1
+                """, user_id)
+            used = 0
+
+    if plan == "free" or sub_status not in ("active", "trialing"):
+        quota     = 1
+        remaining = max(0, 1 - free_used)
+        used      = free_used
+    else:
+        quota     = PLAN_MONTHLY_LIMITS.get(plan)
+        remaining = None if quota is None else max(0, quota - used)
+
+    return {
+        "plan":      plan,
+        "used":      used,
+        "quota":     quota,
+        "remaining": remaining,   # None = unlimited
+        "reset_at":  reset_at.isoformat() if reset_at else None,
+    }
+
+
+async def try_consume_report(user_id: int) -> dict:
+    """
+    Atomically check quota and increment counter.
+    Returns {"allowed": True} or {"allowed": False, "reason": "..."}.
+    Uses a single UPDATE ... WHERE ... RETURNING to prevent race conditions —
+    if the row isn't updated (quota already hit), the report is blocked.
+    """
+    from datetime import datetime, timezone
+    usage = await get_usage(user_id)
+    plan       = usage["plan"]
+    remaining  = usage["remaining"]
+    sub_status = (await get_user_by_id(user_id) or {}).get("subscription_status", "none")
+
+    # Unlimited plan
+    if remaining is None:
+        return {"allowed": True, "usage": usage}
+
+    # Quota exhausted
+    if remaining <= 0:
+        quota = usage["quota"]
+        return {
+            "allowed": False,
+            "reason":  f"Monthly limit reached ({quota} reports on {plan.title()} plan). "
+                       f"Upgrade or wait until next billing period.",
+            "upgrade_required": True,
+            "usage": usage,
+        }
+
+    # Atomic increment — WHERE clause prevents over-spending if two requests race
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        if plan == "free" or sub_status not in ("active", "trialing"):
+            result = await conn.fetchrow(
+                "UPDATE users SET free_reports_used = free_reports_used + 1 "
+                "WHERE id = $1 AND free_reports_used < 1 RETURNING id",
+                user_id
+            )
+        else:
+            quota = usage["quota"]
+            result = await conn.fetchrow(
+                "UPDATE users SET monthly_reports_used = monthly_reports_used + 1 "
+                "WHERE id = $1 AND monthly_reports_used < $2 RETURNING id",
+                user_id, quota
+            )
+
+    if not result:
+        # Another request got the last slot between our check and the UPDATE
+        return {
+            "allowed": False,
+            "reason":  "Monthly limit reached. Upgrade or wait until next billing period.",
+            "upgrade_required": True,
+            "usage": await get_usage(user_id),
+        }
+
+    updated_usage = await get_usage(user_id)
+    return {"allowed": True, "usage": updated_usage}
+
+
+async def update_user_plan(user_id: int, plan_name: str):
+    """Set the plan name for a user (called from Stripe webhook)."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE users SET plan_name = $1, "
+            "monthly_reset_at = date_trunc('month', NOW()) + interval '1 month', "
+            "monthly_reports_used = 0 WHERE id = $2",
+            plan_name, user_id
+        )
