@@ -424,15 +424,32 @@ async def get_opportunities(
                     }
 
                 elif extended_total > 100:
-                    # No search: return curated top-N (best quality)
-                    for i, o in enumerate(curated_opps[:top_n], 1):
+                    # Merge curated (live-scored, full detail) + DB-extended diseases
+                    needed = max(0, top_n - len(curated_opps))
+                    ext_rows = await conn.fetch("""
+                        SELECT * FROM disease_scored
+                        WHERE data_source != 'universe_builder'
+                        ORDER BY COALESCE(sam_usd, 0) DESC NULLS LAST,
+                                 score DESC NULLS LAST
+                        LIMIT $1
+                    """, needed)
+                    ext_opps = [_row_to_opp(row, 0) for row in ext_rows]
+
+                    all_opps = curated_opps + ext_opps
+                    # Sort by SAM for live-scored; fall back to score for DB-only
+                    all_opps.sort(
+                        key=lambda x: x.get("sam_usd") or (x.get("score", 0) * 1_000_000),
+                        reverse=True,
+                    )
+                    for i, o in enumerate(all_opps[:top_n], 1):
                         o["rank"] = i
+                    universe = len(curated_opps) + extended_total
                     return {
-                        "opportunities": curated_opps[:top_n],
+                        "opportunities": all_opps[:top_n],
                         "generated_at":  datetime.utcnow().isoformat(),
-                        "algorithm":     f"Expert 309 + {extended_total:,} MONDO (search to explore all)",
-                        "total_scored":  len(curated_opps[:top_n]),
-                        "universe_size": 309 + extended_total,
+                        "algorithm":     f"Expert {len(curated_opps)} curated + {extended_total:,} extended diseases",
+                        "total_scored":  len(all_opps),
+                        "universe_size": universe,
                     }
         except Exception as e_db:
             logger.debug("disease_scored supplement failed: %s", e_db)
@@ -457,20 +474,37 @@ async def get_opportunities(
 
 def _row_to_opp(row, rank: int) -> dict:
     """Convert a disease_scored DB row to the frontend opportunity dict."""
-    score = float(row["score"] or 0)
+    score  = float(row["score"] or 0)
+    sam    = row["sam_usd"] if "sam_usd" in row.keys() and row["sam_usd"] else None
+    peak   = row["peak_revenue_usd"] if "peak_revenue_usd" in row.keys() and row["peak_revenue_usd"] else None
+    tam_usd = row["us_tam_usd"] if "us_tam_usd" in row.keys() and row["us_tam_usd"] else None
+    pop    = row["us_population"] if "us_population" in row.keys() else None
+    ptrs   = row["ptrs_pct"] if "ptrs_pct" in row.keys() and row["ptrs_pct"] else None
+
+    def _fmt(v):
+        if not v: return "—"
+        v = float(v)
+        if v >= 1e9:  return f"${v/1e9:.1f}B"
+        if v >= 1e6:  return f"${v/1e6:.0f}M"
+        return f"${v/1e3:.0f}K"
+
+    sam_fmt  = _fmt(sam or peak)
+    tam_fmt  = row["us_tam_fmt"] or _fmt(tam_usd) or "—"
+    peak_fmt = row["peak_revenue_fmt"] or _fmt(peak) or "—"
+
     return {
-        "rank":             rank,
-        "disease":          row["disease_label"],
-        "therapeutic_area": row["therapeutic_area"] or "other",
-        "score":            round(score, 1),
-        "tier":             row["tier"] or "MODERATE",
-        "tier_color":       _tier_color(row["tier"]),
-        "score_raw":        round(score, 2),
-        "ptrs":             0,
-        "confidence_low":   round(score * 0.82, 1),
-        "confidence_high":  round(score * 1.18, 1),
-        "notes":            row["notes"] or "",
-        "phase":            "phase2",
+        "rank":               rank,
+        "disease":            row["disease_label"],
+        "therapeutic_area":   row["therapeutic_area"] or "other",
+        "score":              round(score, 1),
+        "tier":               row["tier"] or "MODERATE",
+        "tier_color":         _tier_color(row["tier"]),
+        "score_raw":          round(score, 2),
+        "ptrs":               round(float(ptrs), 1) if ptrs else 0,
+        "confidence_low":     round(score * 0.82, 1),
+        "confidence_high":    round(score * 1.18, 1),
+        "notes":              row["notes"] or "",
+        "phase":              "phase2",
         "components": {
             "opportunity": round(float(row["opportunity"] or 0), 1),
             "probability": round(float(row["probability"] or 0), 1),
@@ -482,9 +516,17 @@ def _row_to_opp(row, rank: int) -> dict:
             "value":       round(float(row["value_score"] or 0), 1),
             "innovation":  0,
         },
-        "us_tam_fmt":       row["us_tam_fmt"] or "",
-        "peak_revenue_fmt": row["peak_revenue_fmt"] or "",
-        "funding_pathway":  "commercial",
+        "us_tam_usd":         int(tam_usd) if tam_usd else None,
+        "us_tam_fmt":         tam_fmt,
+        "peak_revenue_usd":   int(peak) if peak else None,
+        "peak_revenue_fmt":   peak_fmt,
+        "sam_usd":            int(sam or peak or 0),
+        "sam_fmt":            sam_fmt,
+        "us_patient_population": int(pop) if pop else None,
+        "commercial_tractability": row["commercial_tractability"] if "commercial_tractability" in row.keys() else None,
+        "tractability_note":  row["tractability_note"] if "tractability_note" in row.keys() else None,
+        "funding_pathway":    "commercial",
+        "data_source":        row["data_source"] or "db",
     }
 
 
