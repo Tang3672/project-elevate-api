@@ -2,11 +2,11 @@
 Subscription Middleware v3
 ===========================
 Plan-based quota enforcement:
-  free        → 1 report total (lifetime), all other tools blocked
   explorer    → 5 reports/month, no validation/timeline/tracker
   innovator   → 20 reports/month, full access
   institution → unlimited, full access
 
+No free tier. Every API call requires an active subscription.
 Enforcement is server-side only. try_consume_report() uses an atomic DB
 UPDATE ... WHERE ... RETURNING that blocks over-spending even under concurrent
 requests — the client cannot hack quotas by replaying requests.
@@ -100,6 +100,17 @@ async def check_subscription(user_id: int, path: str) -> dict:
             )
         return {"allowed": True, "status": plan}
 
+    # ── No active subscription — block everything ─────────────────────────────
+    if not is_active:
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "error":   "subscription_required",
+                "message": "A subscription is required to use Medlevate. Choose a plan to get started.",
+                "action":  "subscribe",
+            }
+        )
+
     # ── Report path: consume one quota slot ───────────────────────────────────
     if path in REPORT_PATHS:
         result = await try_consume_report(user_id)
@@ -108,14 +119,14 @@ async def check_subscription(user_id: int, path: str) -> dict:
             raise HTTPException(
                 status_code=402,
                 detail={
-                    "error":           "quota_exceeded",
-                    "message":         result["reason"],
-                    "action":          "upgrade",
-                    "plan":            plan,
-                    "reports_used":    usage.get("used", 0),
-                    "reports_quota":   usage.get("quota"),
+                    "error":             "quota_exceeded",
+                    "message":           result["reason"],
+                    "action":            "upgrade",
+                    "plan":              plan,
+                    "reports_used":      usage.get("used", 0),
+                    "reports_quota":     usage.get("quota"),
                     "reports_remaining": 0,
-                    "reset_at":        usage.get("reset_at"),
+                    "reset_at":          usage.get("reset_at"),
                 }
             )
         usage = result.get("usage", {})
