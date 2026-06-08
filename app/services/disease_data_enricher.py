@@ -160,6 +160,13 @@ _DISEASE_SUBCATEGORY_MAP: dict[str, str] = {
     "Major Depression (TRD)":              "drug_mental_health",
     "Bipolar Depression":                   "drug_mental_health",
     "Schizophrenia":                        "drug_mental_health",
+    # Correctly classified: not gene therapy targets
+    "Autism Spectrum Disorder (core)":      "drug_mental_health",
+    "Autism Spectrum Disorder (core symptoms)": "drug_mental_health",
+    "22q11.2 Deletion Syndrome":            "drug_mental_health",  # symptom management only
+    "22q11.2 Deletion Syndrome (DiGeorge)": "drug_mental_health",
+    # Rare liver disease — orphan RNAi, not gene therapy
+    "Alpha-1 Antitrypsin Deficiency (liver)": "drug_rare_disease",
     # Metabolic
     "Type 2 Diabetes (GLP-1 resistant)":   "drug_metabolic",
     "Obesity (CNS/metabolic)":             "drug_metabolic",
@@ -353,6 +360,26 @@ _DISEASE_ENRICHMENT_DB: dict[str, dict] = {
         "population_source": "Orphanet 30/million × US 334M",
         "pricing_source": "CMS Part B (Hemgenix $3.5M; Beqvez ~$3.5M)",
     },
+    "Alpha-1 Antitrypsin Deficiency (liver)": {
+        # AATD liver disease (PI*ZZ genotype). Distinct from AATD lung disease
+        # (augmentation IV approved). Liver manifestation = progressive cirrhosis
+        # from misfolded Z-AAT polymer accumulation in hepatocytes.
+        # Treatment pipeline: fazirsiran (RNAi, AZ/Takeda) Phase 3 positive 2024;
+        # ARO-AAT (Arrowhead) discontinued; Vertex VX-814/VX-864 failed.
+        # PI*ZZ US population ~100K. Liver disease (F2+ fibrosis) ~20-25K eligible.
+        # Source: Strnad 2020 Hepatology + Stoller 2014 Am J Med
+        "population": 22_000,          # PI*ZZ patients with significant liver fibrosis (F2+)
+        "biomarker_fraction": 1.0,    # PI*ZZ genotype = perfect therapeutic biomarker
+        "has_biomarker": True,
+        "annual_cost": 480_000,        # RNAi liver disease pricing: givosiran $575K,
+                                       # lumasiran $450K → fazirsiran estimated $450-500K/yr
+        "formulary_coverage": 0.82,
+        "pa_approval_rate": 0.88,     # PI*ZZ genotype confirmation = high PA approval
+        "meps_fill_rate": 0.91,
+        "meps_adherence": 0.90,       # High motivation (liver disease progression)
+        "population_source": "Strnad 2020 Hepatology; Stoller 2014 Am J Med; PI*ZZ liver fibrosis criteria",
+        "pricing_source": "RNAi liver precedents: givosiran $575K, lumasiran $450K (CMS Part B ASP)",
+    },
     "Huntington Disease": {
         "population": 16_700,         # Orphanet 50/million × 334M
         "biomarker_fraction": 1.0,    # All have HTT expansion (confirmed genetic)
@@ -451,6 +478,71 @@ _DISEASE_ENRICHMENT_DB: dict[str, dict] = {
     },
 
     # ── CNS ────────────────────────────────────────────────────────────────
+    "Autism Spectrum Disorder (core)": {
+        # Core social/communication symptoms — NO approved DMT (risperidone/aripiprazole
+        # are for irritability only, not core symptoms). Novel targets: oxytocin,
+        # GABA/glutamate, mGluR5, CNTNAP2. CDC 1 in 36 children (2023); adult
+        # prevalence estimated 4.5M+ US. Drug-eligible subset = those with
+        # measurable core symptom burden seeking pharmacotherapy.
+        "population": 3_500_000,      # CDC 2023 prevalence estimate, adults + children
+        "biomarker_fraction": None,
+        "has_biomarker": False,        # No validated pharmacogenomic biomarker for core Sx
+        "annual_cost": 22_000,         # Novel mechanism drug est. (oxytocin/GABA class) —
+                                       # comparable to brexpiprazole/aripiprazole extended market
+        "formulary_coverage": 0.58,
+        "pa_approval_rate": 0.72,
+        "meps_fill_rate": 0.65,
+        "meps_adherence": 0.48,       # MEPS CNS adherence (caregiver-administered)
+        "population_source": "CDC ADDM 2023 (1 in 36 children) × US school-age cohort + adult estimate",
+        "pricing_source": "Estimated novel CNS drug WAC; no approved core-symptom DMT exists",
+    },
+    "Autism Spectrum Disorder (core symptoms)": {
+        # Same disease, alternate name used in universe_expander_v2
+        "population": 3_500_000,
+        "biomarker_fraction": None,
+        "has_biomarker": False,
+        "annual_cost": 22_000,
+        "formulary_coverage": 0.58,
+        "pa_approval_rate": 0.72,
+        "meps_fill_rate": 0.65,
+        "meps_adherence": 0.48,
+        "population_source": "CDC ADDM 2023 (1 in 36 children) × US school-age cohort + adult estimate",
+        "pricing_source": "Estimated novel CNS drug WAC; no approved core-symptom DMT exists",
+    },
+    "22q11.2 Deletion Syndrome": {
+        # DiGeorge / velocardiofacial syndrome. 3-megabase chromosomal deletion of
+        # 30+ genes — NOT a single-gene replacement candidate. No disease-modifying
+        # therapy exists; ALL active trials address symptoms (schizophrenia risk,
+        # cognitive deficits, behavioral issues). Current treatment = calcium/vitamin D
+        # for hypocalcemia, antipsychotics for schizophrenia, monitoring.
+        # US prevalence: ~1 in 2,000-4,000 births = 82,000-165,000 total.
+        # Drug-eligible (active psychiatric/behavioral treatment): ~40,000.
+        "population": 40_000,          # Subset requiring active pharmacotherapy
+        "biomarker_fraction": None,
+        "has_biomarker": False,        # Chromosomal deletion = DIAGNOSTIC biomarker only,
+                                       # NOT a therapeutic biomarker (does not improve drug LOA)
+        "annual_cost": 7_500,          # Antipsychotics (aripiprazole WAC) + supplements;
+                                       # NOT orphan drug pricing — no orphan indication exists
+        "formulary_coverage": 0.68,
+        "pa_approval_rate": 0.70,
+        "meps_fill_rate": 0.61,
+        "meps_adherence": 0.46,       # Psychiatric medication adherence (MEPS)
+        "population_source": "McDonald-McGinn 2015 (1/2,000-4,000 births) × eligible subset",
+        "pricing_source": "CMS Part D antipsychotic + calcium supplement pricing",
+    },
+    "22q11.2 Deletion Syndrome (DiGeorge)": {
+        # Alternate name used in universe_expander_v2.py
+        "population": 40_000,
+        "biomarker_fraction": None,
+        "has_biomarker": False,
+        "annual_cost": 7_500,
+        "formulary_coverage": 0.68,
+        "pa_approval_rate": 0.70,
+        "meps_fill_rate": 0.61,
+        "meps_adherence": 0.46,
+        "population_source": "McDonald-McGinn 2015 (1/2,000-4,000 births) × eligible subset",
+        "pricing_source": "CMS Part D antipsychotic + calcium supplement pricing",
+    },
     "Alzheimer Disease (early/MCI)": {
         "population": 1_800_000,      # Early stage eligible for anti-amyloid (amyloid-confirmed)
         "biomarker_fraction": 0.70,   # ~70% of clinical MCI confirmed amyloid-positive by PET
@@ -822,6 +914,7 @@ _TAM_SANITY_CEILING: dict[str, float] = {
     "drug_cardiovascular":  25_000_000_000,   # $25B — AFib NOAC market $18B validated
     "drug_immunology":      45_000_000_000,
     "biologic_immunology":  45_000_000_000,
+    "drug_mental_health":   100_000_000_000,  # $100B — ASD 3.5M × $22K = $77B; ADHD/depression larger; theoretical only
     "drug_cns_neurodegen":  55_000_000_000,   # $55B — Alzheimer's 1.8M × $26.5K = $48B is valid theoretical
     "drug_rare_disease":    12_000_000_000,
     "biologic_rare_disease":15_000_000_000,
