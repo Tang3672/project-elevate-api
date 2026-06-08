@@ -409,10 +409,9 @@ async def get_free_reports_used(user_id: int) -> int:
 # ── Plan-based quota ──────────────────────────────────────────────────────────
 
 PLAN_MONTHLY_LIMITS: dict[str, int | None] = {
-    "free":        1,    # 1 total (free_reports_used), not monthly
     "explorer":    5,
     "innovator":   20,
-    "institution": None, # unlimited
+    "institution": None,  # unlimited
     "professional":None,
 }
 
@@ -424,14 +423,12 @@ async def get_usage(user_id: int) -> dict:
     async with pool.acquire() as conn:
         row = await conn.fetchrow("SELECT * FROM users WHERE id = $1", user_id)
     if not row:
-        return {"plan": "free", "used": 0, "quota": 1, "remaining": 0}
+        return {"plan": "explorer", "used": 0, "quota": 5, "remaining": 5}
 
     row = dict(row)
-    plan        = row.get("plan_name") or "free"
-    sub_status  = row.get("subscription_status", "none")
+    plan        = row.get("plan_name") or "explorer"
     reset_at    = row.get("monthly_reset_at")
     used        = row.get("monthly_reports_used", 0) or 0
-    free_used   = row.get("free_reports_used", 0) or 0
 
     # Reset monthly counter if the billing period rolled over
     now = datetime.now(timezone.utc)
@@ -448,13 +445,8 @@ async def get_usage(user_id: int) -> dict:
                 """, user_id)
             used = 0
 
-    if plan == "free" or sub_status not in ("active", "trialing"):
-        quota     = 1
-        remaining = max(0, 1 - free_used)
-        used      = free_used
-    else:
-        quota     = PLAN_MONTHLY_LIMITS.get(plan)
-        remaining = None if quota is None else max(0, quota - used)
+    quota     = PLAN_MONTHLY_LIMITS.get(plan)
+    remaining = None if quota is None else max(0, quota - used)
 
     return {
         "plan":      plan,
@@ -496,19 +488,12 @@ async def try_consume_report(user_id: int) -> dict:
     # Atomic increment — WHERE clause prevents over-spending if two requests race
     pool = await get_pool()
     async with pool.acquire() as conn:
-        if plan == "free" or sub_status not in ("active", "trialing"):
-            result = await conn.fetchrow(
-                "UPDATE users SET free_reports_used = free_reports_used + 1 "
-                "WHERE id = $1 AND free_reports_used < 1 RETURNING id",
-                user_id
-            )
-        else:
-            quota = usage["quota"]
-            result = await conn.fetchrow(
-                "UPDATE users SET monthly_reports_used = monthly_reports_used + 1 "
-                "WHERE id = $1 AND monthly_reports_used < $2 RETURNING id",
-                user_id, quota
-            )
+        quota = usage["quota"]
+        result = await conn.fetchrow(
+            "UPDATE users SET monthly_reports_used = monthly_reports_used + 1 "
+            "WHERE id = $1 AND monthly_reports_used < $2 RETURNING id",
+            user_id, quota
+        )
 
     if not result:
         # Another request got the last slot between our check and the UPDATE
