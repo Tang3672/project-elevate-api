@@ -570,33 +570,37 @@ async def idea_builder(body: dict):
 
     Public endpoint — no auth required (just idea generation, no quota hit).
     """
-    modality       = body.get("modality", "intervention")
+    platform       = body.get("platform", body.get("modality", "intervention"))
+    biology        = body.get("biology", body.get("constraint", ""))
+    patients       = body.get("patients", body.get("differentiator", ""))
     stage          = body.get("stage", "")
-    constraint     = body.get("constraint", "")
     differentiator = body.get("differentiator", "")
     markets        = body.get("markets", [])[:3]
 
     if not markets:
         raise HTTPException(status_code=400, detail="At least one market required")
 
-    # Build a compact prompt for Claude Haiku (fast + cheap)
     market_str = "\n".join(
-        f"- {m.get('disease','?')}: {m.get('ta','').replace('_',' ')} market, TAM {m.get('tam','?')}, score {m.get('score',50):.0f}/100"
+        f"- {m.get('disease','?')}: {m.get('ta','').replace('_',' ')} | SAM {m.get('sam','?')} | score {m.get('score',50):.0f}/100"
         for m in markets
     )
 
-    prompt = f"""You are a medical market intelligence expert helping a health innovator refine their idea.
+    prompt = f"""You are a medical market intelligence expert helping a health innovator identify their best opportunity.
 
 INNOVATOR PROFILE:
-- Innovation type: {modality}
+- Platform / modality: {platform}
+- Biological mechanism targeted: {biology}
+- Target patient population: {patients}
 - Development stage: {stage}
-- Primary constraint: {constraint}
 - Key differentiator: {differentiator}
 
-TOP MARKET OPPORTUNITIES (from our 49-source database):
+MATCHED MARKET OPPORTUNITIES (ranked by biology + patient fit, then SAM):
 {market_str}
 
-Generate exactly 3 refined idea concepts matching this innovator to these markets.
+Generate exactly 3 refined idea concepts — one per market — that specifically connect
+this innovator's biological mechanism and platform to each disease.
+Be precise: name the specific target protein, pathway, or mechanism. Do NOT write generic ideas.
+
 Return ONLY valid JSON (no markdown):
 {{
   "ideas": [
@@ -652,8 +656,8 @@ Order by match_score descending. Make the refined_idea statements specific and c
                     "therapeutic_area": m.get("ta", ""),
                     "tam": m.get("tam", "—"),
                     "match_score": max(60, int(m.get("score", 65))),
-                    "refined_idea": f"A {modality} targeting {m.get('disease','?')} with {differentiator.lower()} — positioned for {stage.split('—')[0].strip()} development addressing an unmet clinical need.",
-                    "fit_reason": f"{modality} validated in this therapeutic area",
+                    "refined_idea": f"A {platform} targeting {biology.split('/')[0].lower() if biology else 'the underlying pathway'} in {m.get('disease','?')} — {patients.lower() if patients else 'addressing unmet clinical need'} at {stage.split('—')[0].strip()} stage.",
+                    "fit_reason": f"{platform} mechanism matches {m.get('ta','').replace('_',' ')} biology",
                     "opportunity": "High unmet need, limited approved options",
                     "fast_path": "Seek FDA expedited designation early",
                 }
