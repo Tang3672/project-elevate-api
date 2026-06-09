@@ -141,6 +141,64 @@ async def list_sources():
     return {"sources": counts}
 
 
+@admin_router.post("/provision-user")
+async def provision_user(
+    email:     str,
+    name:      str  = "",
+    plan_name: str  = "explorer",
+    password:  str  = "",
+):
+    """
+    Create an early-access user account with a specific plan.
+    Returns the generated temp password so it can be shared with the user.
+    plan_name: explorer (5/mo), innovator (20/mo), institution (unlimited)
+    """
+    import secrets, string
+    from app.db.user_repository import create_user, get_user_by_email
+    from app.services.auth_service import hash_password
+    from app.db.database import get_pool
+
+    email = email.lower().strip()
+    valid_plans = ("explorer", "innovator", "institution")
+    if plan_name not in valid_plans:
+        raise HTTPException(status_code=400, detail=f"plan_name must be one of {valid_plans}")
+
+    if not password:
+        alphabet = string.ascii_letters + string.digits
+        password = "".join(secrets.choice(alphabet) for _ in range(12))
+
+    existing = await get_user_by_email(email)
+    if existing:
+        # Update the plan for an existing user
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE users SET plan_name=$1, name=COALESCE(NULLIF($2,''), name) WHERE email=$3",
+                plan_name, name or None, email
+            )
+        return {"status": "updated", "email": email, "plan_name": plan_name, "note": "existing account plan updated"}
+
+    hashed = hash_password(password)
+    user = await create_user(email=email, password_hash=hashed, name=name or None)
+    if not user:
+        raise HTTPException(status_code=409, detail="Could not create user — email already exists")
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE users SET plan_name=$1 WHERE email=$2",
+            plan_name, email
+        )
+
+    return {
+        "status":        "created",
+        "email":         email,
+        "name":          name,
+        "plan_name":     plan_name,
+        "temp_password": password,
+    }
+
+
 @admin_router.post("/reddit/run")
 async def run_reddit_ingestion_endpoint(
     max_per_subreddit: int = 30,
