@@ -577,8 +577,10 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
         # Implements Adaptive RAG + CRAG quality gating across 38+ sources
         from app.services.retrieval_pipeline import run_retrieval_pipeline
         from app.services.chapter_data_service import get_all_chapter_data, format_all_chapter_data
+        from app.services.expert_panel import run_expert_panel
 
-        ci, pub_data, strategic_intel, aggregated_sources, chapter_data, pipeline_result = await asyncio.gather(
+        (ci, pub_data, strategic_intel, aggregated_sources, chapter_data,
+         pipeline_result, panel_result) = await asyncio.gather(
             get_full_competitive_intelligence(
                 condition=disease_name,
                 disease_keywords=disease_keywords,
@@ -607,6 +609,14 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
                 subcategory_id=sub_expert_id or "drug_amr",
                 idea=idea,
                 max_total_sec=12.0,
+            ),
+            # Expert panel: 3 parallel Haiku sub-analyses with different analytical lenses.
+            # Runs in parallel here → zero latency overhead vs. the existing 6 fetches.
+            run_expert_panel(
+                disease_name=disease_name,
+                idea=idea,
+                sub_expert_id=sub_expert_id or "drug_amr",
+                product_type=product_type or "drug",
             ),
             return_exceptions=True
         )
@@ -792,10 +802,31 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
     except Exception as e_deriv:
         logger.warning("Market sizing derivation failed (non-fatal): %s", e_deriv)
 
-    # Build final context with demand signals + hospital matches + all intelligence
+    # Expert panel: inject structured pre-analysis as highest-priority context block
+    panel_block = ""
+    try:
+        from app.services.expert_panel import format_panel_for_prompt, ExpertPanelResult
+        if not isinstance(panel_result, Exception) and panel_result:
+            panel_block = format_panel_for_prompt(panel_result)
+            c = panel_result.clinical
+            r = panel_result.regulatory
+            com = panel_result.commercial
+            logger.info(
+                "Expert panel injected: mechanism=%.1f/10 approval=%d%% moat=%.1f/10",
+                c.mechanism_score if c else 0,
+                r.approval_probability_pct if r else 0,
+                com.competitive_moat_score if com else 0,
+            )
+        elif isinstance(panel_result, Exception):
+            logger.warning("Expert panel failed (non-fatal): %s", panel_result)
+    except Exception as _pe:
+        logger.warning("Expert panel injection failed (non-fatal): %s", _pe)
+
+    # Build final context with demand signals + hospital matches + all intelligence.
+    # Panel block prepended so it appears first — Opus treats earlier context as higher priority.
     context = _build_expert_context(
         idea, expert, demand_results, hospital_matches_raw,
-        disease_knowledge=researcher_ctx + intelligence_text + market_derivation_text,
+        disease_knowledge=panel_block + "\n\n" + researcher_ctx + intelligence_text + market_derivation_text,
         pi_memory=pi_memory_context,
     )
 
@@ -811,6 +842,19 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
         "(4) Market access prices: cite CMS ASP or reimbursement data. "
         "(5) If uncertain, state a range with sources for both ends. "
         f"GUIDELINE NOTE: {clinical_guideline_warning[:200]}"
+        + (
+            "\n\nEXPERT PANEL INTEGRATION RULES (CRITICAL): "
+            "An expert panel ran three independent sub-analyses before this synthesis. "
+            "You MUST: "
+            "(a) Reference the Clinical Validity Expert's mechanism score and risks in your scientific assessment. "
+            "(b) Use the Regulatory Pathway Expert's recommended pathway and approval probability as your baseline — "
+            "override only with cited precedent. "
+            "(c) Use the Commercial Viability Expert's pricing benchmark and payer barrier in your market access section. "
+            "If you disagree with any panel finding, state explicitly: "
+            "'The panel assessed [X]; however, based on [specific evidence], my assessment is [Y].' "
+            "Do NOT ignore the panel findings."
+            if panel_block else ""
+        )
     )
 
     system = expert.system_prompt + "\n\n" + EXPERT_JSON_SCHEMA + reporting_instructions
