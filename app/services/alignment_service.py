@@ -590,6 +590,8 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
         from app.services.expert_panel import run_expert_panel
         from app.services.literature_synthesis import synthesize_literature
         from app.services.funding_intelligence_service import get_funding_intelligence, format_funding_intelligence
+        from app.services.patent_landscape_service import get_patent_landscape, format_patent_landscape
+        from app.services.regulatory_precedent_service import get_regulatory_precedent, format_regulatory_precedent
 
         # Hard 20-second cap on all data fetches. Anything that doesn't finish
         # in time is returned as a TimeoutError, which the downstream handlers
@@ -634,14 +636,19 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
             ),
             # Real-time funding intelligence: NIH SBIR awards, SEC 8-K, preprint velocity.
             get_funding_intelligence(disease_name),
+            # Patent landscape: recent US filings + assignees (Google Patents, free).
+            get_patent_landscape(disease_name),
+            # Regulatory precedent: FDA-approved drugs for this indication (openFDA, free).
+            get_regulatory_precedent(disease_name),
             return_exceptions=True,
         )
         try:
             (ci, pub_data, strategic_intel, aggregated_sources, chapter_data,
-             pipeline_result, panel_result, funding_intel) = await asyncio.wait_for(gather_coro, timeout=20.0)
+             pipeline_result, panel_result, funding_intel,
+             patent_landscape, regulatory_precedent) = await asyncio.wait_for(gather_coro, timeout=20.0)
         except asyncio.TimeoutError:
             logger.warning("Data gather hit 20s timeout — continuing with partial results")
-            ci = pub_data = strategic_intel = aggregated_sources = chapter_data = pipeline_result = panel_result = funding_intel = Exception("timeout")
+            ci = pub_data = strategic_intel = aggregated_sources = chapter_data = pipeline_result = panel_result = funding_intel = patent_landscape = regulatory_precedent = Exception("timeout")
 
         # CRAG quality gating: inject MSRP pipeline results first (highest quality)
         # CRAG principle: evaluate retrieved data quality before injecting
@@ -893,6 +900,26 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
     except Exception as _fb_e:
         logger.warning("Fund benchmarks injection failed (non-fatal): %s", _fb_e)
 
+    # Patent landscape — IP whitespace / FTO signal (Google Patents, free)
+    patent_block = ""
+    try:
+        if not isinstance(patent_landscape, Exception) and patent_landscape:
+            patent_block = format_patent_landscape(patent_landscape, disease_name)
+            logger.info("Patent landscape: %d filings, signal=%s",
+                         patent_landscape.get("total_results", 0), patent_landscape.get("activity_signal", ""))
+    except Exception as _pl_e:
+        logger.warning("Patent landscape injection failed (non-fatal): %s", _pl_e)
+
+    # Regulatory precedent — FDA-approved drug landscape (openFDA, free)
+    regulatory_precedent_block = ""
+    try:
+        if not isinstance(regulatory_precedent, Exception) and regulatory_precedent:
+            regulatory_precedent_block = format_regulatory_precedent(regulatory_precedent, disease_name)
+            logger.info("Regulatory precedent: %d labels, %d approved drugs",
+                         regulatory_precedent.get("total_labels", 0), len(regulatory_precedent.get("approved_drugs", [])))
+    except Exception as _rp_e:
+        logger.warning("Regulatory precedent injection failed (non-fatal): %s", _rp_e)
+
     # KOL network — key opinion leaders by citation influence (Semantic Scholar, free API)
     kol_block = ""
     try:
@@ -944,6 +971,8 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
             + investor_block + "\n\n"
             + fund_bench_block + "\n\n"
             + funding_block + "\n\n"
+            + patent_block + "\n\n"
+            + regulatory_precedent_block + "\n\n"
             + kol_block + "\n\n"
             + researcher_ctx + intelligence_text + market_derivation_text
         ),
