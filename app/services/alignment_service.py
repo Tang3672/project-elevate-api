@@ -579,8 +579,11 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
         from app.services.chapter_data_service import get_all_chapter_data, format_all_chapter_data
         from app.services.expert_panel import run_expert_panel
 
-        (ci, pub_data, strategic_intel, aggregated_sources, chapter_data,
-         pipeline_result, panel_result) = await asyncio.gather(
+        # Hard 20-second cap on all data fetches. Anything that doesn't finish
+        # in time is returned as a TimeoutError, which the downstream handlers
+        # already treat identically to any other Exception (non-fatal, skip that source).
+        # This keeps total request time well under Railway's 60s proxy timeout.
+        gather_coro = asyncio.gather(
             get_full_competitive_intelligence(
                 condition=disease_name,
                 disease_keywords=disease_keywords,
@@ -610,16 +613,21 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
                 idea=idea,
                 max_total_sec=12.0,
             ),
-            # Expert panel: 3 parallel Haiku sub-analyses with different analytical lenses.
-            # Runs in parallel here → zero latency overhead vs. the existing 6 fetches.
+            # Expert panel: 3 parallel Haiku sub-analyses (different analytical lenses).
             run_expert_panel(
                 disease_name=disease_name,
                 idea=idea,
                 sub_expert_id=sub_expert_id or "drug_amr",
                 product_type=product_type or "drug",
             ),
-            return_exceptions=True
+            return_exceptions=True,
         )
+        try:
+            (ci, pub_data, strategic_intel, aggregated_sources, chapter_data,
+             pipeline_result, panel_result) = await asyncio.wait_for(gather_coro, timeout=20.0)
+        except asyncio.TimeoutError:
+            logger.warning("Data gather hit 20s timeout — continuing with partial results")
+            ci = pub_data = strategic_intel = aggregated_sources = chapter_data = pipeline_result = panel_result = Exception("timeout")
 
         # CRAG quality gating: inject MSRP pipeline results first (highest quality)
         # CRAG principle: evaluate retrieved data quality before injecting
