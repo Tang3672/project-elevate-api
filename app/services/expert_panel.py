@@ -120,7 +120,7 @@ async def _haiku_call(system: str, user: str) -> dict:
     api_key = os.getenv("ANTHROPIC_API_KEY", "")
     if not api_key:
         raise ValueError("ANTHROPIC_API_KEY not set")
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(timeout=12.0) as client:
         r = await client.post(
             ANTHROPIC_API_URL,
             headers={
