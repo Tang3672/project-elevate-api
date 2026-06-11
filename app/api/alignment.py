@@ -930,3 +930,80 @@ Return ONLY valid JSON with these exact fields:
     except Exception as e:
         logger.error("NCS generation failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Dataset Analysis (Edison Scientific play) ─────────────────────────────────
+
+class DatasetAnalysisRequest(BaseModel):
+    csv_data:          str  = Field(..., description="CSV text with column headers in first row")
+    disease_name:      str  = Field(..., min_length=3, max_length=200)
+    research_question: str  = Field(
+        default="What do these results mean for drug development?",
+        max_length=500,
+    )
+
+
+@router.post("/analyze-data")
+async def analyze_experimental_data(
+    payload: DatasetAnalysisRequest,
+    current_user=Depends(get_current_user),
+):
+    """
+    Upload experimental data (IC50 table, binding affinities, efficacy %, survival data,
+    gene expression, clinical PK data) and receive:
+
+      - Statistical summary (mean, median, IQR, range)
+      - Benchmark comparison: how your values compare to published standards
+        with specific PubMed citations (PMID-traceable, like Edison Scientific)
+      - Commercialization implication: what these results mean for TRL,
+        investor narrative, and regulatory pathway
+
+    This is the mini-Edison play: your experimental data contextualized against
+    published benchmarks, with every comparison traceable to a specific paper.
+
+    CSV format: first row = column headers, subsequent rows = data.
+    Example:
+      Compound,IC50_nM,Selectivity_Index,Cytotox_CC50_uM
+      Compound_A,45.2,28.4,189.5
+      Compound_B,120.8,12.1,98.2
+    """
+    from app.services.dataset_analysis_service import analyze_dataset
+
+    if len(payload.csv_data) > 50_000:
+        raise HTTPException(status_code=400, detail="CSV too large — max 50,000 characters")
+
+    try:
+        result = await analyze_dataset(
+            csv_text         = payload.csv_data,
+            disease_name     = payload.disease_name,
+            research_question = payload.research_question,
+        )
+        return {
+            "disease_name":                   payload.disease_name,
+            "data_type_identified":           result.inferred_data_type,
+            "key_finding":                    result.key_finding,
+            "benchmark_context":              result.benchmark_context,
+            "commercialization_implication":  result.commercialization_implication,
+            "supporting_pmids":               result.supporting_pmids,
+            "column_stats": [
+                {
+                    "name":    c.name,
+                    "n":       c.n,
+                    "mean":    round(c.mean, 4) if c.mean is not None else None,
+                    "median":  round(c.median, 4) if c.median is not None else None,
+                    "std":     round(c.std, 4) if c.std is not None else None,
+                    "min":     round(c.min, 4) if c.min is not None else None,
+                    "max":     round(c.max, 4) if c.max is not None else None,
+                    "p25":     round(c.p25, 4) if c.p25 is not None else None,
+                    "p75":     round(c.p75, 4) if c.p75 is not None else None,
+                }
+                for c in result.column_stats
+            ],
+            "formatted_analysis": result.formatted,
+            "generated_at": datetime.utcnow().isoformat() + "Z",
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error("Dataset analysis failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
