@@ -313,9 +313,10 @@ def _format_trl(r: TRLResult) -> str:
     lines += [
         f"  Estimated cost to next level: {r.cost_to_next}",
         "",
-        f"  SBIR Phase I ready: {'✓ Yes' if r.sbir_phase1_ready else '✗ Not yet — need TRL 2+'}",
-        f"  SBIR Phase II ready: {'✓ Yes' if r.sbir_phase2_ready else '✗ Not yet — need TRL 4+'}",
-        + (f"\n  SBIR gap: {r.sbir_gap}" if r.sbir_gap and not r.sbir_phase2_ready else ""),
+        f"  SBIR Phase I ready: {'Yes' if r.sbir_phase1_ready else 'Not yet — need TRL 2+'}",
+        f"  SBIR Phase II ready: {'Yes' if r.sbir_phase2_ready else 'Not yet — need TRL 4+'}",
         f"  Investor stage: {r.investor_readiness}",
     ]
-    return "\n".join(str(l) for l in lines)
+    if r.sbir_gap and not r.sbir_phase2_ready:
+        lines.append(f"  SBIR gap: {r.sbir_gap}")
+    return "\n".join(lines)
