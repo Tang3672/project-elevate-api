@@ -589,6 +589,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
         from app.services.chapter_data_service import get_all_chapter_data, format_all_chapter_data
         from app.services.expert_panel import run_expert_panel
         from app.services.literature_synthesis import synthesize_literature
+        from app.services.funding_intelligence_service import get_funding_intelligence, format_funding_intelligence
 
         # Hard 20-second cap on all data fetches. Anything that doesn't finish
         # in time is returned as a TimeoutError, which the downstream handlers
@@ -631,14 +632,16 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
                 sub_expert_id=sub_expert_id or "drug_amr",
                 product_type=product_type or "drug",
             ),
+            # Real-time funding intelligence: NIH SBIR awards, SEC 8-K, preprint velocity.
+            get_funding_intelligence(disease_name),
             return_exceptions=True,
         )
         try:
             (ci, pub_data, strategic_intel, aggregated_sources, chapter_data,
-             pipeline_result, panel_result) = await asyncio.wait_for(gather_coro, timeout=20.0)
+             pipeline_result, panel_result, funding_intel) = await asyncio.wait_for(gather_coro, timeout=20.0)
         except asyncio.TimeoutError:
             logger.warning("Data gather hit 20s timeout — continuing with partial results")
-            ci = pub_data = strategic_intel = aggregated_sources = chapter_data = pipeline_result = panel_result = Exception("timeout")
+            ci = pub_data = strategic_intel = aggregated_sources = chapter_data = pipeline_result = panel_result = funding_intel = Exception("timeout")
 
         # CRAG quality gating: inject MSRP pipeline results first (highest quality)
         # CRAG principle: evaluate retrieved data quality before injecting
@@ -870,6 +873,45 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
     except Exception as _inv_e:
         logger.warning("Investor matching failed (non-fatal): %s", _inv_e)
 
+    # Funding intelligence — real-time competitive funding signals
+    funding_block = ""
+    try:
+        if not isinstance(funding_intel, Exception) and funding_intel:
+            funding_block = format_funding_intelligence(funding_intel, disease_name)
+            sbir_count = len(funding_intel.get("sbir_awards", []))
+            entrant_count = len(funding_intel.get("new_entrants", []))
+            logger.info("Funding intel: %d SBIR awards, %d new trial entrants", sbir_count, entrant_count)
+    except Exception as _fi_e:
+        logger.warning("Funding intelligence injection failed (non-fatal): %s", _fi_e)
+
+    # VC fund benchmarks — what investors expect (published Cambridge Associates / NVCA data)
+    fund_bench_block = ""
+    try:
+        from app.services.fund_benchmarks import format_benchmarks_for_prompt
+        _trl_for_bench = trl_result.trl_level if trl_block else 3
+        fund_bench_block = format_benchmarks_for_prompt(_trl_for_bench)
+    except Exception as _fb_e:
+        logger.warning("Fund benchmarks injection failed (non-fatal): %s", _fb_e)
+
+    # KOL network — key opinion leaders by citation influence (Semantic Scholar, free API)
+    kol_block = ""
+    try:
+        from app.ingestion.connectors.semantic_scholar import get_kol_network, get_disease_literature_signal
+        kols = get_kol_network(disease_name, limit=6)
+        lit_signal = get_disease_literature_signal(disease_name)
+        if kols:
+            kol_lines = [
+                "KEY OPINION LEADERS (by citation influence — Semantic Scholar):",
+                f"Research momentum: {lit_signal.get('research_momentum', 'UNKNOWN')} "
+                f"({lit_signal.get('total_citations_top5', 0):,} citations in top 5 papers)",
+            ]
+            for k in kols[:5]:
+                kol_lines.append(f"  • {k['author']} — {k['paper_count']} papers, {k['citation_total']:,} citations")
+            kol_block = "\n".join(kol_lines)
+            logger.info("KOL network: %d KOLs for '%s'", len(kols), disease_name)
+    except Exception as _kol_e:
+        logger.warning("KOL network injection failed (non-fatal): %s", _kol_e)
+
     # Expert panel: inject structured pre-analysis as highest-priority context block
     panel_block = ""
     try:
@@ -891,8 +933,8 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
         logger.warning("Expert panel injection failed (non-fatal): %s", _pe)
 
     # Build final context. Priority order (highest first):
-    #   world model (prior knowledge) → TRL → expert panel → investor match →
-    #   literature synthesis (in researcher_ctx) → CI → market sizing
+    #   world model → TRL → expert panel → investor match → fund benchmarks →
+    #   funding intel → KOL → literature synthesis → CI → market sizing
     context = _build_expert_context(
         idea, expert, demand_results, hospital_matches_raw,
         disease_knowledge=(
@@ -900,6 +942,9 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
             + trl_block + "\n\n"
             + panel_block + "\n\n"
             + investor_block + "\n\n"
+            + fund_bench_block + "\n\n"
+            + funding_block + "\n\n"
+            + kol_block + "\n\n"
             + researcher_ctx + intelligence_text + market_derivation_text
         ),
         pi_memory=pi_memory_context,
