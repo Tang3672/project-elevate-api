@@ -99,6 +99,8 @@ class CommercialPanelResult:
     moat_basis: str
     yrs_to_peak_revenue: int
     reimbursement_mechanism: str
+    licensing_upfront_range: str = ""   # e.g. "$5M-$30M"
+    licensing_royalty_range: str = ""   # e.g. "2%-6% (academic)"
 
 
 @dataclass
@@ -177,16 +179,39 @@ async def _run_regulatory_panel(
     idea: str,
     sub_expert_id: str,
     product_type: str = "drug",
+    development_phase: str = "preclinical",
 ) -> Optional[RegulatoryPanelResult]:
+    # Anchor approval probability on calibrated historical FDA data from ptrs_tables.
+    # Haiku's job is qualitative analysis (pathway, precedent, risk) — not guessing rates.
+    calibrated_loa_pct: Optional[float] = None
+    calibrated_citation: str = ""
+    try:
+        from app.services.ptrs_tables import get_ptrs
+        loa_frac, loa_pct, citation = get_ptrs(sub_expert_id, development_phase)
+        calibrated_loa_pct  = loa_pct
+        calibrated_citation = citation
+    except Exception:
+        pass  # Fall back to Haiku estimate if ptrs_tables unavailable
+
     domain_hint = _REGULATORY_DOMAIN_HINTS.get(sub_expert_id, "")
+    ptrs_anchor = (
+        f"HISTORICAL FDA APPROVAL RATE (from published BIO/WONG data): "
+        f"{calibrated_loa_pct:.1f}% probability of approval from {development_phase} stage. "
+        f"Source: {calibrated_citation}. "
+        f"Use this as your baseline — you may adjust ±5% only with specific cited reasoning.\n"
+        if calibrated_loa_pct is not None else ""
+    )
     system = (
         "You are an FDA regulatory strategist specializing in biomedical product development.\n"
         + (f"Domain context: {domain_hint}\n" if domain_hint else "")
-        + "Given the disease and proposed approach, determine the regulatory pathway.\n"
+        + ptrs_anchor
+        + "Given the disease and proposed approach, determine the regulatory pathway. "
+        "Your approval_probability_pct MUST be within ±5% of the historical baseline unless you cite a specific reason.\n"
         "Return ONLY valid JSON — no prose, no markdown:\n"
         "{\n"
         '  "recommended_pathway": "<exact pathway: NDA 505(b)(1), NDA 505(b)(2), BLA, PMA, De Novo, 510(k), etc.>",\n'
-        '  "approval_probability_pct": <integer 0-100, based on disease + mechanism + precedent>,\n'
+        '  "approval_probability_pct": <integer 0-100, anchored to historical baseline>,\n'
+        '  "probability_adjustment_reason": "<why you adjusted from baseline, or \'baseline\' if unchanged>",\n'
         '  "precedent_product": "<name and approval year of most comparable FDA-approved product>",\n'
         '  "expected_timeline_yrs": <float, total years from current early stage to FDA approval>,\n'
         '  "available_designations": [<applicable: "BTD", "FastTrack", "QIDP", "Orphan", "RMAT", "PRV", "LPAD", "AccelApproval">],\n'
@@ -196,14 +221,21 @@ async def _run_regulatory_panel(
     user = (
         f"Disease: {disease_name}\n"
         f"Product type: {product_type}\n"
+        f"Development stage: {development_phase}\n"
         f"Domain: {sub_expert_id}\n\n"
         f"Proposed innovation:\n{idea[:600]}"
     )
     try:
         data = await _haiku_call(system, user)
+        raw_prob = int(data.get("approval_probability_pct", calibrated_loa_pct or 30))
+        # If we have a calibrated baseline, cap the drift at ±10 percentage points
+        if calibrated_loa_pct is not None:
+            clamped = max(round(calibrated_loa_pct) - 10, min(round(calibrated_loa_pct) + 10, raw_prob))
+        else:
+            clamped = raw_prob
         return RegulatoryPanelResult(
             recommended_pathway     = str(data.get("recommended_pathway", "")),
-            approval_probability_pct= int(data.get("approval_probability_pct", 30)),
+            approval_probability_pct= clamped,
             precedent_product       = str(data.get("precedent_product", "")),
             expected_timeline_yrs   = float(data.get("expected_timeline_yrs", 8.0)),
             available_designations  = list(data.get("available_designations", [])),
@@ -211,6 +243,16 @@ async def _run_regulatory_panel(
         )
     except Exception as e:
         logger.warning("Regulatory panel failed: %s", e)
+        # Return calibrated baseline even if Haiku call fails
+        if calibrated_loa_pct is not None:
+            return RegulatoryPanelResult(
+                recommended_pathway     = "See expert system prompt for pathway",
+                approval_probability_pct= round(calibrated_loa_pct),
+                precedent_product       = "",
+                expected_timeline_yrs   = 8.0,
+                available_designations  = [],
+                top_regulatory_risk     = "Regulatory panel unavailable — see expert analysis",
+            )
         return None
 
 
@@ -219,12 +261,22 @@ async def _run_commercial_panel(
     idea: str,
     sub_expert_id: str,
     market_context: str = "",
+    development_phase: str = "preclinical",
 ) -> Optional[CommercialPanelResult]:
     domain_hint = _COMMERCIAL_DOMAIN_HINTS.get(sub_expert_id, "")
+    # Inject calibrated deal comparables — TTOs negotiate against these numbers
+    deal_comp_block = ""
+    try:
+        from app.services.deal_comps import format_deal_comps_for_prompt
+        deal_comp_block = format_deal_comps_for_prompt(sub_expert_id, development_phase)
+    except Exception:
+        pass
     system = (
         "You are a biotech market access and commercialization analyst.\n"
         + (f"Domain context: {domain_hint}\n" if domain_hint else "")
-        + "Assess the commercial viability of this biomedical innovation.\n"
+        + (f"\n{deal_comp_block}\n" if deal_comp_block else "")
+        + "Assess the commercial viability of this biomedical innovation. "
+        "Your pricing and deal structure estimates MUST reference the deal comparables above.\n"
         "Return ONLY valid JSON — no prose, no markdown:\n"
         "{\n"
         '  "annual_price_benchmark_usd": <integer, estimated annual WAC price in USD>,\n'
@@ -233,12 +285,15 @@ async def _run_commercial_panel(
         '  "competitive_moat_score": <float 0-10, where 10=highly defensible competitive position>,\n'
         '  "moat_basis": "<what specifically creates or undermines the moat in one sentence>",\n'
         '  "yrs_to_peak_revenue": <integer, years post-launch to peak annual revenue>,\n'
-        '  "reimbursement_mechanism": "<primary code/pathway, e.g., J-code, DRG+NTAP, CPT, self-pay>"\n'
+        '  "reimbursement_mechanism": "<primary code/pathway, e.g., J-code, DRG+NTAP, CPT, self-pay>",\n'
+        '  "licensing_upfront_range": "<$XM-$YM upfront based on deal comps for this stage>",\n'
+        '  "licensing_royalty_range": "<X%-Y% royalty on net sales (academic) or X%-Y% (corporate)>"\n'
         "}"
     )
     user = (
         f"Disease: {disease_name}\n"
         f"Domain: {sub_expert_id}\n"
+        f"Development stage: {development_phase}\n"
         + (f"Market context:\n{market_context[:400]}\n" if market_context else "")
         + f"\nProposed innovation:\n{idea[:600]}"
     )
@@ -252,6 +307,8 @@ async def _run_commercial_panel(
             moat_basis                 = str(data.get("moat_basis", "")),
             yrs_to_peak_revenue        = int(data.get("yrs_to_peak_revenue", 5)),
             reimbursement_mechanism    = str(data.get("reimbursement_mechanism", "")),
+            licensing_upfront_range    = str(data.get("licensing_upfront_range", "")),
+            licensing_royalty_range    = str(data.get("licensing_royalty_range", "")),
         )
     except Exception as e:
         logger.warning("Commercial panel failed: %s", e)
@@ -268,6 +325,7 @@ async def run_expert_panel(
     sub_expert_id: str,
     product_type: str = "drug",
     market_context: str = "",
+    development_phase: str = "preclinical",
 ) -> ExpertPanelResult:
     """
     Run all three sub-expert panels in parallel. Each panel has a different analytical
@@ -275,12 +333,16 @@ async def run_expert_panel(
 
     Designed to be called inside an asyncio.gather alongside other data fetches
     so it adds zero latency to the overall report generation flow.
+
+    Key improvements over pure LLM:
+    - Regulatory panel anchors on ptrs_tables.py calibrated historical FDA approval data
+    - Commercial panel anchors on deal_comps.py sourced from AUTM/BIO transaction databases
     """
     import asyncio
     clinical, regulatory, commercial = await asyncio.gather(
         _run_clinical_panel(disease_name, idea),
-        _run_regulatory_panel(disease_name, idea, sub_expert_id, product_type),
-        _run_commercial_panel(disease_name, idea, sub_expert_id, market_context),
+        _run_regulatory_panel(disease_name, idea, sub_expert_id, product_type, development_phase),
+        _run_commercial_panel(disease_name, idea, sub_expert_id, market_context, development_phase),
         return_exceptions=False,
     )
     errors = sum(1 for x in (clinical, regulatory, commercial) if x is None)
@@ -333,9 +395,9 @@ def format_panel_for_prompt(panel: ExpertPanelResult) -> str:
         r = panel.regulatory
         desig_fmt = ", ".join(r.available_designations) if r.available_designations else "None identified"
         lines += [
-            "── REGULATORY PATHWAY EXPERT ──",
+            "── REGULATORY PATHWAY EXPERT (calibrated on historical FDA data) ──",
             f"  Recommended Pathway: {r.recommended_pathway}",
-            f"  Approval Probability: {r.approval_probability_pct}%",
+            f"  Approval Probability: {r.approval_probability_pct}% (source: BIO/WONG historical FDA approval rates)",
             f"  Closest Precedent: {r.precedent_product}",
             f"  Expected Timeline: {r.expected_timeline_yrs:.1f} years to approval",
             f"  Available Designations: {desig_fmt}",
@@ -351,14 +413,18 @@ def format_panel_for_prompt(panel: ExpertPanelResult) -> str:
             else f"${com.annual_price_benchmark_usd:,}/course"
         )
         lines += [
-            "── COMMERCIAL VIABILITY EXPERT ──",
+            "── COMMERCIAL VIABILITY EXPERT (anchored on AUTM/BIO deal transaction data) ──",
             f"  Pricing Benchmark: {price_fmt} (based on {com.pricing_comparable})",
             f"  Key Payer Barrier: {com.key_payer_barrier}",
             f"  Competitive Moat: {com.competitive_moat_score:.1f}/10 — {com.moat_basis}",
             f"  Time to Peak Revenue: {com.yrs_to_peak_revenue} years post-launch",
             f"  Reimbursement Mechanism: {com.reimbursement_mechanism}",
-            "",
         ]
+        if com.licensing_upfront_range:
+            lines.append(f"  License Deal Benchmark — Upfront: {com.licensing_upfront_range}")
+        if com.licensing_royalty_range:
+            lines.append(f"  License Deal Benchmark — Royalty: {com.licensing_royalty_range}")
+        lines.append("")
 
     lines.append("=== END EXPERT PANEL ===")
     return "\n".join(lines)

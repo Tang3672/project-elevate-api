@@ -356,6 +356,7 @@ async def get_market_sizing_derivation(body: dict):
 @router.get("/discovery/opportunities")
 async def get_opportunities(
     top_n: int = 100,
+    offset: int = 0,
     search: str = "",
     current_user = Depends(get_current_user),
 ):
@@ -424,28 +425,28 @@ async def get_opportunities(
                     }
 
                 elif extended_total > 100:
-                    # Merge curated (live-scored, full detail) + DB-extended diseases
-                    needed = max(0, top_n - len(curated_opps))
+                    # Merge curated + DB diseases; support offset pagination
+                    needed = max(0, top_n + offset - len(curated_opps))
                     ext_rows = await conn.fetch("""
                         SELECT * FROM disease_scored
                         WHERE data_source != 'universe_builder'
                         ORDER BY COALESCE(sam_usd, 0) DESC NULLS LAST,
                                  score DESC NULLS LAST
                         LIMIT $1
-                    """, needed)
+                    """, needed + 50)  # fetch a few extra for sort stability
                     ext_opps = [_row_to_opp(row, 0) for row in ext_rows]
 
                     all_opps = curated_opps + ext_opps
-                    # Sort by SAM for live-scored; fall back to score for DB-only
                     all_opps.sort(
                         key=lambda x: x.get("sam_usd") or (x.get("score", 0) * 1_000_000),
                         reverse=True,
                     )
-                    for i, o in enumerate(all_opps[:top_n], 1):
+                    page = all_opps[offset : offset + top_n]
+                    for i, o in enumerate(page, offset + 1):
                         o["rank"] = i
                     universe = len(curated_opps) + extended_total
                     return {
-                        "opportunities": all_opps[:top_n],
+                        "opportunities": page,
                         "generated_at":  datetime.utcnow().isoformat(),
                         "algorithm":     f"Expert {len(curated_opps)} curated + {extended_total:,} extended diseases",
                         "total_scored":  len(all_opps),
@@ -461,10 +462,11 @@ async def get_opportunities(
         total_known = len(get_all_diseases_for_batch_scoring())
     except Exception:
         total_known = curated_size
-    for i, o in enumerate(curated_opps[:top_n], 1):
+    page = curated_opps[offset : offset + top_n]
+    for i, o in enumerate(page, offset + 1):
         o["rank"] = i
     return {
-        "opportunities": curated_opps[:top_n],
+        "opportunities": page,
         "generated_at":  datetime.utcnow().isoformat(),
         "algorithm":     f"Expert {curated_size} curated diseases",
         "total_scored":  len(curated_opps[:top_n]),
@@ -837,4 +839,94 @@ Return ONLY a JSON array of 6 objects. No other text.
             return {"questions": questions[:8], "pathway": pathway}
         return {"questions": [], "pathway": pathway}
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Non-Confidential Summary (NCS) generator ─────────────────────────────────
+
+class NCSRequest(BaseModel):
+    idea: str = Field(..., min_length=30, max_length=2000)
+    product_type: str = Field(default="other")
+    disease_name: Optional[str] = Field(default=None)
+    development_stage: str = Field(default="preclinical",
+        description="preclinical | phase1 | phase2 | phase3")
+    institution: Optional[str] = Field(default=None,
+        description="University/institution name for the NCS header")
+    contact_name: Optional[str] = Field(default=None)
+    contact_email: Optional[str] = Field(default=None)
+
+
+@router.post("/ncs")
+async def generate_ncs(payload: NCSRequest, current_user=Depends(get_current_user)):
+    """
+    Generate a Non-Confidential Summary (NCS) — the one-page document TTOs send
+    to potential industry licensees.
+
+    TTOs spend 3-5 hours writing each NCS manually. This endpoint auto-generates
+    a complete, professionally formatted NCS from the PI's innovation description.
+
+    The NCS includes: technology summary, applications, competitive advantages,
+    development status (TRL), IP status, collaboration model, and contact information.
+    """
+    import anthropic, json as _json
+    from app.core.config import settings
+
+    # TRL assessment for development stage section
+    trl_text = ""
+    try:
+        from app.services.trl_service import assess_trl
+        trl = assess_trl(idea=payload.idea, development_phase=payload.development_stage)
+        trl_text = f"TRL {trl.trl_level}/9 — {trl.trl_label}. {trl.trl_description}"
+    except Exception:
+        trl_text = f"Development stage: {payload.development_stage}"
+
+    system = """You are a technology transfer professional at a leading research university.
+Write a Non-Confidential Summary (NCS) exactly as TTOs write them to attract industry licensees.
+The NCS must be concise, commercially focused, and use industry language — not academic language.
+Return ONLY valid JSON with these exact fields:
+{
+  "title": "<technology title — 8-12 words, commercially appealing>",
+  "technology_summary": "<2-3 sentences: what it is, how it works, what problem it solves — NO jargon>",
+  "unmet_need": "<1-2 sentences: why existing solutions are inadequate, quantify if possible>",
+  "applications": ["<primary application>", "<secondary application>", "<tertiary application>"],
+  "competitive_advantages": ["<advantage 1 — be specific>", "<advantage 2>", "<advantage 3>"],
+  "development_status": "<TRL level + what key experiments have been done>",
+  "ip_status": "<patent filed/issued/pending + brief claim scope — do NOT reveal confidential details>",
+  "collaboration_sought": "<type of partner: licensee, co-developer, sponsored research, option agreement>",
+  "tagline": "<one sentence value proposition — the elevator pitch>"
+}"""
+
+    user = (
+        f"Innovation description:\n{payload.idea}\n\n"
+        f"Product type: {payload.product_type}\n"
+        f"Disease/indication: {payload.disease_name or 'not specified'}\n"
+        f"Development status: {trl_text}\n"
+        f"Institution: {payload.institution or 'research university'}\n"
+    )
+
+    try:
+        client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+        msg = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=1200,
+            system=system,
+            messages=[{"role": "user", "content": user}],
+        )
+        raw = msg.content[0].text.strip()
+        if raw.startswith("```"):
+            parts = raw.split("```")
+            raw = parts[1] if len(parts) > 1 else raw
+            if raw.startswith("json"):
+                raw = raw[4:]
+        data = _json.loads(raw)
+
+        # Add metadata
+        data["development_status_trl"] = trl_text
+        data["institution"]   = payload.institution or ""
+        data["contact_name"]  = payload.contact_name or ""
+        data["contact_email"] = payload.contact_email or ""
+        data["generated_at"]  = datetime.utcnow().isoformat() + "Z"
+        return data
+    except Exception as e:
+        logger.error("NCS generation failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
