@@ -53,6 +53,8 @@ async def _init_background():
         await init_watchlist_tables()
         from app.services.pi_memory_service import init_pi_memory_table
         await init_pi_memory_table()
+        from app.services.research_world_model import init_world_model_table
+        await init_world_model_table()
         from app.db.schema_ontology import init_ontology_tables
         await init_ontology_tables()
         from app.db.schema_priors import init_priors_tables

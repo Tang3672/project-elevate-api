@@ -494,6 +494,16 @@ Do NOT include commercial pricing, sales channels, or go-to-market strategy.""",
     expert_critic_rules  = getattr(expert, "critic_rules", "")
     domain_static        = getattr(expert, "knowledge_base", "")
 
+    # Load research world model — prior knowledge from previous analyses of this disease.
+    # Edison Scientific's key differentiator: the system accumulates structured knowledge
+    # across research runs rather than starting cold every time.
+    world_model_ctx = ""
+    try:
+        from app.services.research_world_model import load_world_model
+        world_model_ctx = await load_world_model(disease_name)
+    except Exception as _wm_e:
+        logger.debug("World model load skipped: %s", _wm_e)
+
     researcher_ctx = ""
     critic_ctx     = ""
     try:
@@ -578,6 +588,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
         from app.services.retrieval_pipeline import run_retrieval_pipeline
         from app.services.chapter_data_service import get_all_chapter_data, format_all_chapter_data
         from app.services.expert_panel import run_expert_panel
+        from app.services.literature_synthesis import synthesize_literature
 
         # Hard 20-second cap on all data fetches. Anything that doesn't finish
         # in time is returned as a TimeoutError, which the downstream handlers
@@ -710,6 +721,22 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
             researcher_ctx = researcher_ctx + pub_context
             logger.info(f"✅ PubMed: {pub_data.get('total_found', 0)} publications loaded for {disease_name}")
 
+            # Deep literature synthesis — PMID-traceable findings, open questions, white space.
+            # Runs after pub_data is available, before Opus call. Mini-Edison pattern:
+            # every proven finding is anchored to a specific paper.
+            try:
+                lit_synthesis = await synthesize_literature(
+                    disease_name=disease_name,
+                    idea=idea,
+                    pub_data=pub_data,
+                )
+                if lit_synthesis and lit_synthesis.formatted:
+                    researcher_ctx = lit_synthesis.formatted + "\n\n" + researcher_ctx
+                    logger.info("Literature synthesis: %d proven findings, %d open questions",
+                                len(lit_synthesis.proven_findings), len(lit_synthesis.open_questions))
+            except Exception as _ls_e:
+                logger.warning("Literature synthesis failed (non-fatal): %s", _ls_e)
+
     except Exception as e:
         logger.warning(f"Competitive intelligence fetch failed: {e}")
         _competitive_intelligence = {}
@@ -810,19 +837,38 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
     except Exception as e_deriv:
         logger.warning("Market sizing derivation failed (non-fatal): %s", e_deriv)
 
-    # TRL assessment — stage-of-development scoring before main Opus call
+    # TRL assessment — stage-of-development scoring before main Opus call.
+    # development_phase comes from the opportunity phase field, not product_type.
     trl_block = ""
     try:
         from app.services.trl_service import assess_trl
+        # Map product_type → development_phase for TRL estimation.
+        # product_type is the modality (drug_small_molecule, biologic, etc.).
+        # The actual dev phase should come from the opportunity record; fall back to "preclinical".
+        _dev_phase = "preclinical"  # conservative default — keyword matching in assess_trl refines this
         trl_result = assess_trl(
             idea=idea,
-            development_phase=product_type or "preclinical",
+            development_phase=_dev_phase,
             sub_expert_id=sub_expert_id or "drug_amr",
         )
         trl_block = trl_result.formatted
         logger.info("TRL assessment: TRL %d — %s", trl_result.trl_level, trl_result.trl_label)
     except Exception as _trl_e:
         logger.warning("TRL assessment failed (non-fatal): %s", _trl_e)
+
+    # Investor matching — who to call, what to say, grounded in TA + TRL.
+    investor_block = ""
+    try:
+        from app.services.investor_matcher import format_investors_for_prompt
+        _trl_level = trl_result.trl_level if trl_block else 3
+        investor_block = format_investors_for_prompt(
+            sub_expert_id=sub_expert_id or "drug_amr",
+            trl_level=_trl_level,
+            is_academic_spinout=True,
+        )
+        logger.info("Investor matching: injected for sub_expert=%s TRL=%d", sub_expert_id, _trl_level)
+    except Exception as _inv_e:
+        logger.warning("Investor matching failed (non-fatal): %s", _inv_e)
 
     # Expert panel: inject structured pre-analysis as highest-priority context block
     panel_block = ""
@@ -844,11 +890,18 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
     except Exception as _pe:
         logger.warning("Expert panel injection failed (non-fatal): %s", _pe)
 
-    # Build final context with demand signals + hospital matches + all intelligence.
-    # TRL + panel prepended — Opus treats earlier context as higher priority.
+    # Build final context. Priority order (highest first):
+    #   world model (prior knowledge) → TRL → expert panel → investor match →
+    #   literature synthesis (in researcher_ctx) → CI → market sizing
     context = _build_expert_context(
         idea, expert, demand_results, hospital_matches_raw,
-        disease_knowledge=trl_block + "\n\n" + panel_block + "\n\n" + researcher_ctx + intelligence_text + market_derivation_text,
+        disease_knowledge=(
+            world_model_ctx + "\n\n"
+            + trl_block + "\n\n"
+            + panel_block + "\n\n"
+            + investor_block + "\n\n"
+            + researcher_ctx + intelligence_text + market_derivation_text
+        ),
         pi_memory=pi_memory_context,
     )
 
@@ -881,11 +934,35 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
 
     system = expert.system_prompt + "\n\n" + EXPERT_JSON_SCHEMA + reporting_instructions
 
-    raw  = await _call_claude(context, system, max_tokens=8192)
+    raw  = await _call_claude(context, system, max_tokens=6144)
     data = _clean_json(raw)
 
     # Parse into PIReport
-    return _parse_expert_response(data, idea, product_type, expert, demand_results, hospital_matches_raw, total_signals)
+    report = _parse_expert_response(data, idea, product_type, expert, demand_results, hospital_matches_raw, total_signals)
+
+    # Update research world model asynchronously — fire and forget, non-blocking.
+    # Next report for this disease will have richer prior context.
+    try:
+        import asyncio as _aio
+        _ci_for_wm = _competitive_intelligence if isinstance(_competitive_intelligence, dict) else {}
+        _pub_for_wm = pub_data if not isinstance(pub_data, Exception) else {}
+        _aio.create_task(
+            _update_world_model_bg(disease_name, report, _pub_for_wm, _ci_for_wm)
+        )
+    except Exception as _wm_upd_e:
+        logger.debug("World model update scheduling failed (non-fatal): %s", _wm_upd_e)
+
+    return report
+
+
+async def _update_world_model_bg(disease_name: str, report, pub_data: dict, ci_data: dict):
+    """Background task: update world model after report completes."""
+    try:
+        from app.services.research_world_model import update_world_model
+        report_dict = report.model_dump(mode="json") if hasattr(report, "model_dump") else {}
+        await update_world_model(disease_name, report_dict, pub_data, ci_data)
+    except Exception as e:
+        logger.debug("World model background update failed: %s", e)
 
 
 def _build_expert_context(idea, expert, demand_results, hospital_matches, disease_knowledge="", pi_memory=""):
