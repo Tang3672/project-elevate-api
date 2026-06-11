@@ -802,6 +802,20 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
     except Exception as e_deriv:
         logger.warning("Market sizing derivation failed (non-fatal): %s", e_deriv)
 
+    # TRL assessment — stage-of-development scoring before main Opus call
+    trl_block = ""
+    try:
+        from app.services.trl_service import assess_trl
+        trl_result = assess_trl(
+            idea=idea,
+            development_phase=product_type or "preclinical",
+            sub_expert_id=sub_expert_id or "drug_amr",
+        )
+        trl_block = trl_result.formatted
+        logger.info("TRL assessment: TRL %d — %s", trl_result.trl_level, trl_result.trl_label)
+    except Exception as _trl_e:
+        logger.warning("TRL assessment failed (non-fatal): %s", _trl_e)
+
     # Expert panel: inject structured pre-analysis as highest-priority context block
     panel_block = ""
     try:
@@ -823,10 +837,10 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
         logger.warning("Expert panel injection failed (non-fatal): %s", _pe)
 
     # Build final context with demand signals + hospital matches + all intelligence.
-    # Panel block prepended so it appears first — Opus treats earlier context as higher priority.
+    # TRL + panel prepended — Opus treats earlier context as higher priority.
     context = _build_expert_context(
         idea, expert, demand_results, hospital_matches_raw,
-        disease_knowledge=panel_block + "\n\n" + researcher_ctx + intelligence_text + market_derivation_text,
+        disease_knowledge=trl_block + "\n\n" + panel_block + "\n\n" + researcher_ctx + intelligence_text + market_derivation_text,
         pi_memory=pi_memory_context,
     )
 
