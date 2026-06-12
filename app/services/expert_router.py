@@ -137,23 +137,18 @@ async def classify_with_claude(idea: str) -> tuple[str, float, str]:
                 if text.startswith("json"):
                     text = text[4:]
             data = json.loads(text.strip())
-            domain     = data.get("domain", "drug_amr")
+            domain     = data.get("domain", _DEFAULT_DOMAIN)
             confidence = float(data.get("confidence", 0.7))
             reasoning  = data.get("reasoning", "")
-            # Map granular router domain → expert profile domain
-            if domain in _ROUTER_TO_EXPERT:
-                domain = _ROUTER_TO_EXPERT[domain]
-            elif domain not in EXPERT_REGISTRY:
-                domain = _ROUTER_TO_EXPERT.get(_keyword_classify(idea), "drug_amr")
-                if domain not in EXPERT_REGISTRY:
-                    domain = "drug_amr"
+            # Map granular router domain → expert profile domain, then coerce to a
+            # guaranteed-valid top-level EXPERT_REGISTRY key.
+            domain = _ROUTER_TO_EXPERT.get(domain, domain)
+            domain = _coerce_to_registry(domain)
             return domain, confidence, reasoning
     except Exception as e:
         logger.warning(f"Claude router failed: {e} — falling back to keyword classification")
         raw = _keyword_classify(idea)
-        domain = _ROUTER_TO_EXPERT.get(raw, raw)
-        if domain not in EXPERT_REGISTRY:
-            domain = "drug_amr"
+        domain = _coerce_to_registry(_ROUTER_TO_EXPERT.get(raw, raw))
         return domain, 0.6, "Classified by keyword matching (Claude router unavailable)"
 
 
@@ -251,6 +246,34 @@ _ROUTER_TO_EXPERT: dict[str, str] = {
 }
 
 
+# Default top-level expert when nothing else resolves (must be a valid EXPERT_REGISTRY key).
+_DEFAULT_DOMAIN = "antibiotic_amr"
+
+# Coarse keyword → one of the 6 top-level EXPERT_REGISTRY domains. Used to coerce
+# granular router/sub-expert ids (e.g. "drug_amr", "biologic_oncology") — which are
+# NOT registry keys — down to a valid top-level expert, so the registry lookup in
+# route() can never KeyError.
+_TOPLEVEL_HINTS = [
+    ("antibiotic_amr",    ("amr", "antibiotic", "antimicrobial", "infect", "antiviral", "vaccine", "sepsis")),
+    ("oncology",          ("oncolog", "cancer", "tumor", "carcinom", "leukemia", "lymphoma", "car-t", "car_t")),
+    ("cardiology",        ("cardio", "cardiac", "heart", "vascular", "hematolog", "blood")),
+    ("neurology_cns",     ("cns", "neuro", "brain", "alzheimer", "parkinson", "epilep", "psych_cns")),
+    ("metabolic_diabetes",("metabolic", "diabet", "obesity", "glp", "nash", "mash", "lipid", "renal", "device_metabolic")),
+    ("mental_health",     ("mental", "depress", "psych", "anxiety", "bipolar", "schizo", "addiction")),
+]
+
+
+def _coerce_to_registry(domain: str) -> str:
+    """Map ANY classifier output to a valid EXPERT_REGISTRY key. Never raises."""
+    if domain in EXPERT_REGISTRY:
+        return domain
+    d = (domain or "").lower()
+    for top, hints in _TOPLEVEL_HINTS:
+        if any(h in d for h in hints):
+            return top
+    return _DEFAULT_DOMAIN
+
+
 def _keyword_classify(idea: str) -> str:
     """Fast keyword-based fallback classifier using granular subcategory keywords."""
     idea_lower = idea.lower()
@@ -308,7 +331,7 @@ async def route(
         # Disagreement — Claude wins
         pi_name     = EXPERT_REGISTRY.get(pi_domain, {})
         pi_label    = getattr(pi_name, 'display_name', pi_domain) if pi_name else pi_domain
-        claude_name = EXPERT_REGISTRY[claude_domain].display_name
+        claude_name = EXPERT_REGISTRY[_coerce_to_registry(claude_domain)].display_name
         final_domain   = claude_domain
         routing_method = "claude_override"
         mismatch       = (
@@ -317,6 +340,7 @@ async def route(
         )
         logger.info(f"Domain mismatch: PI={pi_domain}, Claude={claude_domain} — Claude wins")
 
+    final_domain = _coerce_to_registry(final_domain)
     expert = EXPERT_REGISTRY[final_domain]
     return RouterResult(
         domain_id         = final_domain,

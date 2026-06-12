@@ -112,6 +112,59 @@ class ExpertPanelResult:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Serialization for UI visibility (Sprint 2)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def panel_to_dict(panel: "ExpertPanelResult") -> dict:
+    """Flatten an ExpertPanelResult into a UI-friendly dict. Each sub-panel is a
+    separate Haiku call with its own grounding, so exposing them makes the
+    mixture-of-experts work visible rather than hidden."""
+    out: dict = {"error_count": getattr(panel, "error_count", 0), "panels": []}
+    c = getattr(panel, "clinical", None)
+    if c is not None:
+        out["panels"].append({
+            "name": "Clinical Validity", "icon": "🧪",
+            "headline_metric": "Mechanism score", "headline_value": f"{c.mechanism_score:.1f}/10",
+            "confidence": getattr(c, "confidence", None),
+            "fields": {
+                "Recommended endpoint": c.recommended_endpoint,
+                "Differentiation vs. standard of care": c.differentiation_vs_soc,
+            },
+            "risks": list(c.key_scientific_risks or []),
+        })
+    r = getattr(panel, "regulatory", None)
+    if r is not None:
+        out["panels"].append({
+            "name": "Regulatory Pathway", "icon": "🏛",
+            "headline_metric": "Approval probability", "headline_value": f"{r.approval_probability_pct}%",
+            "fields": {
+                "Recommended pathway": r.recommended_pathway,
+                "Precedent product": r.precedent_product,
+                "Expected timeline": f"{r.expected_timeline_yrs} yrs",
+                "Available designations": ", ".join(r.available_designations or []) or "—",
+            },
+            "risks": [r.top_regulatory_risk] if getattr(r, "top_regulatory_risk", "") else [],
+        })
+    com = getattr(panel, "commercial", None)
+    if com is not None:
+        out["panels"].append({
+            "name": "Commercial Viability", "icon": "💰",
+            "headline_metric": "Competitive moat", "headline_value": f"{com.competitive_moat_score:.1f}/10",
+            "fields": {
+                "Annual price benchmark": f"${com.annual_price_benchmark_usd:,}" if com.annual_price_benchmark_usd else "—",
+                "Pricing comparable": com.pricing_comparable,
+                "Moat basis": com.moat_basis,
+                "Years to peak revenue": str(com.yrs_to_peak_revenue),
+                "Reimbursement mechanism": getattr(com, "reimbursement_mechanism", ""),
+                "Licensing upfront range": getattr(com, "licensing_upfront_range", "") or "—",
+                "Licensing royalty range": getattr(com, "licensing_royalty_range", "") or "—",
+            },
+            "risks": [com.key_payer_barrier] if getattr(com, "key_payer_barrier", "") else [],
+        })
+    return out
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Internal helpers
 # ─────────────────────────────────────────────────────────────────────────────
 

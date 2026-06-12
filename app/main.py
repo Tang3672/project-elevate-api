@@ -55,6 +55,12 @@ async def _init_background():
         await init_pi_memory_table()
         from app.services.research_world_model import init_world_model_table
         await init_world_model_table()
+        from app.db.market_sizing_repository import init_market_sizing_tables
+        await init_market_sizing_tables()
+        from app.services.world_model_graph import init_world_model_graph
+        await init_world_model_graph()
+        from app.db.reports_repository import init_reports_tables
+        await init_reports_tables()
         from app.db.schema_ontology import init_ontology_tables
         await init_ontology_tables()
         from app.db.schema_priors import init_priors_tables

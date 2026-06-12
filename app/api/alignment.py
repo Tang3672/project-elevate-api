@@ -147,6 +147,89 @@ async def get_pi_report(payload: PIReportRequest, current_user = Depends(get_cur
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/world-graph")
+async def get_world_graph(disease: str):
+    """Commercialization world-model subgraph for a disease (P4): nodes + edges
+    accumulated across all reports. Powers the graph visualization."""
+    from app.services.world_model_graph import get_disease_subgraph
+    return await get_disease_subgraph(disease)
+
+
+# ── Outcome / feedback learning (P11) + evaluation dashboard (P10) ──────────────
+
+class FeedbackRequest(BaseModel):
+    report_id:         str
+    user_action:       Optional[str] = None   # accepted | rejected | edited | ignored
+    outcome:           Optional[str] = None   # patented | licensed | grant_funded | spun_out | deprioritized | ...
+    recommendation_id: Optional[str] = None
+    notes:             Optional[str] = None
+    outcome_date:      Optional[str] = None   # ISO date
+    institution_id:    Optional[str] = None
+
+
+@router.post("/feedback")
+async def submit_feedback(req: FeedbackRequest):
+    """Capture what the user/TTO did with a recommendation and how it turned out (P11)."""
+    from app.db.reports_repository import record_feedback
+    try:
+        return await record_feedback(
+            req.report_id, user_action=req.user_action, outcome=req.outcome,
+            recommendation_id=req.recommendation_id, notes=req.notes,
+            outcome_date=req.outcome_date, institution_id=req.institution_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/outcomes")
+async def get_outcomes(report_id: str = "", user_id: int = None):
+    from app.db.reports_repository import list_outcomes
+    return {"outcomes": await list_outcomes(report_id=report_id, user_id=user_id)}
+
+
+@router.get("/eval-dashboard")
+async def get_eval_dashboard(institution_id: str = None):
+    """Internal evaluation metrics: trust, priority, abstention, acceptance, outcomes (P10)."""
+    from app.db.reports_repository import eval_metrics
+    return await eval_metrics(institution_id=institution_id)
+
+
+# ── TTO review dashboard / workflow (Sprint 5) ──────────────────────────────────
+
+@router.get("/review-queue")
+async def review_queue(institution_id: str = None, status: str = "", reviewer: str = ""):
+    """The TTO review queue: inventions with triage scores, status, reviewer, next action."""
+    from app.db.reports_repository import list_review_queue
+    return {"inventions": await list_review_queue(
+        institution_id=institution_id, status=status, reviewer=reviewer)}
+
+
+@router.get("/invention/{report_id}")
+async def invention_detail(report_id: str):
+    from app.db.reports_repository import get_invention
+    inv = await get_invention(report_id)
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invention not found")
+    return inv
+
+
+class ReviewUpdateRequest(BaseModel):
+    report_id:         str
+    status:            Optional[str] = None   # intake | triaged | under_review | decided | deprioritized
+    assigned_reviewer: Optional[str] = None
+    next_action:       Optional[str] = None
+
+
+@router.post("/review-update")
+async def review_update(req: ReviewUpdateRequest):
+    from app.db.reports_repository import update_review
+    try:
+        return await update_review(req.report_id, status=req.status,
+                                   assigned_reviewer=req.assigned_reviewer,
+                                   next_action=req.next_action)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router.get("/examples")
 async def get_examples():
     return {

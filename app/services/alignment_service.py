@@ -278,6 +278,20 @@ async def generate_pi_report(
             "validated_at": None,
         }
 
+    #  Trust Layer scorecard (P2) — atomic-claim citation judging, contradiction
+    #  detection, retrieval coverage, and abstention. Runs after validation so it
+    #  can fold the verifier ERROR flags into the contradiction signal.
+    try:
+        from app.services.trust_layer_service import score_report_trust
+        report.trust = await score_report_trust(report.model_dump(mode="json"))
+    except Exception as e:
+        logger.error(f"Trust layer error: {e}")
+        report.trust = {
+            "available": False, "error": str(e),
+            "summary": "Trust scoring unavailable for this report.",
+            "abstention_required": False, "human_review_recommended": False,
+        }
+
     return report
 
 
@@ -503,6 +517,14 @@ Do NOT include commercial pricing, sales channels, or go-to-market strategy.""",
         world_model_ctx = await load_world_model(disease_name)
     except Exception as _wm_e:
         logger.debug("World model load skipped: %s", _wm_e)
+    # Commercialization world-model GRAPH context (P4) — accumulated nodes/edges
+    try:
+        from app.services.world_model_graph import load_graph_context
+        _graph_ctx = await load_graph_context(disease_name)
+        if _graph_ctx:
+            world_model_ctx = (world_model_ctx + "\n\n" + _graph_ctx).strip()
+    except Exception as _gctx_e:
+        logger.debug("World-model graph context load skipped: %s", _gctx_e)
 
     researcher_ctx = ""
     critic_ctx     = ""
@@ -776,6 +798,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
 
     # === UNIQUE MARKET SIZING DERIVATION — generate before building context ===
     market_derivation_text = ""
+    deriv = None  # MarketSizingDerivation; reused below to build P1 provenance
     try:
         from app.services.market_sizing_derivation_service import (
             generate_market_sizing_derivation, format_derivation_for_prompt
@@ -850,6 +873,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
     # TRL assessment — stage-of-development scoring before main Opus call.
     # development_phase comes from the opportunity phase field, not product_type.
     trl_block = ""
+    trl_result = None   # reused by the P5 decision engine below
     try:
         from app.services.trl_service import assess_trl
         # Map product_type → development_phase for TRL estimation.
@@ -882,6 +906,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
 
     # Funding intelligence — real-time competitive funding signals
     funding_block = ""
+    sbir_count = 0   # reused by the P5 decision engine below
     try:
         if not isinstance(funding_intel, Exception) and funding_intel:
             funding_block = format_funding_intelligence(funding_intel, disease_name)
@@ -1008,11 +1033,88 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
 
     system = expert.system_prompt + "\n\n" + EXPERT_JSON_SCHEMA + reporting_instructions
 
-    raw  = await _call_claude(context, system, max_tokens=6144)
+    # ── Cost-aware specialist router (P3) — pick the synthesis model tier; the
+    #    frontier model is used only when complexity/uncertainty is high. ──
+    _routing_plan = None
+    _synthesis_model = None
+    try:
+        from app.services.cost_aware_router import build_routing_plan
+        _routing_plan = build_routing_plan(
+            idea=idea, product_type=product_type, sub_expert_id=sub_expert_id or "",
+            development_stage=locals().get("_dev_phase", "preclinical"),
+            signal_count=len(demand_results or []))
+        _synthesis_model = _routing_plan["synthesis_model"]
+        logger.info("Cost-aware router: complexity=%.2f synthesis_model=%s",
+                    _routing_plan["complexity_score"], _synthesis_model)
+    except Exception as _rt_e:
+        logger.warning("Cost-aware router failed (non-fatal, default model): %s", _rt_e)
+
+    raw  = await _call_claude(context, system, max_tokens=6144, model=_synthesis_model)
     data = _clean_json(raw)
 
     # Parse into PIReport
     report = _parse_expert_response(data, idea, product_type, expert, demand_results, hospital_matches_raw, total_signals)
+
+    # Attach the cost-aware routing plan (P3) for visibility/audit.
+    if _routing_plan is not None:
+        report.routing_plan = _routing_plan
+
+    # ── P1: market-sizing provenance — typed, source-backed assumptions + scenarios + waterfall ──
+    if deriv is not None:
+        try:
+            from app.services.market_provenance_service import build_provenance
+            provenance = build_provenance(deriv)
+            report.market_sizing_provenance = provenance
+            import asyncio as _aio_ms
+            from app.db.market_sizing_repository import save_market_sizing_run
+            _aio_ms.create_task(save_market_sizing_run(
+                provenance, user_id=None, disease_name=disease_name or ""))
+        except Exception as _prov_e:
+            logger.warning("Market sizing provenance failed (non-fatal): %s", _prov_e)
+
+    # ── P5: commercialization decision engine — probabilistic scores + drivers + recommendation ──
+    try:
+        from app.services.commercialization_decision_service import build_decision
+        report.commercialization_scores = build_decision(
+            product_type=product_type,
+            sub_expert_id=sub_expert_id or "",
+            panel_result=(panel_result if not isinstance(panel_result, Exception) else None),
+            patent_landscape=(patent_landscape if not isinstance(patent_landscape, Exception) else None),
+            trl_result=trl_result,
+            deriv=deriv,
+            sbir_awards=sbir_count,
+        )
+    except Exception as _dec_e:
+        logger.warning("Commercialization decision engine failed (non-fatal): %s", _dec_e)
+
+    # ── Expert-panel visibility (Sprint 2 UI) — attach the structured panel for the UI ──
+    try:
+        if panel_result is not None and not isinstance(panel_result, Exception):
+            from app.services.expert_panel import panel_to_dict
+            report.expert_panel = panel_to_dict(panel_result)
+    except Exception as _ep_e:
+        logger.debug("Expert panel attach failed (non-fatal): %s", _ep_e)
+
+    # ── Sprint 7: stable id, portfolio benchmark (P7), persistence + graph ingest (P4/P11) ──
+    try:
+        from app.services.world_model_graph import report_id_for, ingest_report_to_graph
+        _rdict = report.model_dump(mode="json")
+        report.report_id = report_id_for(_rdict)
+
+        # Portfolio benchmark (P7): percentile + comparables vs prior internal disclosures.
+        try:
+            from app.services.portfolio_benchmark_service import portfolio_benchmark
+            report.portfolio_benchmark = await portfolio_benchmark(_rdict, user_id=None)
+        except Exception as _pb_e:
+            logger.warning("Portfolio benchmark failed (non-fatal): %s", _pb_e)
+
+        # Persist report metrics (P7/P10 backbone) + ingest into the graph (P4) — background.
+        import asyncio as _aio_s7
+        from app.db.reports_repository import save_report_metrics
+        _aio_s7.create_task(save_report_metrics(_rdict, user_id=None))
+        _aio_s7.create_task(ingest_report_to_graph(_rdict, disease_name=disease_name, user_id=None))
+    except Exception as _s7_e:
+        logger.debug("Sprint-7 wiring failed (non-fatal): %s", _s7_e)
 
     # Update research world model asynchronously — fire and forget, non-blocking.
     # Next report for this disease will have richer prior context.
@@ -1691,7 +1793,8 @@ def _build_hospital_matches(hospital_matches_raw: list) -> list:
     return items
 
 
-async def _call_claude(context: str, system_prompt: str, max_tokens: int = 2000) -> str:
+async def _call_claude(context: str, system_prompt: str, max_tokens: int = 2000,
+                       model: str = None) -> str:
     anthropic_api_key = os.getenv("ANTHROPIC_API_KEY") or settings.ANTHROPIC_API_KEY
     if not anthropic_api_key:
         raise ValueError("ANTHROPIC_API_KEY not set in Railway environment variables")
@@ -1704,7 +1807,7 @@ async def _call_claude(context: str, system_prompt: str, max_tokens: int = 2000)
                 "content-type": "application/json",
             },
             json={
-                "model": CLAUDE_MODEL,
+                "model": model or CLAUDE_MODEL,
                 "max_tokens": max_tokens,
                 "system": system_prompt,
                 "messages": [{"role": "user", "content": context}],
