@@ -149,7 +149,7 @@ async def get_pi_report_async(payload: PIReportRequest, current_user = Depends(g
     await _enforce_quota(current_user)   # synchronous gate — 402 returns instantly
     import asyncio
     from app.services.report_jobs import create_job, set_done, set_error
-    job_id = create_job()
+    job_id = await create_job()
     idea = _idea_from_payload(payload)
     _user = current_user
 
@@ -159,13 +159,13 @@ async def get_pi_report_async(payload: PIReportRequest, current_user = Depends(g
                 idea, payload.product_type, payload.disease_domain,
                 payload.tier1_category, funding_pathway=payload.funding_pathway,
             )
-            set_done(job_id, report.model_dump(mode="json"))
+            await set_done(job_id, report.model_dump(mode="json"))
             await _increment_usage(_user)
         except ValueError as e:
-            set_error(job_id, str(e))
+            await set_error(job_id, str(e))
         except Exception as e:
             logger.error(f"Async PI report failed: {e}", exc_info=True)
-            set_error(job_id, str(e))
+            await set_error(job_id, str(e))
 
     asyncio.create_task(_run())
     return {"job_id": job_id, "status": "running"}
@@ -175,7 +175,7 @@ async def get_pi_report_async(payload: PIReportRequest, current_user = Depends(g
 async def get_pi_report_status(job_id: str):
     """Poll an async report job. Returns {status: running|done|error, report?, error?}."""
     from app.services.report_jobs import get_job
-    job = get_job(job_id)
+    job = await get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found or expired")
     return {"status": job["status"], "report": job["report"], "error": job["error"]}

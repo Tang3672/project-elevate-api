@@ -61,6 +61,8 @@ async def _init_background():
         await init_world_model_graph()
         from app.db.reports_repository import init_reports_tables
         await init_reports_tables()
+        from app.services.report_jobs import init_report_jobs_table
+        await init_report_jobs_table()
         from app.db.schema_ontology import init_ontology_tables
         await init_ontology_tables()
         from app.db.schema_priors import init_priors_tables
