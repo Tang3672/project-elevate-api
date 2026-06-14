@@ -1033,6 +1033,13 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
         "(3) Regulatory timelines: cite a comparable approved drug. "
         "(4) Market access prices: cite CMS ASP or reimbursement data. "
         "(5) If uncertain, state a range with sources for both ends. "
+        "(6) GROUNDING (critical for trust): every factual or numerical claim in EVERY narrative "
+        "field — including the executive summary — must be traceable to the database-grounded "
+        "facts, the expert panel, or a named source provided above. Do NOT assert facts, "
+        "mechanisms, competitor details, or epidemiology that are not in the provided context. "
+        "If a claim is your own interpretation rather than a sourced fact, phrase it as such "
+        "(e.g. 'this suggests…', 'a plausible path is…') rather than stating it as established fact. "
+        "Prefer fewer, well-grounded claims over many unsupported ones. "
         f"GUIDELINE NOTE: {clinical_guideline_warning[:200]}"
         + (
             "\n\nEXPERT PANEL INTEGRATION RULES (CRITICAL): "

@@ -165,6 +165,29 @@ def collect_evidence_pool(report: dict) -> list[dict]:
         add(cit.get("source") or cit.get("journal") or "Literature",
             cit.get("url"), cit.get("title", ""))
 
+    # Expert panel — 3 independently-grounded sub-analyses (approval odds anchored
+    # to PTRS tables, pricing to deal comps, precedents named). A major evidence
+    # source the judge previously couldn't see, so its claims were wrongly unsupported.
+    ep = report.get("expert_panel") or {}
+    for p in ep.get("panels", []) or []:
+        name = p.get("name", "Expert Panel")
+        add(name, None, f"{p.get('headline_metric', '')}: {p.get('headline_value', '')}")
+        for k, v in (p.get("fields") or {}).items():
+            if v and v != "—":
+                add(name, None, f"{k}: {v}")
+
+    # Commercialization decision rationale — each score's sourced drivers.
+    cs = report.get("commercialization_scores") or {}
+    for dim in (cs.get("score_rationales") or {}).values():
+        for drv in dim.get("drivers", []) or []:
+            add(drv.get("source", "Decision engine"), None, drv.get("fact", ""))
+
+    # Regulatory pathway prose carries named precedents/timelines.
+    rp2 = report.get("regulatory_pathway") or {}
+    if rp2.get("recommended_pathway"):
+        add("FDA regulatory analysis", None,
+            f"{rp2.get('recommended_pathway', '')}: {rp2.get('pathway_rationale', '')[:160]}")
+
     return pool
 
 

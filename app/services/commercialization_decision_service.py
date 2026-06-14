@@ -156,10 +156,103 @@ def score_commercialization(signals: dict) -> dict:
 
     return {
         "commercialization_scores": scores,
+        "score_rationales": build_rationales(signals, scores, market, whitespace),
         "top_drivers": _top_drivers(scores, market, whitespace),
         "recommendation": _recommendation(scores),
         "modality": modality,
         "method": "rules+calibrated_tables_v1",
+    }
+
+
+# ── Sourced, evidence-led rationale for every dimension ─────────────────────────
+# Each score is paired with the real signals + sources that produced it, so the UI
+# can lead with the evidence and treat the number as secondary (not a black box).
+
+_SRC = {
+    "ptrs":     "Historical FDA approval rates for this class & phase (PTRS calibration tables)",
+    "moat":     "Competitive-moat assessment (expert panel, grounded in AUTM/BIO deal comps)",
+    "patents":  "Recent US patent filings (Google Patents)",
+    "trl":      "Technology Readiness Level assessment (NIH/BARDA framework)",
+    "sbir":     "Recent NIH SBIR/STTR awards in this space (NIH Reporter)",
+    "market":   "Bottom-up market sizing (CDC/SEER epidemiology + CMS pricing)",
+    "modality": "Modality base rates (AUTM licensing surveys + FDA approval data)",
+    "payer":    "Payer/reimbursement assessment (expert panel + CMS coverage data)",
+}
+
+
+def _band(v: float) -> str:
+    return "STRONG" if v >= 0.66 else ("MODERATE" if v >= 0.45 else "WEAK")
+
+
+def _ws_word(w: float) -> str:
+    return "open" if w >= 0.66 else ("crowded" if w <= 0.34 else "moderately contested")
+
+
+def build_rationales(signals: dict, scores: dict, market: float, whitespace: float) -> dict:
+    """Per-dimension {label, drivers:[{fact, source}]} — the evidence behind each score."""
+    modality = (signals.get("modality") or "other").replace("_", " ")
+    approval = signals.get("approval_prob")
+    moat = signals.get("moat")
+    trl = signals.get("trl")
+    sbir_ready = signals.get("sbir_p1_ready")
+    sbir_awards = signals.get("sbir_awards") or 0
+    som = signals.get("som_usd")
+    designations = signals.get("designations") or []
+    payer = signals.get("payer_barrier")
+
+    def d(fact, src):
+        return {"fact": fact, "source": _SRC.get(src, src)}
+
+    def dim(key, drivers):
+        return {"label": _band(scores[key]), "score": scores[key],
+                "drivers": [x for x in drivers if x]}
+
+    reg = []
+    if approval is not None:
+        reg.append(d(f"{approval*100:.0f}% historical probability of approval for a {modality} at this phase", "ptrs"))
+    if designations:
+        reg.append(d(f"Eligible expedited pathways: {', '.join(designations[:4])}", "ptrs"))
+
+    sbir = []
+    if sbir_ready and trl:
+        sbir.append(d(f"Meets the TRL bar for SBIR Phase I (TRL {trl})", "trl"))
+    if sbir_awards:
+        sbir.append(d(f"{sbir_awards} recent NIH SBIR/STTR award(s) funding comparable work", "sbir"))
+    sbir.append(d(f"{modality} has a {'strong' if scores['sbir_fit'] >= 0.6 else 'modest'} non-dilutive funding track record", "modality"))
+
+    ws = [d(f"IP/competitive landscape looks {_ws_word(whitespace)} based on recent filings", "patents")] if whitespace is not None else []
+
+    pat = list(ws) + [d(f"{modality} compositions are {'readily' if scores['patentability'] >= 0.6 else 'less reliably'} patentable", "modality")]
+
+    inv = []
+    if som:
+        inv.append(d(f"~${som/1e6:.0f}M serviceable obtainable market (US)", "market"))
+    if approval is not None:
+        inv.append(d(f"{approval*100:.0f}% approval odds set the risk-adjusted value", "ptrs"))
+    if moat is not None:
+        inv.append(d(f"Competitive moat assessed {moat*10:.1f}/10 by the panel", "moat"))
+
+    lic = []
+    if moat is not None:
+        lic.append(d(f"Competitive moat {moat*10:.1f}/10 (panel)", "moat"))
+    if som:
+        lic.append(d(f"~${som/1e6:.0f}M serviceable market", "market"))
+
+    reimb = []
+    if payer:
+        reimb.append(d(f"Key payer barrier: {payer}", "payer"))
+    reimb.append(d(f"{modality} reimbursement pathway base rate", "modality"))
+
+    return {
+        "regulatory_feasibility":  dim("regulatory_feasibility", reg),
+        "sbir_fit":                dim("sbir_fit", sbir),
+        "competitive_whitespace":  dim("competitive_whitespace", ws),
+        "patentability":           dim("patentability", pat),
+        "investor_attractiveness": dim("investor_attractiveness", inv),
+        "licensing_likelihood":    dim("licensing_likelihood", lic),
+        "acquisition_potential":   dim("acquisition_potential", lic),
+        "spinout_likelihood":      dim("spinout_likelihood", inv),
+        "reimbursement_feasibility": dim("reimbursement_feasibility", reimb),
     }
 
 
