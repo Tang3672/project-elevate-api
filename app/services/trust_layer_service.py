@@ -282,12 +282,45 @@ async def judge_claims(report: dict, evidence_pool: list[dict]) -> dict:
         "Audit the report now. Return only the JSON object."
     )
 
-    raw = await _call_claude(CLAIM_JUDGE_SYSTEM, user)
-    data = _parse_json(raw)
-    return {
-        "claims": data.get("claims", []) or [],
-        "contradictions": data.get("contradictions", []) or [],
-    }
+    raw = await _call_claude(CLAIM_JUDGE_SYSTEM, user, max_tokens=6000)
+    try:
+        data = _parse_json(raw)
+        return {
+            "claims": data.get("claims", []) or [],
+            "contradictions": data.get("contradictions", []) or [],
+        }
+    except (ValueError, TypeError):
+        # The judge's JSON was truncated/malformed — salvage every complete claim
+        # object rather than discarding the whole scorecard.
+        return _salvage_claims(raw)
+
+
+def _salvage_claims(raw: str) -> dict:
+    """Bracket-scan the `claims` array and keep each complete {...} object,
+    tolerating a truncated tail. Contradictions are dropped on salvage."""
+    claims: list[dict] = []
+    i = (raw or "").find('"claims"')
+    arr = raw.find("[", i) if i != -1 else -1
+    if arr != -1:
+        depth, start = 0, None
+        for j in range(arr + 1, len(raw)):
+            ch = raw[j]
+            if ch == "{":
+                if depth == 0:
+                    start = j
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0 and start is not None:
+                    try:
+                        claims.append(json.loads(raw[start:j + 1]))
+                    except (ValueError, TypeError):
+                        pass
+                    start = None
+            elif ch == "]" and depth == 0:
+                break
+    logger.warning("Trust judge JSON malformed — salvaged %d claim(s)", len(claims))
+    return {"claims": claims, "contradictions": []}
 
 
 # ── Deterministic scorecard (pure; unit-tested) ────────────────────────────────

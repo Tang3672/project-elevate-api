@@ -489,11 +489,6 @@ async def _generate_expert_report(idea, product_type, expert, demand_results, ho
     """
     #  Two-layer knowledge system
     # Layer 1: Disease Classifier → specific disease name
-    import time as _time
-    _T0 = _time.monotonic()
-    _TIMING = {}
-    def _ck(label):
-        _TIMING[label] = round(_time.monotonic() - _T0, 1)
     disease_info = {}
     disease_name = "the indicated condition"
     try:
@@ -1056,7 +1051,6 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
 
     system = expert.system_prompt + "\n\n" + EXPERT_JSON_SCHEMA + reporting_instructions
 
-    _ck("pre_synthesis")
     # ── Cost-aware specialist router (P3) — pick the synthesis model tier; the
     #    frontier model is used only when complexity/uncertainty is high. ──
     _routing_plan = None
@@ -1074,7 +1068,6 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
         logger.warning("Cost-aware router failed (non-fatal, default model): %s", _rt_e)
 
     raw  = await _call_claude(context, system, max_tokens=6144, model=_synthesis_model)
-    _ck("post_synthesis")
     data = _clean_json(raw)
 
     # Parse into PIReport
@@ -1083,14 +1076,6 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
     # Attach the cost-aware routing plan (P3) for visibility/audit.
     if _routing_plan is not None:
         report.routing_plan = _routing_plan
-
-    _ck("report_built")
-    report.diagnostics = {
-        "timing_s": _TIMING,
-        "total_s": round(_time.monotonic() - _T0, 1),
-        "gather_error": _gather_error,
-        "synthesis_model": _synthesis_model,
-    }
 
     # ── P1: market-sizing provenance — typed, source-backed assumptions + scenarios + waterfall ──
     if deriv is not None:
@@ -1118,11 +1103,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
             sbir_awards=sbir_count,
         )
     except Exception as _dec_e:
-        import traceback as _tb
-        logger.warning("Commercialization decision engine failed (non-fatal): %s\n%s",
-                       _dec_e, _tb.format_exc())
-        # Temporary diagnostic: surface the error in the response so we can see why.
-        report.commercialization_scores = {"_error": f"{type(_dec_e).__name__}: {_dec_e}"}
+        logger.warning("Commercialization decision engine failed (non-fatal): %s", _dec_e)
 
     # ── Expert-panel visibility (Sprint 2 UI) — attach the structured panel for the UI ──
     try:
