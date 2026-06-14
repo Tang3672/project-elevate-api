@@ -617,6 +617,10 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
     ci = pub_data = strategic_intel = aggregated_sources = chapter_data = None
     pipeline_result = panel_result = funding_intel = patent_landscape = regulatory_precedent = Exception("not gathered")
     _gather_error = None
+    # ta_for_deriv is computed precisely in the market-sizing block below, but the
+    # data-gather above uses it for source selection — bind a safe default first
+    # so it can never be referenced-before-assignment (UnboundLocalError).
+    ta_for_deriv = "other"
     try:
         from app.services.fda_pipeline import (
             get_full_competitive_intelligence,
