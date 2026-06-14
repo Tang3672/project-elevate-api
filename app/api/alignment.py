@@ -811,19 +811,31 @@ async def competitive_sweep(
 
     try:
         loop = asyncio.get_event_loop()
-        landscape = await loop.run_in_executor(
-            None,
-            lambda: sweep_competitors(
-                disease_name=disease,
-                indication_keywords=keywords,
-                therapeutic_area=ta,
-                product_type=pt,
-            )
+        # Hard 30s cap so a slow external sweep can't hold the request open past the
+        # proxy timeout (which surfaced to the client as "Failed to fetch").
+        landscape = await asyncio.wait_for(
+            loop.run_in_executor(
+                None,
+                lambda: sweep_competitors(
+                    disease_name=disease,
+                    indication_keywords=keywords,
+                    therapeutic_area=ta,
+                    product_type=pt,
+                )
+            ),
+            timeout=30.0,
         )
         return to_dict(landscape)
+    except asyncio.TimeoutError:
+        logger.warning("Competitive sweep timed out for %s", disease)
+        return {"available": False, "competitors": [],
+                "note": "Live competitor sweep took too long; see the competitive pipeline "
+                        "summarized in the Opportunity section above."}
     except Exception as e:
         logger.error("Competitive sweep failed: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        return {"available": False, "competitors": [],
+                "note": "Live competitor sweep is temporarily unavailable; see the "
+                        "competitive pipeline in the Opportunity section above."}
 
 
 @router.post("/clarify")

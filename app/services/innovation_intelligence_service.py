@@ -282,18 +282,20 @@ def _sweep_pubmed_recent(term: str, days: int = 90) -> Optional[IntelligenceSign
             return None
         count = int(r.json().get("esearchresult", {}).get("count", 0))
 
-        # Annualise for context
-        annual_rate = round(count * (365 / days))
+        # Use the raw window count to band research activity — no annualised
+        # extrapolation (a naive ×365/days projection reads as a made-up number).
+        annual_rate = round(count * (365 / days))   # internal band only, not shown
         strength = "strong" if count >= 50 else "moderate" if count >= 15 else "weak"
+        band = ("high-volume research area with active academic investment" if annual_rate >= 200
+                else "moderate, growing research interest" if annual_rate >= 50
+                else "emerging research area with limited published literature — early-mover advantage")
 
         return IntelligenceSignal(
             category="academic_momentum",
-            headline=f"{count} new PubMed publications on '{term}' in {days} days (~{annual_rate}/yr pace)",
+            headline=f"{count} new PubMed publications on '{term}' in the last {days} days",
             detail=(
                 f"PubMed E-utilities returned {count} publications indexed for '{term}' "
-                f"in the {days}-day window ending {date.today().isoformat()}. "
-                f"This projects to approximately {annual_rate} publications/year — "
-                f"{'a high-volume research area with active academic investment' if annual_rate >= 200 else 'a moderate research pace indicating growing but not saturated academic interest' if annual_rate >= 50 else 'an emerging research area with limited published literature — early-mover advantage'}."
+                f"in the {days}-day window ending {date.today().isoformat()} — a {band}."
             ),
             implication=(
                 f"{'High' if annual_rate >= 200 else 'Moderate' if annual_rate >= 50 else 'Low'} publication volume means "
