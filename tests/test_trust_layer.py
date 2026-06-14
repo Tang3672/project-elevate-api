@@ -87,9 +87,11 @@ def test_contradictions_and_validation_errors_combine():
         evidence_pool_size=6,
         validation=validation,
     )
-    assert card["contradiction_count"] == 3   # 1 judge + 2 validation errors
-    assert card["human_review_recommended"] is True
-    assert card["citation_support_score"] == 1.0   # but support is still perfect
+    # Validation-graph errors are a SEPARATE signal (own badge) and no longer fold
+    # into the trust contradiction count — only the judge's own contradictions do.
+    assert card["contradiction_count"] == 1
+    assert card["human_review_recommended"] is True   # the 1 real contradiction triggers review
+    assert card["citation_support_score"] == 1.0
 
 
 def test_empty_evidence_pool_forces_abstention():
@@ -99,14 +101,21 @@ def test_empty_evidence_pool_forces_abstention():
     assert any("no retrieved evidence" in r for r in card["abstention_reasons"])
 
 
-def test_grade_moderate_band():
-    # 9 supported, 1 unsupported => 0.9 support, no contradictions
-    claims = [_claim(f"s{i}", "numerical", "supported", [i]) for i in range(9)]
-    claims.append(_claim("u", "factual", "unsupported"))
+def test_grade_bands():
+    # 0.80 support, no contradictions -> MODERATE (>=0.75, <0.90)
+    claims = [_claim(f"s{i}", "numerical", "supported", [i]) for i in range(8)]
+    claims += [_claim(f"u{i}", "factual", "unsupported") for i in range(2)]
     card = compute_trust_scorecard(claims, contradictions=[], evidence_pool_size=12)
-    assert card["citation_support_score"] == 0.9
+    assert card["citation_support_score"] == 0.8
     assert card["trust_grade"] == "MODERATE"
     assert card["abstention_required"] is False
+
+    # 0.95 support, no contradictions -> HIGH (>=0.90)
+    hi = [_claim(f"s{i}", "numerical", "supported", [i]) for i in range(19)]
+    hi.append(_claim("u", "factual", "unsupported"))
+    card2 = compute_trust_scorecard(hi, contradictions=[], evidence_pool_size=22)
+    assert card2["citation_support_score"] == 0.95
+    assert card2["trust_grade"] == "HIGH"
 
 
 def test_collect_evidence_pool_dedups_and_pulls_all_sections():

@@ -63,9 +63,13 @@ SUPPORT_WEIGHTS = {"supported": 1.0, "weak": 0.5, "unsupported": 0.0}
 ABSTAIN_COVERAGE_FLOOR  = 0.40   # below this, too little is grounded -> abstain
 ABSTAIN_SUPPORT_FLOOR   = 0.50   # below this, claims are largely unsupported -> abstain
 ABSTAIN_MIN_CHECKABLE   = 3      # too few checkable claims to assess -> abstain
-REVIEW_SUPPORT_FLOOR    = 0.85   # below this, recommend a human look
-REVIEW_COVERAGE_FLOOR   = 0.70
-REVIEW_UNSUPPORTED_MAX  = 2      # >2 unsupported checkable claims -> review
+REVIEW_SUPPORT_FLOOR    = 0.72   # below this, recommend a human look
+REVIEW_COVERAGE_FLOOR   = 0.60
+REVIEW_UNSUPPORTED_MAX  = 4      # >4 unsupported checkable claims -> review
+
+# Grade bands (citation support).
+GRADE_HIGH_FLOOR        = 0.90
+GRADE_MODERATE_FLOOR    = 0.75
 
 
 # ── Claude caller ─────────────────────────────────────────────────────────────
@@ -382,10 +386,10 @@ def compute_trust_scorecard(
     unsupported = [c for c in checkable if support_of(c) == "unsupported"]
     unsupported_claim_count = len(unsupported)
 
-    # Contradictions: the judge's findings, plus any hard ERROR flags raised by
-    # the upstream validation graph (those are real, independently-found issues).
-    validation_errors = len(validation.get("errors", []) or [])
-    contradiction_count = len(contradictions) + validation_errors
+    # Contradictions = the claim judge's own findings ONLY. The LangGraph
+    # validation graph has its own separate badge, so folding its flags in here
+    # double-counts and conflates two distinct trust signals.
+    contradiction_count = len(contradictions)
 
     # ── Abstention: the report cannot stand on its own evidence. ──
     abstention_reasons: list[str] = []
@@ -415,16 +419,15 @@ def compute_trust_scorecard(
             f"{unsupported_claim_count} unsupported claims (> {REVIEW_UNSUPPORTED_MAX})")
     if contradiction_count > 0:
         review_reasons.append(f"{contradiction_count} contradiction(s)")
-    if validation_errors > 0:
-        review_reasons.append(f"{validation_errors} validation error(s)")
     human_review_recommended = abstention_required or bool(review_reasons)
 
-    # Trust grade for at-a-glance UI.
+    # Trust grade for at-a-glance UI (based on grounding only; the validation
+    # graph is a separate, independently-displayed signal).
     if abstention_required:
         grade = "INSUFFICIENT_EVIDENCE"
-    elif citation_support_score >= 0.95 and contradiction_count == 0:
+    elif citation_support_score >= GRADE_HIGH_FLOOR and contradiction_count == 0:
         grade = "HIGH"
-    elif citation_support_score >= REVIEW_SUPPORT_FLOOR and contradiction_count == 0:
+    elif citation_support_score >= GRADE_MODERATE_FLOOR and contradiction_count == 0:
         grade = "MODERATE"
     else:
         grade = "LOW"
