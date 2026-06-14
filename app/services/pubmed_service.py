@@ -206,12 +206,9 @@ async def _fetch_paper_summaries(pmids: List[str]) -> List[Dict]:
                             idx = abstract_text.find(pmid)
                         if idx != -1:
                             ab_start = abstract_text.find("AB  -", idx)
-                            ab_end = abstract_text.find("
-
-", ab_start) if ab_start != -1 else -1
+                            ab_end = abstract_text.find("\n\n", ab_start) if ab_start != -1 else -1
                             if ab_start != -1 and ab_end != -1:
-                                abstract = abstract_text[ab_start+6:ab_end].replace("
-      ", " ").strip()
+                                abstract = abstract_text[ab_start+6:ab_end].replace("\n      ", " ").strip()
                                 p["abstract"] = abstract[:500]  # Cap at 500 chars
             except Exception as e:
                 logger.warning(f"Abstract fetch failed: {e}")
@@ -249,7 +246,7 @@ def format_publications_for_expert(pub_data: Dict) -> str:
                 used.add(p["pmid"])
                 abstract = p.get("abstract", "")
                 abstract_preview = f" | Abstract: {abstract[:200]}..." if abstract else ""
-                lines.append(f"  PMID {p['pmid']}: {p['authors']} ({p['year']}). "{p['title']}". {p['journal']}.{abstract_preview}")
+                lines.append(f"  PMID {p['pmid']}: {p['authors']} ({p['year']}). \"{p['title']}\". {p['journal']}.{abstract_preview}")
                 lines.append(f"  URL: {p['url']}")
             lines.append("")
 
@@ -259,7 +256,7 @@ def format_publications_for_expert(pub_data: Dict) -> str:
         for p in remaining[:2]:
             abstract = p.get("abstract", "")
             abstract_preview = f" | {abstract[:150]}..." if abstract else ""
-            lines.append(f"  PMID {p['pmid']}: {p['authors']} ({p['year']}). "{p['title']}". {p['journal']}.{abstract_preview}")
+            lines.append(f"  PMID {p['pmid']}: {p['authors']} ({p['year']}). \"{p['title']}\". {p['journal']}.{abstract_preview}")
             lines.append(f"  URL: {p['url']}")
 
     lines.append("\n[These are real PubMed papers. Use their data to support every quantitative claim in the report.]")
