@@ -31,8 +31,10 @@ FRONTIER_MODEL   = "claude-opus-4-5"            # premium synthesis
 SPECIALIST_MODEL = "claude-sonnet-4-6"          # mid-tier synthesis / domain
 SMALL_MODEL      = "claude-haiku-4-5-20251001"  # router / extraction / verifier
 
-# Escalate synthesis to the frontier model at/above this complexity.
-FRONTIER_ESCALATION_THRESHOLD = 0.50
+# Escalate synthesis to the frontier model at/above this complexity. Set high so
+# the fast specialist model (Sonnet) handles the large majority of reports and the
+# frontier (Opus) is reserved for genuinely hard cases — cost- AND latency-aware.
+FRONTIER_ESCALATION_THRESHOLD = 0.80
 
 # Regulatory-risk priors by modality (proxy for development + approval difficulty).
 _REG_RISK = {
@@ -117,18 +119,16 @@ def compute_complexity(profile: dict) -> float:
 def plan_models(profile: dict, complexity: float) -> dict:
     """Pick a model tier per pipeline stage; frontier only when complex/uncertain."""
     quick = profile.get("required_output_type") != "full_report"
-    escalate = (not quick) and (
-        complexity >= FRONTIER_ESCALATION_THRESHOLD
-        or profile.get("regulatory_risk") == "high"
-        or profile.get("evidence_availability") == "low"
-    )
+    # Frontier only for the hardest cases (complexity already folds in regulatory
+    # risk, novelty, evidence thinness, and modality difficulty).
+    escalate = (not quick) and complexity >= FRONTIER_ESCALATION_THRESHOLD
     synthesis_model = FRONTIER_MODEL if escalate else SPECIALIST_MODEL
     reason = (
-        f"frontier ({FRONTIER_MODEL}) — complexity {complexity:.2f} ≥ "
-        f"{FRONTIER_ESCALATION_THRESHOLD} or high regulatory/evidence risk"
+        f"frontier ({FRONTIER_MODEL}) — high complexity {complexity:.2f} ≥ "
+        f"{FRONTIER_ESCALATION_THRESHOLD}"
         if escalate else
-        f"specialist ({SPECIALIST_MODEL}) — low complexity ({complexity:.2f}); "
-        f"frontier reserved for harder cases"
+        f"specialist ({SPECIALIST_MODEL}) — complexity {complexity:.2f} < "
+        f"{FRONTIER_ESCALATION_THRESHOLD}; frontier reserved for the hardest cases"
     )
     return {
         "classify_model": SMALL_MODEL,

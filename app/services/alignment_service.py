@@ -1109,7 +1109,11 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
             sbir_awards=sbir_count,
         )
     except Exception as _dec_e:
-        logger.warning("Commercialization decision engine failed (non-fatal): %s", _dec_e)
+        import traceback as _tb
+        logger.warning("Commercialization decision engine failed (non-fatal): %s\n%s",
+                       _dec_e, _tb.format_exc())
+        # Temporary diagnostic: surface the error in the response so we can see why.
+        report.commercialization_scores = {"_error": f"{type(_dec_e).__name__}: {_dec_e}"}
 
     # ── Expert-panel visibility (Sprint 2 UI) — attach the structured panel for the UI ──
     try:
