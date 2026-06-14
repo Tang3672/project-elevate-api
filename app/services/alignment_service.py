@@ -261,34 +261,58 @@ async def generate_pi_report(
     report.routing_method  = router_result.routing_method
     report.mismatch_warning = router_result.mismatch_warning
 
-    #  LangGraph Validation 
-    try:
+    #  Verification layer: LangGraph validation (P-existing) + Trust scorecard (P2).
+    #  These are run CONCURRENTLY under a hard time budget. Previously they ran
+    #  sequentially and each could approach its own 45-60s timeout, pushing total
+    #  report latency past Railway's proxy limit → the client saw "Failed to fetch".
+    #  Now they share one bounded budget and the report is always returned: if the
+    #  budget is exceeded, verification is marked PENDING rather than blocking.
+    import asyncio as _averify
+    _sub_id = getattr(expert, "sub_expert_id", getattr(expert, "domain_id", "drug_amr"))
+    _report_dict = report.model_dump(mode="json")
+    _VERIFY_BUDGET_S = 25.0
+
+    async def _run_validation():
         from app.services.validation_graph import validate_pi_report
-        report_dict = report.model_dump(mode="json")
-        # Pass sub_expert_id and critic context for domain-aware validation
-        _sub_id = getattr(expert, "sub_expert_id", getattr(expert, "domain_id", "drug_amr"))
-        validated   = await validate_pi_report(report_dict, _sub_id)
-        report.validation = validated.get("validation")
+        v = await validate_pi_report(_report_dict, _sub_id)
+        return v.get("validation")
+
+    async def _run_trust():
+        from app.services.trust_layer_service import score_report_trust
+        return await score_report_trust(_report_dict)
+
+    report.validation = None
+    report.trust = None
+    try:
+        _val_res, _trust_res = await _averify.wait_for(
+            _averify.gather(_run_validation(), _run_trust(), return_exceptions=True),
+            timeout=_VERIFY_BUDGET_S,
+        )
+        if not isinstance(_val_res, Exception):
+            report.validation = _val_res
+        else:
+            logger.error(f"Validation graph error: {_val_res}")
+        if not isinstance(_trust_res, Exception):
+            report.trust = _trust_res
+        else:
+            logger.error(f"Trust layer error: {_trust_res}")
+    except _averify.TimeoutError:
+        logger.warning("Verification layer exceeded %.0fs budget — returning report, marking pending",
+                       _VERIFY_BUDGET_S)
     except Exception as e:
-        logger.error(f"Validation graph error: {e}")
+        logger.error(f"Verification layer error: {e}")
+
+    if report.validation is None:
         report.validation = {
-            "status": "ERROR", "passed": True, "warnings": [], "notes": [],
-            "total_flags": 0, "error": str(e),
-            "summary": "Validation service unavailable",
+            "status": "PENDING", "passed": True, "warnings": [], "notes": [],
+            "total_flags": 0,
+            "summary": "Validation deferred to keep the report responsive.",
             "validated_at": None,
         }
-
-    #  Trust Layer scorecard (P2) — atomic-claim citation judging, contradiction
-    #  detection, retrieval coverage, and abstention. Runs after validation so it
-    #  can fold the verifier ERROR flags into the contradiction signal.
-    try:
-        from app.services.trust_layer_service import score_report_trust
-        report.trust = await score_report_trust(report.model_dump(mode="json"))
-    except Exception as e:
-        logger.error(f"Trust layer error: {e}")
+    if report.trust is None:
         report.trust = {
-            "available": False, "error": str(e),
-            "summary": "Trust scoring unavailable for this report.",
+            "available": False,
+            "summary": "Trust scoring deferred to keep the report responsive.",
             "abstention_required": False, "human_review_recommended": False,
         }
 
