@@ -765,26 +765,9 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
         else:
             _aggregated_sources = None
 
-        # Inject aggregated papers into report sources NOW (after aggregator ran)
-        if _aggregated_sources and hasattr(report, 'sources'):
-            from datetime import datetime as _dt2
-            from app.models.alignment import ReportSource
-            existing_urls = set(s.url for s in report.sources if hasattr(s, 'url') and s.url)
-            next_num = max((s.number for s in report.sources if hasattr(s, 'number')), default=0) + 1
-            for paper in _aggregated_sources.get('papers', [])[:5]:
-                url = paper.get('url', '')
-                if url and url not in existing_urls:
-                    existing_urls.add(url)
-                    name = (paper.get('authors','') + ' (' + paper.get('year','') + '). ' +
-                            paper.get('title','')[:80] + '. ' + paper.get('journal',''))[:200]
-                    try:
-                        report.sources.append(ReportSource(
-                            number=next_num, name=name, url=url,
-                            accessed=_dt2.utcnow().strftime('%Y-%m-%d')
-                        ))
-                        next_num += 1
-                    except Exception as _e:
-                        logger.warning(f"Could not append source: {_e}")
+        # (Aggregated papers are already injected into researcher_ctx above; the
+        # report object doesn't exist yet here, and report.sources is rebuilt later
+        # in generate_pi_report — so no source injection at this stage.)
 
         if not isinstance(pub_data, Exception) and pub_data:
             pub_context = format_publications_for_expert(pub_data)
