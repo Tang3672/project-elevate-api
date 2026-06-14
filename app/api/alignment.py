@@ -52,33 +52,22 @@ async def check_alignment(payload: AlignmentRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/pi-report", response_model=PIReport)
-async def get_pi_report(payload: PIReportRequest, current_user = Depends(get_current_user)):
-    """
-    Full PI go-to-market intelligence report.
+_DEV_EMAILS = {"test@projectelevate.io", "ijw91021@gmail.com",
+               "admin@projectelevate.io", "oneonesie100@gmail.com"}
+_PLAN_LIMITS = {
+    "basic":        5,    # Explorer $49
+    "starter":      20,   # Innovator $149
+    "professional": None,  # Institution $799 — unlimited
+    "active":       None,
+    "trialing":     None,
+}
 
-    For antibiotics: includes disease intelligence, transparent bottom-up market
-    sizing, FDA regulatory pathway (QIDP/LPAD/Fast Track), clinical trial
-    requirements, P&T committee access strategy, friction points and loopholes,
-    BARDA/CARB-X funding programs — all with explicit source citations.
 
-    Takes 20-40 seconds.
-    """
-    # ── Server-side quota enforcement (BEFORE calling Claude) ─────────────────
-    # This is the real gate — frontend checks are just UX. Without this,
-    # anyone who bypasses the frontend can burn Anthropic API tokens freely.
-    _dev_emails = {"test@projectelevate.io", "ijw91021@gmail.com",
-                   "admin@projectelevate.io", "oneonesie100@gmail.com"}
-    _PLAN_LIMITS = {
-        "basic":        5,   # Explorer $49
-        "starter":      20,  # Innovator $149
-        "professional": None, # Institution $799 — unlimited
-        "active":       None,
-        "trialing":     None,
-    }
-
+async def _enforce_quota(current_user):
+    """Server-side quota gate (BEFORE calling Claude). Raises HTTPException(402)
+    if over limit. Frontend checks are UX only; this is the real gate."""
     try:
-        if current_user and current_user.get("email") not in _dev_emails:
+        if current_user and current_user.get("email") not in _DEV_EMAILS:
             from app.db.user_repository import get_user_by_id
             user = await get_user_by_id(current_user["id"])
             if user:
@@ -87,8 +76,7 @@ async def get_pi_report(payload: PIReportRequest, current_user = Depends(get_cur
                 used       = user.get("free_reports_used", 0) or 0
                 limit      = _PLAN_LIMITS.get(plan) or _PLAN_LIMITS.get(sub_status)
 
-                # Early access period: grant 10 free analyses to anyone on the waitlist
-                # Remove this block when billing is live
+                # Early-access period: grant 10 free analyses to waitlist members.
                 on_waitlist = False
                 try:
                     from app.db.database import get_pool
@@ -96,55 +84,101 @@ async def get_pi_report(payload: PIReportRequest, current_user = Depends(get_cur
                     async with pool.acquire() as conn:
                         wl = await conn.fetchrow(
                             "SELECT id FROM waitlist WHERE lower(email)=lower($1)",
-                            current_user.get("email","")
-                        )
+                            current_user.get("email", ""))
                         on_waitlist = bool(wl)
                 except Exception:
                     pass
-
-                early_access_limit = 10  # free analyses for waitlist members
-                if on_waitlist and used < early_access_limit:
-                    limit = early_access_limit  # override with early access allowance
+                if on_waitlist and used < 10:
+                    limit = 10
 
                 if limit is not None and used >= limit:
-                    raise HTTPException(
-                        status_code=402,
-                        detail={
-                            "error": "quota_exceeded",
-                            "message": f"You've used all {limit} analyses on your plan. Upgrade to continue.",
-                            "used": used,
-                            "limit": limit,
-                        }
-                    )
+                    raise HTTPException(status_code=402, detail={
+                        "error": "quota_exceeded",
+                        "message": f"You've used all {limit} analyses on your plan. Upgrade to continue.",
+                        "used": used, "limit": limit,
+                    })
     except HTTPException:
         raise
     except Exception as quota_e:
         logger.warning("Quota check failed (non-fatal): %s", quota_e)
 
+
+async def _increment_usage(current_user):
     try:
-        idea = payload.idea
-        if payload.target_pathogen:
-            idea = f"{idea}\n\nTarget pathogen: {payload.target_pathogen}"
+        if current_user and current_user.get("email") not in _DEV_EMAILS:
+            from app.db.user_repository import get_user_by_id, increment_free_report_count
+            user = await get_user_by_id(current_user["id"])
+            status = user.get("subscription_status", "none") if user else "none"
+            if status not in ("active", "trialing"):
+                await increment_free_report_count(current_user["id"])
+    except Exception as inc_e:
+        logger.warning(f"Failed to increment report count: {inc_e}")
+
+
+def _idea_from_payload(payload: "PIReportRequest") -> str:
+    idea = payload.idea
+    if payload.target_pathogen:
+        idea = f"{idea}\n\nTarget pathogen: {payload.target_pathogen}"
+    return idea
+
+
+@router.post("/pi-report", response_model=PIReport)
+async def get_pi_report(payload: PIReportRequest, current_user = Depends(get_current_user)):
+    """Full PI go-to-market intelligence report (synchronous). Kept for backward
+    compatibility; the frontend now uses the async pair below to avoid proxy
+    timeouts on the ~2-3 minute generation."""
+    await _enforce_quota(current_user)
+    try:
         report = await generate_pi_report(
-            idea, payload.product_type, payload.disease_domain,
+            _idea_from_payload(payload), payload.product_type, payload.disease_domain,
             payload.tier1_category, funding_pathway=payload.funding_pathway,
         )
-        # Increment usage counter after successful report
-        try:
-            if current_user and current_user.get("email") not in _dev_emails:
-                from app.db.user_repository import get_user_by_id, increment_free_report_count
-                user = await get_user_by_id(current_user["id"])
-                status = user.get("subscription_status", "none") if user else "none"
-                if status not in ("active", "trialing"):
-                    await increment_free_report_count(current_user["id"])
-        except Exception as inc_e:
-            logger.warning(f"Failed to increment report count: {inc_e}")
+        await _increment_usage(current_user)
         return report
     except ValueError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         logger.error(f"PI report failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/pi-report/async")
+async def get_pi_report_async(payload: PIReportRequest, current_user = Depends(get_current_user)):
+    """Start report generation in the background; returns a job_id immediately so
+    the client never holds a long request open. Poll /pi-report/status/{job_id}."""
+    await _enforce_quota(current_user)   # synchronous gate — 402 returns instantly
+    import asyncio
+    from app.services.report_jobs import create_job, set_done, set_error
+    job_id = create_job()
+    idea = _idea_from_payload(payload)
+    _user = current_user
+
+    async def _run():
+        try:
+            report = await generate_pi_report(
+                idea, payload.product_type, payload.disease_domain,
+                payload.tier1_category, funding_pathway=payload.funding_pathway,
+            )
+            set_done(job_id, report.model_dump(mode="json"))
+            await _increment_usage(_user)
+        except ValueError as e:
+            set_error(job_id, str(e))
+        except Exception as e:
+            logger.error(f"Async PI report failed: {e}", exc_info=True)
+            set_error(job_id, str(e))
+
+    asyncio.create_task(_run())
+    return {"job_id": job_id, "status": "running"}
+
+
+@router.get("/pi-report/status/{job_id}")
+async def get_pi_report_status(job_id: str):
+    """Poll an async report job. Returns {status: running|done|error, report?, error?}."""
+    from app.services.report_jobs import get_job
+    job = get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found or expired")
+    return {"status": job["status"], "report": job["report"], "error": job["error"]}
 
 
 @router.get("/world-graph")
