@@ -487,8 +487,13 @@ async def _generate_expert_report(idea, product_type, expert, demand_results, ho
     Injects expert system_prompt + knowledge_base into the researcher context.
     Falls back to antibiotic-specific parsing for AMR; generic parsing for others.
     """
-    #  Two-layer knowledge system 
+    #  Two-layer knowledge system
     # Layer 1: Disease Classifier → specific disease name
+    import time as _time
+    _T0 = _time.monotonic()
+    _TIMING = {}
+    def _ck(label):
+        _TIMING[label] = round(_time.monotonic() - _T0, 1)
     disease_info = {}
     disease_name = "the indicated condition"
     try:
@@ -607,6 +612,11 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
     critic_ctx     = expert_critic_rules
 
     # Moat Widener 2+3: inject FDA history + ClinicalTrials live pipeline
+    # Bind all gather-result vars up front so an early failure in the block below
+    # (e.g. an import error) can't leave them unbound → UnboundLocalError downstream.
+    ci = pub_data = strategic_intel = aggregated_sources = chapter_data = None
+    pipeline_result = panel_result = funding_intel = patent_landscape = regulatory_precedent = Exception("not gathered")
+    _gather_error = None
     try:
         from app.services.fda_pipeline import (
             get_full_competitive_intelligence,
@@ -794,7 +804,9 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
                 logger.warning("Literature synthesis failed (non-fatal): %s", _ls_e)
 
     except Exception as e:
-        logger.warning(f"Competitive intelligence fetch failed: {e}")
+        import traceback as _tbx
+        _gather_error = f"{type(e).__name__}: {e}"
+        logger.warning(f"Competitive intelligence fetch failed: {e}\n{_tbx.format_exc()}")
         _competitive_intelligence = {}
 
 
@@ -1057,6 +1069,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
 
     system = expert.system_prompt + "\n\n" + EXPERT_JSON_SCHEMA + reporting_instructions
 
+    _ck("pre_synthesis")
     # ── Cost-aware specialist router (P3) — pick the synthesis model tier; the
     #    frontier model is used only when complexity/uncertainty is high. ──
     _routing_plan = None
@@ -1074,6 +1087,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
         logger.warning("Cost-aware router failed (non-fatal, default model): %s", _rt_e)
 
     raw  = await _call_claude(context, system, max_tokens=6144, model=_synthesis_model)
+    _ck("post_synthesis")
     data = _clean_json(raw)
 
     # Parse into PIReport
@@ -1082,6 +1096,14 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
     # Attach the cost-aware routing plan (P3) for visibility/audit.
     if _routing_plan is not None:
         report.routing_plan = _routing_plan
+
+    _ck("report_built")
+    report.diagnostics = {
+        "timing_s": _TIMING,
+        "total_s": round(_time.monotonic() - _T0, 1),
+        "gather_error": _gather_error,
+        "synthesis_model": _synthesis_model,
+    }
 
     # ── P1: market-sizing provenance — typed, source-backed assumptions + scenarios + waterfall ──
     if deriv is not None:
