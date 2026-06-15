@@ -319,7 +319,49 @@ async def generate_pi_report(
             "abstention_required": False, "human_review_recommended": False,
         }
 
+    # Self-correction: if the verifiers found hard ERRORs, fix the flagged sections
+    # and re-validate once. Async generation gives us the headroom, and the user
+    # shouldn't have to see uncorrected errors.
+    try:
+        _val = report.validation or {}
+        _errs = _val.get("errors") or []
+        if _errs and _val.get("status") == "ERROR":
+            from app.services.validation_graph import correct_flagged_sections, validate_pi_report as _revalidate
+            _fixed = await correct_flagged_sections(report.model_dump(mode="json"), _errs)
+            if _fixed:
+                _apply_corrected_sections(report, _fixed)
+                _re = await _revalidate(report.model_dump(mode="json"), _sub_id)
+                if _re.get("validation"):
+                    report.validation = _re["validation"]
+                logger.info("Self-correction: ERROR -> %s (fixed %s)",
+                            (report.validation or {}).get("status"), list(_fixed))
+    except Exception as _cor_e:
+        logger.warning("Self-correction failed (non-fatal): %s", _cor_e)
+
     return report
+
+
+def _apply_corrected_sections(report, fixed: dict) -> None:
+    """Replace verifier-corrected report sections, rebuilding their Pydantic models."""
+    from app.models.alignment import (
+        DiseaseIntelligence, MarketSizingCalculation, RegulatoryPathway,
+        MarketAccessStrategy, MarketGeography,
+    )
+    _MODELS = {
+        "disease_intelligence": DiseaseIntelligence,
+        "market_sizing": MarketSizingCalculation,
+        "regulatory_pathway": RegulatoryPathway,
+        "market_access": MarketAccessStrategy,
+        "market_geography": MarketGeography,
+    }
+    for section, val in (fixed or {}).items():
+        try:
+            if section == "executive_summary" and isinstance(val, str):
+                report.executive_summary = val
+            elif section in _MODELS and isinstance(val, dict):
+                setattr(report, section, _MODELS[section](**val))
+        except Exception as e:
+            logger.warning("apply corrected section '%s' failed: %s", section, e)
 
 
 async def generate_alignment_report(idea: str) -> AlignmentReport:

@@ -651,6 +651,62 @@ def get_validation_graph():
     return _validation_graph
 
 
+# ── Self-correction: fix verifier-flagged sections, then the caller re-validates ──
+
+CORRECTOR_MODEL = "claude-sonnet-4-6"
+
+_SECTION_FIELDS = {  # top-level report sections a flag can target
+    "disease_intelligence", "market_sizing", "regulatory_pathway",
+    "market_access", "market_geography", "executive_summary",
+}
+
+
+async def correct_flagged_sections(report: dict, error_flags: list) -> dict:
+    """Given the verifiers' ERROR flags, ask the model to fix ONLY the affected
+    report sections and return them as JSON. Returns {section: corrected_value}.
+    Best-effort; returns {} on any problem (the report is then left as-is)."""
+    if not error_flags:
+        return {}
+    # Which top-level sections were flagged?
+    sections = set()
+    for f in error_flags:
+        field = (f.get("field") or "").split(".")[0]
+        if field in _SECTION_FIELDS:
+            sections.add(field)
+    if not sections:
+        return {}
+
+    current = {s: report.get(s) for s in sections}
+    flags_txt = "\n".join(
+        f"- [{f.get('agent')}] {f.get('field')}: {f.get('issue')} (fix: {f.get('suggestion','')})"
+        for f in error_flags)
+
+    system = (
+        "You are a careful editor fixing factual/numeric errors that independent verifiers "
+        "found in a biomedical commercialization report. Fix ONLY the specific issues listed. "
+        "Keep the exact same JSON schema for each section. Do not invent new sources or URLs; "
+        "if a fact is uncertain, soften it or cite a comparable precedent rather than asserting "
+        "a wrong number. Respond with ONLY a JSON object mapping each section name to its "
+        "corrected value, e.g. {\"regulatory_pathway\": {...}}.")
+    user = (f"VERIFIER ERRORS:\n{flags_txt}\n\nCURRENT SECTIONS (fix these):\n"
+            f"{json.dumps(current, indent=2)[:9000]}\n\nReturn the corrected sections as JSON.")
+
+    try:
+        raw = await _call_claude(system, user, max_tokens=4000, model=CORRECTOR_MODEL)
+        clean = raw.strip()
+        if clean.startswith("```"):
+            clean = clean.split("```")[1]
+            if clean.lower().startswith("json"):
+                clean = clean[4:]
+        start, end = clean.find("{"), clean.rfind("}")
+        data = json.loads(clean[start:end + 1]) if start != -1 else {}
+        # Only return sections we asked about.
+        return {k: v for k, v in data.items() if k in sections and v}
+    except Exception as e:
+        logger.warning("correct_flagged_sections failed (non-fatal): %s", e)
+        return {}
+
+
 # ── Public Entry Point ────────────────────────────────────────────────────────
 
 async def validate_pi_report(report: dict, sub_expert_id: str = "drug_amr") -> dict:
