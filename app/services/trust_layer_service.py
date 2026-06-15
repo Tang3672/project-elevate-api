@@ -192,6 +192,17 @@ def collect_evidence_pool(report: dict) -> list[dict]:
         add("FDA regulatory analysis", None,
             f"{rp2.get('recommended_pathway', '')}: {rp2.get('pathway_rationale', '')[:160]}")
 
+    # Retrieved-fact blocks the synthesis actually used (regulatory precedents,
+    # competitive pipeline, funding, KOLs, literature) — real evidence that wasn't
+    # otherwise on the report. Split each block into individual lines so each fact
+    # is its own matchable evidence item (not truncated to one 200-char blob).
+    for gc in report.get("grounded_context", []) or []:
+        src = gc.get("source", "Retrieved intelligence")
+        for line in (gc.get("fact", "") or "").split("\n"):
+            line = line.strip(" -•·\t")
+            if len(line) > 12:
+                add(src, None, line)
+
     return pool
 
 

@@ -1106,6 +1106,34 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
     # Parse into PIReport
     report = _parse_expert_response(data, idea, product_type, expert, demand_results, hospital_matches_raw, total_signals)
 
+    # Fix 1 — make market sizing arithmetically self-consistent so the Math Verifier
+    # can't flag rounding drift (LLMs round $99.45M->$99M inconsistently). Recompute
+    # SAM/SOM from clean displayed percentages off the deterministic derivation.
+    if deriv is not None:
+        _enforce_market_consistency(report, deriv)
+
+    # Fix 2 — give the trust judge the facts the synthesis actually used. The
+    # regulatory-precedent / competitive / funding / KOL / literature blocks are
+    # real retrieved evidence but weren't on the report, so true sourced claims
+    # (e.g. "Omadacycline approved 2018") were wrongly judged "unsupported".
+    try:
+        _grounded = []
+        for _src, _txt in (
+            ("FDA-approved drugs for this indication (openFDA)", regulatory_precedent_block),
+            ("Competitive pipeline & funding (NIH Reporter / SEC / ClinicalTrials.gov)", funding_block),
+            ("Patent landscape (Google Patents)", patent_block),
+            ("Key opinion leaders (Semantic Scholar)", kol_block),
+            ("Expert panel analysis", panel_block),
+            ("PMID-traceable literature synthesis", getattr(locals().get("lit_synthesis"), "formatted", "")),
+        ):
+            _txt = (_txt or "").strip()
+            if _txt:
+                _grounded.append({"source": _src, "fact": _txt[:1500]})
+        if _grounded:
+            report.grounded_context = _grounded
+    except Exception as _gc_e:
+        logger.debug("grounded_context build failed (non-fatal): %s", _gc_e)
+
     # Attach the cost-aware routing plan (P3) for visibility/audit.
     if _routing_plan is not None:
         report.routing_plan = _routing_plan
@@ -1842,6 +1870,40 @@ def _build_hospital_matches(hospital_matches_raw: list) -> list:
             subreddit=getattr(n, "subreddit", None),
         ))
     return items
+
+
+def _enforce_market_consistency(report, deriv) -> None:
+    """Overwrite the market-sizing headline figures + formula with internally-exact
+    arithmetic from the deterministic derivation, so SAM = TAM × penetration% and
+    SOM = SAM × capture% hold to the dollar (no LLM rounding drift for the Math
+    Verifier to flag). Best-effort; leaves the report untouched on any problem."""
+    try:
+        ms = getattr(report, "market_sizing", None)
+        if ms is None:
+            return
+        tam = round(float(getattr(deriv, "us_tam_usd", 0) or 0))
+        sam_raw = float(getattr(deriv, "us_sam_usd", 0) or 0)
+        som_raw = float(getattr(deriv, "us_som_usd", 0) or 0)
+        if tam <= 0 or sam_raw <= 0:
+            return
+        pen = round(sam_raw / tam * 100, 1)            # clean reachable-penetration %
+        sam = round(tam * pen / 100)                   # exactly TAM × pen%
+        cap = round(som_raw / sam_raw * 100, 1) if sam_raw else 0.0
+        som = round(sam * cap / 100)                   # exactly SAM × cap%
+
+        def _fmt(v):
+            return f"${v/1e9:.2f}B" if v >= 1e9 else f"${v/1e6:.1f}M"
+
+        ms.total_addressable_market_usd = float(tam)
+        ms.serviceable_market_usd = float(sam)
+        ms.formula = (
+            f"TAM = ${tam:,.0f} ({_fmt(tam)}, eligible patients × annual price). "
+            f"SAM = TAM × {pen}% reachable penetration = ${sam:,.0f} ({_fmt(sam)}). "
+            f"SOM = SAM × {cap}% Year-1 capture = ${som:,.0f} ({_fmt(som)}). "
+            f"US, annual; figures from the deterministic bottom-up derivation."
+        )
+    except Exception as e:
+        logger.warning("market consistency enforcement skipped: %s", e)
 
 
 async def _call_claude(context: str, system_prompt: str, max_tokens: int = 2000,

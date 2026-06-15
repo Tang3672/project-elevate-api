@@ -198,6 +198,7 @@ class PIReport(BaseModel):
     report_id:              Optional[str]  = None    # stable id for feedback/outcome linkage (P11)
     portfolio_benchmark:    Optional[dict] = None    # institution-level percentile + comparables (P7)
     routing_plan:           Optional[dict] = None     # cost-aware specialist routing plan (P3)
+    grounded_context:       Optional[list] = None      # retrieved facts used by synthesis, for trust judging
     expert_domain:          Optional[str]  = None
     expert_name:            Optional[str]  = None
     expert_icon:            Optional[str]  = None
