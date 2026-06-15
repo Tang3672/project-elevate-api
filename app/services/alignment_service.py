@@ -1094,7 +1094,10 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
     except Exception as _rt_e:
         logger.warning("Cost-aware router failed (non-fatal, default model): %s", _rt_e)
 
-    raw  = await _call_claude(context, system, max_tokens=6144, model=_synthesis_model)
+    # 8192 (was 6144): the stricter grounding + full market-math rules make the
+    # report longer; 6144 truncated mid-JSON and dropped later sections (sources,
+    # market sizing). Async generation removes any latency concern.
+    raw  = await _call_claude(context, system, max_tokens=8192, model=_synthesis_model)
     data = _clean_json(raw)
 
     # Parse into PIReport
