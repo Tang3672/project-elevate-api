@@ -270,7 +270,10 @@ async def generate_pi_report(
     import asyncio as _averify
     _sub_id = getattr(expert, "sub_expert_id", getattr(expert, "domain_id", "drug_amr"))
     _report_dict = report.model_dump(mode="json")
-    _VERIFY_BUDGET_S = 25.0
+    # Generous budget: report generation is async (no proxy timeout), so validation
+    # + trust should run to completion rather than being deferred. The cap only
+    # guards against a genuinely stuck verifier call.
+    _VERIFY_BUDGET_S = 90.0
 
     async def _run_validation():
         from app.services.validation_graph import validate_pi_report
