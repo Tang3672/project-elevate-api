@@ -1409,6 +1409,11 @@ def _parse_expert_response(data, idea, product_type, expert, demand_results, hos
     ) if ma_data else None
 
     geo_data = data.get("market_geography", {})
+    try:
+        _geo_obj = MarketGeography(**geo_data) if geo_data else None
+    except Exception as _geo_e:
+        logger.warning("market_geography parse failed (non-fatal): %s", _geo_e)
+        _geo_obj = MarketGeography(description=str(geo_data.get("description", "")) if isinstance(geo_data, dict) else "")
 
     return PIReport(
         product_type           = product_type,
@@ -1420,7 +1425,7 @@ def _parse_expert_response(data, idea, product_type, expert, demand_results, hos
         market_access          = market_access,
         supporting_evidence    = _build_evidence_items(demand_results[:10]),
         hospital_need_matches  = _build_hospital_matches(hospital_matches_raw[:5]),
-        market_geography       = MarketGeography(**geo_data) if geo_data else None,
+        market_geography       = _geo_obj,
         recommended_next_steps = data.get("recommended_next_steps", []),
         strategic_playbook     = data.get("strategic_playbook", []),
         literature_citations   = data.get("literature_citations", []),

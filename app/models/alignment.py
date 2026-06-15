@@ -160,9 +160,9 @@ class HospitalNeedMatch(BaseModel):
 
 
 class MarketGeography(BaseModel):
-    description:  str
+    description:  str = ""
     top_states:   List[str] = Field(default_factory=list)
-    scope:        str
+    scope:        str = ""
 
 
 # ── Full PI Report ────────────────────────────────────────────────────────────
