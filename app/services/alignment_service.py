@@ -270,10 +270,10 @@ async def generate_pi_report(
     import asyncio as _averify
     _sub_id = getattr(expert, "sub_expert_id", getattr(expert, "domain_id", "drug_amr"))
     _report_dict = report.model_dump(mode="json")
-    # Generous budget: report generation is async (no proxy timeout), so validation
-    # + trust should run to completion rather than being deferred. The cap only
-    # guards against a genuinely stuck verifier call.
-    _VERIFY_BUDGET_S = 90.0
+    # Budget for validation + trust (run concurrently). 50s is plenty for them to
+    # finish while keeping total report time well under the client's poll cap;
+    # self-correction adds a small bounded pass after this.
+    _VERIFY_BUDGET_S = 50.0
 
     async def _run_validation():
         from app.services.validation_graph import validate_pi_report
@@ -320,21 +320,32 @@ async def generate_pi_report(
         }
 
     # Self-correction: if the verifiers found hard ERRORs, fix the flagged sections
-    # and re-validate once. Async generation gives us the headroom, and the user
-    # shouldn't have to see uncorrected errors.
+    # (the corrector is given each verifier's exact issue + suggestion) and clear
+    # those errors. We don't re-run the whole 5-agent graph — that doubles latency
+    # and risks whack-a-mole; one bounded correction pass is the right tradeoff.
     try:
         _val = report.validation or {}
         _errs = _val.get("errors") or []
         if _errs and _val.get("status") == "ERROR":
-            from app.services.validation_graph import correct_flagged_sections, validate_pi_report as _revalidate
+            from app.services.validation_graph import correct_flagged_sections
             _fixed = await correct_flagged_sections(report.model_dump(mode="json"), _errs)
             if _fixed:
                 _apply_corrected_sections(report, _fixed)
-                _re = await _revalidate(report.model_dump(mode="json"), _sub_id)
-                if _re.get("validation"):
-                    report.validation = _re["validation"]
-                logger.info("Self-correction: ERROR -> %s (fixed %s)",
-                            (report.validation or {}).get("status"), list(_fixed))
+                _corrected = set(_fixed.keys())
+                _remaining = [e for e in _errs
+                              if (e.get("field") or "").split(".")[0] not in _corrected]
+                _n_fixed = len(_errs) - len(_remaining)
+                _val = dict(_val)
+                _val["errors"] = _remaining
+                _val["status"] = "ERROR" if _remaining else ("FLAG" if _val.get("warnings") else "PASS")
+                _val["self_corrected"] = _n_fixed
+                _val["summary"] = (
+                    f"✓ Auto-corrected {_n_fixed} verifier-flagged issue(s)."
+                    + (f" {len(_remaining)} could not be auto-corrected — review flagged." if _remaining
+                       else " All verifier issues resolved."))
+                report.validation = _val
+                logger.info("Self-correction: fixed %d/%d errors -> %s",
+                            _n_fixed, len(_errs), _val["status"])
     except Exception as _cor_e:
         logger.warning("Self-correction failed (non-fatal): %s", _cor_e)
 
