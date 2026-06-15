@@ -159,7 +159,15 @@ async def get_pi_report_async(payload: PIReportRequest, current_user = Depends(g
                 idea, payload.product_type, payload.disease_domain,
                 payload.tier1_category, funding_pathway=payload.funding_pathway,
             )
-            await set_done(job_id, report.model_dump(mode="json"))
+            rd = report.model_dump(mode="json")
+            # Validate source links and drop dead/fabricated ones (async path has headroom).
+            try:
+                from app.services.url_validator import clean_report_urls
+                _url_stats = await clean_report_urls(rd)
+                logger.info("URL validation: %s", _url_stats)
+            except Exception as _u:
+                logger.warning("URL validation skipped (non-fatal): %s", _u)
+            await set_done(job_id, rd)
             await _increment_usage(_user)
         except ValueError as e:
             await set_error(job_id, str(e))
