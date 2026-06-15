@@ -82,18 +82,27 @@ def build_benchmark(report: dict, internal_peers: list[dict],
     drivers = cs_block.get("top_drivers") or []
     above, may_fail = _split_drivers(drivers, scores)
 
-    if percentile is not None:
-        if percentile >= 60:
-            above.insert(0, f"Ranks in the top {100 - percentile}% of "
-                            f"{len(peer_scores)} comparable internal disclosures")
-        elif percentile <= 40:
-            may_fail.insert(0, f"Below the median of {len(peer_scores)} comparable "
-                               f"internal disclosures (P{percentile})")
+    # Rank is clearer than a percentile when the pool is tiny (a "top 0% of 2"
+    # percentile is nonsense). Compute an explicit rank and prefer it for small N.
+    n = len([s for s in peer_scores if s is not None])
+    rank = rank_total = None
+    if my_priority is not None and n:
+        rank = 1 + sum(1 for s in peer_scores if s is not None and s > my_priority)
+        rank_total = n + 1
+        if n < 5:
+            line = f"Ranks #{rank} of {rank_total} comparable internal disclosures on file"
+            (above if rank * 2 <= rank_total else may_fail).insert(0, line)
+        elif percentile is not None and percentile >= 60:
+            above.insert(0, f"In the top {max(1, 100 - percentile)}% of {n} comparable internal disclosures")
+        elif percentile is not None and percentile <= 40:
+            may_fail.insert(0, f"Below the median of {n} comparable internal disclosures (P{percentile})")
 
     ext = external or {}
     return {
         "portfolio_percentile": percentile,
-        "peer_count": len([s for s in peer_scores if s is not None]),
+        "rank": rank,
+        "rank_total": rank_total,
+        "peer_count": n,
         "similar_internal_projects": similar_internal,
         "similar_successful_external_projects": ext.get("successful", []),
         "similar_failed_external_projects": ext.get("failed", []),

@@ -49,9 +49,10 @@ def test_build_benchmark_above_average():
     b = build_benchmark(rep, peers)
     assert b["portfolio_percentile"] == 100          # 0.7 above all 3 peers
     assert b["peer_count"] == 3
+    assert b["rank"] == 1 and b["rank_total"] == 4   # small pool -> rank, not percentile
     assert len(b["similar_internal_projects"]) == 3
-    # positives land in above-average, and the top-percentile note is prepended
-    assert any("top" in w.lower() for w in b["why_this_is_above_average"])
+    # small-N uses rank wording ("#1 of 4"), and the real drivers are still there
+    assert any("#1 of 4" in w for w in b["why_this_is_above_average"])
     assert any("SBIR" in w for w in b["why_this_is_above_average"])
 
 
@@ -61,8 +62,16 @@ def test_build_benchmark_below_average_collects_risks():
                         "Uncertain reimbursement / payer pathway"])
     b = build_benchmark(rep, peers)
     assert b["portfolio_percentile"] == 0
-    assert any("median" in w.lower() or "below" in w.lower() for w in b["why_this_may_fail"])
+    assert b["rank"] == 4 and b["rank_total"] == 4   # last of 4
+    assert any("#4 of 4" in w for w in b["why_this_may_fail"])
     assert any("Crowded" in w for w in b["why_this_may_fail"])
+
+
+def test_large_pool_uses_percentile_not_rank():
+    peers = [_peer(str(i), i / 10.0) for i in range(6)]   # 6 peers -> not small
+    rep = _report(0.95, ["Large addressable market"])
+    b = build_benchmark(rep, peers)
+    assert any("top" in w.lower() for w in b["why_this_is_above_average"])
 
 
 def test_build_benchmark_no_peers():
