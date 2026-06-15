@@ -78,6 +78,12 @@ class PIReportState(TypedDict):
 
 async def _call_claude(system: str, user: str, max_tokens: int = 1500,
                         model: str = VERIFIER_MODEL) -> str:
+    from datetime import date as _date
+    # Verifiers lack a clock and were flagging valid current/recent dates as
+    # "future" — ground them in today's date to kill that class of false errors.
+    dated_system = (f"CONTEXT: Today's date is {_date.today().isoformat()}. Any date on or "
+                    f"before today is in the past or present — NEVER flag it as a 'future date'.\n\n"
+                    + system)
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
         r = await client.post(
             ANTHROPIC_API_URL,
@@ -89,7 +95,7 @@ async def _call_claude(system: str, user: str, max_tokens: int = 1500,
             json={
                 "model":      model,
                 "max_tokens": max_tokens,
-                "system":     system,
+                "system":     dated_system,
                 "messages":   [{"role": "user", "content": user}],
             }
         )
