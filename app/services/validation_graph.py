@@ -660,6 +660,35 @@ _SECTION_FIELDS = {  # top-level report sections a flag can target
     "market_access", "market_geography", "executive_summary",
 }
 
+# Verifiers often emit RELATIVE field paths ("designations[0].benefit",
+# "data_points[4]"), so map by keyword in the field + issue text, not just prefix.
+_FIELD_KEYWORDS = [
+    ("designation", "regulatory_pathway"), ("pathway", "regulatory_pathway"),
+    ("regulatory", "regulatory_pathway"), ("exclusivity", "regulatory_pathway"),
+    ("clinical_trial", "regulatory_pathway"), ("fda", "regulatory_pathway"),
+    ("data_point", "disease_intelligence"), ("incidence", "disease_intelligence"),
+    ("prevalence", "disease_intelligence"), ("resistance", "disease_intelligence"),
+    ("pipeline", "disease_intelligence"), ("epidemiolog", "disease_intelligence"),
+    ("step", "market_sizing"), ("penetration", "market_sizing"),
+    ("tam", "market_sizing"), ("sam", "market_sizing"), ("market_sizing", "market_sizing"),
+    ("buyer", "market_access"), ("reimbursement", "market_access"),
+    ("payer", "market_access"), ("market_access", "market_access"),
+    ("geograph", "market_geography"),
+    ("executive", "executive_summary"),
+]
+
+
+def section_for_flag(field: str, issue: str = "") -> str:
+    """Map a verifier flag (possibly a relative field path) to a top-level section."""
+    pref = (field or "").split(".")[0].split("[")[0]
+    if pref in _SECTION_FIELDS:
+        return pref
+    blob = f"{field} {issue}".lower()
+    for kw, sec in _FIELD_KEYWORDS:
+        if kw in blob:
+            return sec
+    return ""
+
 
 async def correct_flagged_sections(report: dict, error_flags: list) -> dict:
     """Given the verifiers' ERROR flags, ask the model to fix ONLY the affected
@@ -667,12 +696,8 @@ async def correct_flagged_sections(report: dict, error_flags: list) -> dict:
     Best-effort; returns {} on any problem (the report is then left as-is)."""
     if not error_flags:
         return {}
-    # Which top-level sections were flagged?
-    sections = set()
-    for f in error_flags:
-        field = (f.get("field") or "").split(".")[0]
-        if field in _SECTION_FIELDS:
-            sections.add(field)
+    sections = {section_for_flag(f.get("field", ""), f.get("issue", "")) for f in error_flags}
+    sections = {s for s in sections if s in _SECTION_FIELDS}
     if not sections:
         return {}
 

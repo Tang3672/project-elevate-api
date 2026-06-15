@@ -327,13 +327,13 @@ async def generate_pi_report(
         _val = report.validation or {}
         _errs = _val.get("errors") or []
         if _errs and _val.get("status") == "ERROR":
-            from app.services.validation_graph import correct_flagged_sections
+            from app.services.validation_graph import correct_flagged_sections, section_for_flag
             _fixed = await correct_flagged_sections(report.model_dump(mode="json"), _errs)
             if _fixed:
                 _apply_corrected_sections(report, _fixed)
                 _corrected = set(_fixed.keys())
                 _remaining = [e for e in _errs
-                              if (e.get("field") or "").split(".")[0] not in _corrected]
+                              if section_for_flag(e.get("field", ""), e.get("issue", "")) not in _corrected]
                 _n_fixed = len(_errs) - len(_remaining)
                 _val = dict(_val)
                 _val["errors"] = _remaining
