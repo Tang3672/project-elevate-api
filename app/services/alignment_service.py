@@ -1051,13 +1051,10 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
         "composition'; 'Apply to NIAID SBIR Phase I, ~$300K, next deadline'; 'Run a 28-day murine "
         "thigh-infection PK/PD study vs linezolid'), with a rough cost or timeframe where known. "
         "Avoid vague advice like 'pursue funding' or 'engage stakeholders'. "
-        "(9) MARKET MATH (must be self-consistent and fully shown — the math is verified): "
-        "market_sizing.steps MUST include, as explicit steps, the eligible patient population, the "
-        "annual price/cost per patient, AND the adoption/penetration rate (as a %). The formula "
-        "field MUST show the complete arithmetic with every multiplier stated, e.g. "
-        "'TAM = 80,000 patients × $12,000 = $960M; SAM = TAM × 22% penetration = $211M; "
-        "SOM = SAM × 25% Year-1 capture = $53M'. NEVER state a SAM or SOM value without showing the "
-        "penetration/capture rate that produces it from TAM; the rate must equal SAM÷TAM. "
+        "(9) MARKET SIZING: populate market_sizing.steps (eligible population, price, penetration) "
+        "and the TAM/SAM/SOM values using ONLY the bottom-up derivation provided above. Keep the "
+        "formula field brief — the system renders the exact, verified arithmetic separately, so do "
+        "not labor over precise multiplication in your text. "
         "(10) REGULATORY ACCURACY (verified): state FDA pathway names, exclusivity periods, and "
         "designation eligibility ONLY as given by the Regulatory Pathway Expert or the provided "
         "context. Do not invent specific exclusivity year-counts or eligibility criteria. Standard "
@@ -1097,11 +1094,34 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
     except Exception as _rt_e:
         logger.warning("Cost-aware router failed (non-fatal, default model): %s", _rt_e)
 
-    # 8192 (was 6144): the stricter grounding + full market-math rules make the
-    # report longer; 6144 truncated mid-JSON and dropped later sections (sources,
-    # market sizing). Async generation removes any latency concern.
+    # Synthesis with a retry: the JSON occasionally malforms/truncates, yielding a
+    # hollow report. If the first attempt comes back without the core sections,
+    # regenerate once before accepting it.
+    def _looks_complete(d):
+        return bool(d) and (d.get("executive_summary") or d.get("market_sizing")
+                            or d.get("disease_intelligence"))
+
+    def _parse_safe(raw_text):
+        try:
+            return _clean_json(raw_text)
+        except Exception as _pe:
+            logger.warning("Synthesis JSON parse failed: %s", _pe)
+            return {}
+
     raw  = await _call_claude(context, system, max_tokens=8192, model=_synthesis_model)
-    data = _clean_json(raw)
+    data = _parse_safe(raw)
+    if not _looks_complete(data):
+        logger.warning("Synthesis came back thin/unparseable — retrying once")
+        raw2 = await _call_claude(
+            context,
+            system + "\n\nIMPORTANT: respond with ONLY one complete, valid JSON object "
+                     "matching the schema. Do not truncate; include every top-level field.",
+            max_tokens=8192, model=_synthesis_model)
+        data2 = _parse_safe(raw2)
+        if _looks_complete(data2):
+            data = data2
+    if not _looks_complete(data):
+        raise ValueError("Synthesis produced no usable report after retry")
 
     # Parse into PIReport
     report = _parse_expert_response(data, idea, product_type, expert, demand_results, hospital_matches_raw, total_signals)
@@ -2008,13 +2028,18 @@ def _clean_json(raw: str) -> dict:
             except json.JSONDecodeError:
                 pass
 
-        # Final attempt: extract any complete top-level JSON object
+        # Final attempt: extract a top-level object that actually looks like a
+        # report — never return a tiny nested object (that ships a hollow report).
         import re as _re
+        _report_keys = ("executive_summary", "disease_intelligence", "market_sizing",
+                        "regulatory_pathway")
         matches = list(_re.finditer(r'\{[^{}]*\}', clean, _re.DOTALL))
         if matches:
             for m in reversed(matches):
                 try:
-                    return json.loads(m.group())
+                    obj = json.loads(m.group())
+                    if isinstance(obj, dict) and any(k in obj for k in _report_keys):
+                        return obj
                 except json.JSONDecodeError:
                     continue
 
