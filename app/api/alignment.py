@@ -159,7 +159,7 @@ async def get_pi_report_async(payload: PIReportRequest, current_user = Depends(g
             report = await generate_pi_report(
                 idea, payload.product_type, payload.disease_domain,
                 payload.tier1_category, funding_pathway=payload.funding_pathway,
-                skip_verification=True,
+                user_id=(_user or {}).get("id"), skip_verification=True,
             )
             rd = report.model_dump(mode="json")
             try:
@@ -173,7 +173,8 @@ async def get_pi_report_async(payload: PIReportRequest, current_user = Depends(g
             # Phase 2: run verification (validation + trust + self-correction) in the
             # background, then patch the job so the badges fill in client-side.
             try:
-                from app.services.alignment_service import run_report_verification
+                from app.services.alignment_service import run_report_verification, attach_competitive_landscape
+                await attach_competitive_landscape(report)   # reliable server-side sweep
                 await run_report_verification(report)
                 rd2 = report.model_dump(mode="json")
                 try:

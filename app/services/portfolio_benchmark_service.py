@@ -145,15 +145,20 @@ def _dedupe(items: list[str]) -> list[str]:
 
 async def portfolio_benchmark(report: dict, user_id: Optional[int] = None,
                               institution_id: Optional[str] = None) -> dict:
-    """Async wrapper: fetch internal peers from the registry, then build the block."""
+    """Async wrapper: fetch this owner's prior peers from the registry, then build
+    the block. Scoped to the user/institution — never a cross-account global pool."""
     try:
+        if user_id is None and not institution_id:
+            return {"portfolio_percentile": None, "rank": None, "similar_internal_projects": [],
+                    "why_this_is_above_average": [], "why_this_may_fail": [],
+                    "note": "First disclosure in this account — no internal portfolio to rank against yet."}
         from app.db.reports_repository import peer_reports
         from app.services.world_model_graph import report_id_for
         di = report.get("disease_intelligence") or {}
         disease = di.get("condition") or report.get("idea_submitted", "")[:60]
         peers = await peer_reports(
             disease_name=disease, modality=report.get("product_type", ""),
-            exclude_report_id=report_id_for(report), user_id=user_id)
+            exclude_report_id=report_id_for(report), user_id=user_id, institution_id=institution_id)
         return build_benchmark(report, peers)
     except Exception as e:
         logger.warning("portfolio_benchmark failed (non-fatal): %s", e)

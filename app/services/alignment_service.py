@@ -113,7 +113,7 @@ async def generate_pi_report(
     #  Generate with Expert context 
     report = await _generate_expert_report(
         idea, pt, expert, demand_results, hospital_matches_raw, total_signals,
-        pi_memory_context=pi_memory_context, funding_pathway=funding_pathway)
+        pi_memory_context=pi_memory_context, funding_pathway=funding_pathway, user_id=user_id)
 
     # Build sources from structured data
     try:
@@ -280,6 +280,32 @@ async def generate_pi_report(
         await run_report_verification(report)
 
     return report
+
+
+async def attach_competitive_landscape(report) -> None:
+    """Run the competitor sweep server-side and attach it to the report, so the UI
+    renders it from report data instead of a separate (flaky) client fetch."""
+    import asyncio as _aio_cl
+    try:
+        from app.services.competitor_sweep_service import sweep_competitors, to_dict
+        disease = (report.disease_intelligence.condition
+                   if getattr(report, "disease_intelligence", None) else None) \
+            or (report.idea_submitted or "")[:80]
+        kw = [w for w in disease.replace("(", "").replace(")", "").split() if len(w) > 4][:5]
+        ta = report.expert_domain or "other"
+        pt = (report.product_type.value if hasattr(report.product_type, "value")
+              else str(report.product_type)) or "drug_small_molecule"
+        loop = _aio_cl.get_event_loop()
+        landscape = await _aio_cl.wait_for(
+            loop.run_in_executor(None, lambda: sweep_competitors(
+                disease_name=disease, indication_keywords=kw,
+                therapeutic_area=ta, product_type=pt)),
+            timeout=25.0)
+        report.competitive_landscape = to_dict(landscape)
+    except Exception as e:
+        logger.warning("attach_competitive_landscape failed (non-fatal): %s", e)
+        report.competitive_landscape = {"available": False, "competitors": [],
+            "note": "Live competitor sweep unavailable — see the competitive pipeline in the Opportunity section above."}
 
 
 async def run_report_verification(report) -> None:
@@ -546,7 +572,7 @@ You must respond with ONLY a valid JSON object. No markdown, no preamble. Use th
 
 
 
-async def _generate_expert_report(idea, product_type, expert, demand_results, hospital_matches_raw, total_signals, pi_memory_context="", funding_pathway="commercial"):
+async def _generate_expert_report(idea, product_type, expert, demand_results, hospital_matches_raw, total_signals, pi_memory_context="", funding_pathway="commercial", user_id=None):
     """
     Generates a PI report using the selected Expert's domain knowledge.
     Injects expert system_prompt + knowledge_base into the researcher context.
@@ -1262,18 +1288,19 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
         _rdict = report.model_dump(mode="json")
         report.report_id = report_id_for(_rdict)
 
-        # Portfolio benchmark (P7): percentile + comparables vs prior internal disclosures.
+        # Portfolio benchmark (P7): percentile + comparables vs THIS owner's prior
+        # disclosures only (scoped by user_id — never a cross-account global pool).
         try:
             from app.services.portfolio_benchmark_service import portfolio_benchmark
-            report.portfolio_benchmark = await portfolio_benchmark(_rdict, user_id=None)
+            report.portfolio_benchmark = await portfolio_benchmark(_rdict, user_id=user_id)
         except Exception as _pb_e:
             logger.warning("Portfolio benchmark failed (non-fatal): %s", _pb_e)
 
         # Persist report metrics (P7/P10 backbone) + ingest into the graph (P4) — background.
         import asyncio as _aio_s7
         from app.db.reports_repository import save_report_metrics
-        _aio_s7.create_task(save_report_metrics(_rdict, user_id=None))
-        _aio_s7.create_task(ingest_report_to_graph(_rdict, disease_name=disease_name, user_id=None))
+        _aio_s7.create_task(save_report_metrics(_rdict, user_id=user_id))
+        _aio_s7.create_task(ingest_report_to_graph(_rdict, disease_name=disease_name, user_id=user_id))
     except Exception as _s7_e:
         logger.debug("Sprint-7 wiring failed (non-fatal): %s", _s7_e)
 

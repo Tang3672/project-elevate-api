@@ -130,20 +130,29 @@ async def save_report_metrics(report: dict, user_id: Optional[int] = None,
 
 async def peer_reports(disease_name: str, modality: str = "",
                        exclude_report_id: str = "", user_id: Optional[int] = None,
-                       limit: int = 50) -> list[dict]:
-    """Prior reports for the same disease (and modality), for benchmarking."""
+                       institution_id: Optional[str] = None, limit: int = 50) -> list[dict]:
+    """Prior reports for the SAME owner (institution, else user) in the same disease/
+    modality. Portfolio benchmarking must never compare across accounts — that both
+    leaks other users' ideas and makes the "internal portfolio" meaningless."""
+    if user_id is None and not institution_id:
+        return []   # no owner scope -> no portfolio (don't fall back to a global pool)
     try:
         from app.db.database import get_pool
         pool = await get_pool()
+        if institution_id:
+            owner_clause, owner_val = "institution_id = $5", institution_id
+        else:
+            owner_clause, owner_val = "user_id = $5", user_id
         async with pool.acquire() as conn:
-            rows = await conn.fetch("""
+            rows = await conn.fetch(f"""
                 SELECT report_id, disease_name, modality, idea, overall_priority, tam_usd, created_at
                 FROM reports
                 WHERE report_id <> $1
                   AND (lower(disease_name) = lower($2) OR lower(modality) = lower($3))
+                  AND {owner_clause}
                 ORDER BY (lower(disease_name) = lower($2)) DESC, created_at DESC
                 LIMIT $4
-            """, exclude_report_id or "", disease_name or "", modality or "", limit)
+            """, exclude_report_id or "", disease_name or "", modality or "", limit, owner_val)
             return [dict(r) for r in rows]
     except Exception as e:
         logger.warning("peer_reports failed: %s", e)
