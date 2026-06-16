@@ -78,6 +78,19 @@ async def set_error(job_id: str, error: str) -> None:
         logger.error("report_jobs.set_error failed for %s: %s", job_id, e)
 
 
+async def update_report(job_id: str, report: dict) -> None:
+    """Patch a done job's report in place (e.g. after background verification)."""
+    try:
+        from app.db.database import get_pool
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE report_jobs SET report=$2::jsonb, updated_at=NOW() "
+                "WHERE job_id=$1 AND status='done'", job_id, json.dumps(report))
+    except Exception as e:
+        logger.error("report_jobs.update_report failed for %s: %s", job_id, e)
+
+
 async def get_job(job_id: str) -> dict | None:
     from app.db.database import get_pool
     pool = await get_pool()

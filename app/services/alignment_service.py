@@ -56,6 +56,7 @@ async def generate_pi_report(
     tier1_category: str = "drug_small_molecule",
     funding_pathway: str = "commercial",
     user_id:        int = None,
+    skip_verification: bool = False,
 ) -> PIReport:
     """
     Full MoE pipeline: idea → Expert Router → Expert Context → Claude → PIReport.
@@ -261,19 +262,34 @@ async def generate_pi_report(
     report.routing_method  = router_result.routing_method
     report.mismatch_warning = router_result.mismatch_warning
 
-    #  Verification layer: LangGraph validation (P-existing) + Trust scorecard (P2).
-    #  These are run CONCURRENTLY under a hard time budget. Previously they ran
-    #  sequentially and each could approach its own 45-60s timeout, pushing total
-    #  report latency past Railway's proxy limit → the client saw "Failed to fetch".
-    #  Now they share one bounded budget and the report is always returned: if the
-    #  budget is exceeded, verification is marked PENDING rather than blocking.
+    if skip_verification:
+        # Verification (validation + trust + self-correction) is run in the
+        # background AFTER the report is delivered, so the user sees the report
+        # fast and the badges fill in a few seconds later.
+        report.validation = {
+            "status": "PENDING", "passed": True, "warnings": [], "notes": [],
+            "total_flags": 0, "pending": True,
+            "summary": "Verifying claims and FDA/market facts…", "validated_at": None,
+        }
+        report.trust = {
+            "available": False, "pending": True,
+            "summary": "Checking how many claims link to a source…",
+            "abstention_required": False, "human_review_recommended": False,
+        }
+    else:
+        await run_report_verification(report)
+
+    return report
+
+
+async def run_report_verification(report) -> None:
+    """LangGraph validation + Trust scorecard + self-correction. Mutates the report
+    in place. Can run AFTER the report is delivered (background) so it never blocks
+    the UI; the budget is generous since latency no longer matters there."""
     import asyncio as _averify
-    _sub_id = getattr(expert, "sub_expert_id", getattr(expert, "domain_id", "drug_amr"))
+    _sub_id = getattr(report, "expert_domain", None) or "drug_amr"
     _report_dict = report.model_dump(mode="json")
-    # Budget for validation + trust (run concurrently). 50s is plenty for them to
-    # finish while keeping total report time well under the client's poll cap;
-    # self-correction adds a small bounded pass after this.
-    _VERIFY_BUDGET_S = 50.0
+    _VERIFY_BUDGET_S = 75.0
 
     async def _run_validation():
         from app.services.validation_graph import validate_pi_report
@@ -300,29 +316,24 @@ async def generate_pi_report(
         else:
             logger.error(f"Trust layer error: {_trust_res}")
     except _averify.TimeoutError:
-        logger.warning("Verification layer exceeded %.0fs budget — returning report, marking pending",
-                       _VERIFY_BUDGET_S)
+        logger.warning("Verification exceeded %.0fs budget — marking pending", _VERIFY_BUDGET_S)
     except Exception as e:
         logger.error(f"Verification layer error: {e}")
 
     if report.validation is None:
         report.validation = {
             "status": "PENDING", "passed": True, "warnings": [], "notes": [],
-            "total_flags": 0,
-            "summary": "Validation deferred to keep the report responsive.",
+            "total_flags": 0, "summary": "Validation unavailable for this report.",
             "validated_at": None,
         }
     if report.trust is None:
         report.trust = {
-            "available": False,
-            "summary": "Trust scoring deferred to keep the report responsive.",
+            "available": False, "summary": "Source coverage unavailable for this report.",
             "abstention_required": False, "human_review_recommended": False,
         }
 
-    # Self-correction: if the verifiers found hard ERRORs, fix the flagged sections
-    # (the corrector is given each verifier's exact issue + suggestion) and clear
-    # those errors. We don't re-run the whole 5-agent graph — that doubles latency
-    # and risks whack-a-mole; one bounded correction pass is the right tradeoff.
+    # Self-correction: fix the flagged sections (corrector gets each verifier's exact
+    # issue + suggestion) and clear those errors. One bounded pass — no full re-run.
     try:
         _val = report.validation or {}
         _errs = _val.get("errors") or []
@@ -348,8 +359,6 @@ async def generate_pi_report(
                             _n_fixed, len(_errs), _val["status"])
     except Exception as _cor_e:
         logger.warning("Self-correction failed (non-fatal): %s", _cor_e)
-
-    return report
 
 
 def _apply_corrected_sections(report, fixed: dict) -> None:

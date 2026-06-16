@@ -148,27 +148,42 @@ async def get_pi_report_async(payload: PIReportRequest, current_user = Depends(g
     the client never holds a long request open. Poll /pi-report/status/{job_id}."""
     await _enforce_quota(current_user)   # synchronous gate — 402 returns instantly
     import asyncio
-    from app.services.report_jobs import create_job, set_done, set_error
+    from app.services.report_jobs import create_job, set_done, set_error, update_report
     job_id = await create_job()
     idea = _idea_from_payload(payload)
     _user = current_user
 
     async def _run():
         try:
+            # Phase 1: core report WITHOUT the slow verification — deliver it fast.
             report = await generate_pi_report(
                 idea, payload.product_type, payload.disease_domain,
                 payload.tier1_category, funding_pathway=payload.funding_pathway,
+                skip_verification=True,
             )
             rd = report.model_dump(mode="json")
-            # Validate source links and drop dead/fabricated ones (async path has headroom).
             try:
                 from app.services.url_validator import clean_report_urls
-                _url_stats = await clean_report_urls(rd)
-                logger.info("URL validation: %s", _url_stats)
+                logger.info("URL validation: %s", await clean_report_urls(rd))
             except Exception as _u:
                 logger.warning("URL validation skipped (non-fatal): %s", _u)
-            await set_done(job_id, rd)
+            await set_done(job_id, rd)            # report is now viewable
             await _increment_usage(_user)
+
+            # Phase 2: run verification (validation + trust + self-correction) in the
+            # background, then patch the job so the badges fill in client-side.
+            try:
+                from app.services.alignment_service import run_report_verification
+                await run_report_verification(report)
+                rd2 = report.model_dump(mode="json")
+                try:
+                    from app.services.url_validator import clean_report_urls
+                    await clean_report_urls(rd2)   # corrected sections may add URLs
+                except Exception:
+                    pass
+                await update_report(job_id, rd2)
+            except Exception as _ve:
+                logger.warning("Background verification failed (non-fatal): %s", _ve)
         except ValueError as e:
             await set_error(job_id, str(e))
         except Exception as e:
