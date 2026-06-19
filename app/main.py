@@ -20,17 +20,43 @@ app = FastAPI(
     version="0.2.0"
 )
 
+# CORS — restricted to the Netlify frontends (prod + staging + preview deploys) and
+# localhost for dev, instead of a wide-open "*". Extra origins (e.g. a future custom
+# domain) can be added via the ALLOWED_ORIGINS env var (comma-separated).
+import os as _os
+_extra_origins = [o.strip() for o in _os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_extra_origins or None,
+    allow_origin_regex=r"https://([a-z0-9-]+\.)*netlify\.app|http://localhost(:\d+)?|http://127\.0\.0\.1(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# Security response headers (HSTS, nosniff, no-frame, referrer policy, …).
+from app.middleware.security_headers import SecurityHeadersMiddleware
+app.add_middleware(SecurityHeadersMiddleware)
+
 # Rate limiting — protects Anthropic/OpenAI API tokens from abuse
 from app.middleware.rate_limit import RateLimitMiddleware
 app.add_middleware(RateLimitMiddleware)
+
+
+# Global exception handler — never leak a stack trace; return a clean JSON 500.
+from fastapi import Request as _Request
+from fastapi.responses import JSONResponse as _JSONResponse
+import logging as _logging
+_log = _logging.getLogger("app.errors")
+
+
+@app.exception_handler(Exception)
+async def _unhandled_exception_handler(request: _Request, exc: Exception):
+    _log.error("Unhandled error on %s %s: %s", request.method, request.url.path, exc, exc_info=True)
+    return _JSONResponse(status_code=500, content={
+        "detail": "An unexpected error occurred. Please try again.",
+        "error": "internal_error",
+    })
 
 @app.on_event("startup")
 async def startup():
