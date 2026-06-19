@@ -27,7 +27,7 @@ import os as _os
 _extra_origins = [o.strip() for o in _os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_extra_origins or None,
+    allow_origins=_extra_origins,
     allow_origin_regex=r"https://([a-z0-9-]+\.)*netlify\.app|http://localhost(:\d+)?|http://127\.0\.0\.1(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
