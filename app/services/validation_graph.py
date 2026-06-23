@@ -78,6 +78,12 @@ class PIReportState(TypedDict):
 
 async def _call_claude(system: str, user: str, max_tokens: int = 1500,
                         model: str = VERIFIER_MODEL) -> str:
+    from datetime import date as _date
+    # Verifiers lack a clock and were flagging valid current/recent dates as
+    # "future" — ground them in today's date to kill that class of false errors.
+    dated_system = (f"CONTEXT: Today's date is {_date.today().isoformat()}. Any date on or "
+                    f"before today is in the past or present — NEVER flag it as a 'future date'.\n\n"
+                    + system)
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
         r = await client.post(
             ANTHROPIC_API_URL,
@@ -89,7 +95,7 @@ async def _call_claude(system: str, user: str, max_tokens: int = 1500,
             json={
                 "model":      model,
                 "max_tokens": max_tokens,
-                "system":     system,
+                "system":     dated_system,
                 "messages":   [{"role": "user", "content": user}],
             }
         )
@@ -649,6 +655,87 @@ def get_validation_graph():
     if _validation_graph is None:
         _validation_graph = build_validation_graph()
     return _validation_graph
+
+
+# ── Self-correction: fix verifier-flagged sections, then the caller re-validates ──
+
+CORRECTOR_MODEL = "claude-sonnet-4-6"
+
+_SECTION_FIELDS = {  # top-level report sections a flag can target
+    "disease_intelligence", "market_sizing", "regulatory_pathway",
+    "market_access", "market_geography", "executive_summary",
+}
+
+# Verifiers often emit RELATIVE field paths ("designations[0].benefit",
+# "data_points[4]"), so map by keyword in the field + issue text, not just prefix.
+_FIELD_KEYWORDS = [
+    ("designation", "regulatory_pathway"), ("pathway", "regulatory_pathway"),
+    ("regulatory", "regulatory_pathway"), ("exclusivity", "regulatory_pathway"),
+    ("clinical_trial", "regulatory_pathway"), ("fda", "regulatory_pathway"),
+    ("data_point", "disease_intelligence"), ("incidence", "disease_intelligence"),
+    ("prevalence", "disease_intelligence"), ("resistance", "disease_intelligence"),
+    ("pipeline", "disease_intelligence"), ("epidemiolog", "disease_intelligence"),
+    ("step", "market_sizing"), ("penetration", "market_sizing"),
+    ("tam", "market_sizing"), ("sam", "market_sizing"), ("market_sizing", "market_sizing"),
+    ("buyer", "market_access"), ("reimbursement", "market_access"),
+    ("payer", "market_access"), ("market_access", "market_access"),
+    ("geograph", "market_geography"),
+    ("executive", "executive_summary"),
+]
+
+
+def section_for_flag(field: str, issue: str = "") -> str:
+    """Map a verifier flag (possibly a relative field path) to a top-level section."""
+    pref = (field or "").split(".")[0].split("[")[0]
+    if pref in _SECTION_FIELDS:
+        return pref
+    blob = f"{field} {issue}".lower()
+    for kw, sec in _FIELD_KEYWORDS:
+        if kw in blob:
+            return sec
+    return ""
+
+
+async def correct_flagged_sections(report: dict, error_flags: list) -> dict:
+    """Given the verifiers' ERROR flags, ask the model to fix ONLY the affected
+    report sections and return them as JSON. Returns {section: corrected_value}.
+    Best-effort; returns {} on any problem (the report is then left as-is)."""
+    if not error_flags:
+        return {}
+    sections = {section_for_flag(f.get("field", ""), f.get("issue", "")) for f in error_flags}
+    sections = {s for s in sections if s in _SECTION_FIELDS}
+    if not sections:
+        return {}
+
+    current = {s: report.get(s) for s in sections}
+    flags_txt = "\n".join(
+        f"- [{f.get('agent')}] {f.get('field')}: {f.get('issue')} (fix: {f.get('suggestion','')})"
+        for f in error_flags)
+
+    system = (
+        "You are a careful editor fixing factual/numeric errors that independent verifiers "
+        "found in a biomedical commercialization report. Fix ONLY the specific issues listed. "
+        "Keep the exact same JSON schema for each section. Do not invent new sources or URLs; "
+        "if a fact is uncertain, soften it or cite a comparable precedent rather than asserting "
+        "a wrong number. Respond with ONLY a JSON object mapping each section name to its "
+        "corrected value, e.g. {\"regulatory_pathway\": {...}}.")
+    user = (f"VERIFIER ERRORS:\n{flags_txt}\n\nCURRENT SECTIONS (fix these):\n"
+            f"{json.dumps(current, indent=2)[:9000]}\n\nReturn the corrected sections as JSON.")
+
+    try:
+        raw = await _call_claude(system, user, max_tokens=4000, model=CORRECTOR_MODEL)
+        clean = raw.strip()
+        if clean.startswith("```"):
+            clean = clean.split("```")[1]
+            if clean.lower().startswith("json"):
+                clean = clean[4:]
+        start, end = clean.find("{"), clean.rfind("}")
+        data = json.loads(clean[start:end + 1]) if start != -1 else {}
+        # Only return sections we asked about.
+        return {k: v for k, v in data.items() if k in sections and v}
+    except Exception as e:
+        logger.warning("correct_flagged_sections failed (non-fatal): %s", e)
+        return {}
 
 
 # ── Public Entry Point ────────────────────────────────────────────────────────

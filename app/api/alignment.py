@@ -52,33 +52,22 @@ async def check_alignment(payload: AlignmentRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/pi-report", response_model=PIReport)
-async def get_pi_report(payload: PIReportRequest, current_user = Depends(get_current_user)):
-    """
-    Full PI go-to-market intelligence report.
+_DEV_EMAILS = {"test@projectelevate.io", "ijw91021@gmail.com",
+               "admin@projectelevate.io", "oneonesie100@gmail.com"}
+_PLAN_LIMITS = {
+    "basic":        5,    # Explorer $49
+    "starter":      20,   # Innovator $149
+    "professional": None,  # Institution $799 — unlimited
+    "active":       None,
+    "trialing":     None,
+}
 
-    For antibiotics: includes disease intelligence, transparent bottom-up market
-    sizing, FDA regulatory pathway (QIDP/LPAD/Fast Track), clinical trial
-    requirements, P&T committee access strategy, friction points and loopholes,
-    BARDA/CARB-X funding programs — all with explicit source citations.
 
-    Takes 20-40 seconds.
-    """
-    # ── Server-side quota enforcement (BEFORE calling Claude) ─────────────────
-    # This is the real gate — frontend checks are just UX. Without this,
-    # anyone who bypasses the frontend can burn Anthropic API tokens freely.
-    _dev_emails = {"test@projectelevate.io", "ijw91021@gmail.com",
-                   "admin@projectelevate.io", "oneonesie100@gmail.com"}
-    _PLAN_LIMITS = {
-        "basic":        5,   # Explorer $49
-        "starter":      20,  # Innovator $149
-        "professional": None, # Institution $799 — unlimited
-        "active":       None,
-        "trialing":     None,
-    }
-
+async def _enforce_quota(current_user):
+    """Server-side quota gate (BEFORE calling Claude). Raises HTTPException(402)
+    if over limit. Frontend checks are UX only; this is the real gate."""
     try:
-        if current_user and current_user.get("email") not in _dev_emails:
+        if current_user and current_user.get("email") not in _DEV_EMAILS:
             from app.db.user_repository import get_user_by_id
             user = await get_user_by_id(current_user["id"])
             if user:
@@ -87,8 +76,7 @@ async def get_pi_report(payload: PIReportRequest, current_user = Depends(get_cur
                 used       = user.get("free_reports_used", 0) or 0
                 limit      = _PLAN_LIMITS.get(plan) or _PLAN_LIMITS.get(sub_status)
 
-                # Early access period: grant 10 free analyses to anyone on the waitlist
-                # Remove this block when billing is live
+                # Early-access period: grant 10 free analyses to waitlist members.
                 on_waitlist = False
                 try:
                     from app.db.database import get_pool
@@ -96,55 +84,208 @@ async def get_pi_report(payload: PIReportRequest, current_user = Depends(get_cur
                     async with pool.acquire() as conn:
                         wl = await conn.fetchrow(
                             "SELECT id FROM waitlist WHERE lower(email)=lower($1)",
-                            current_user.get("email","")
-                        )
+                            current_user.get("email", ""))
                         on_waitlist = bool(wl)
                 except Exception:
                     pass
-
-                early_access_limit = 10  # free analyses for waitlist members
-                if on_waitlist and used < early_access_limit:
-                    limit = early_access_limit  # override with early access allowance
+                if on_waitlist and used < 10:
+                    limit = 10
 
                 if limit is not None and used >= limit:
-                    raise HTTPException(
-                        status_code=402,
-                        detail={
-                            "error": "quota_exceeded",
-                            "message": f"You've used all {limit} analyses on your plan. Upgrade to continue.",
-                            "used": used,
-                            "limit": limit,
-                        }
-                    )
+                    raise HTTPException(status_code=402, detail={
+                        "error": "quota_exceeded",
+                        "message": f"You've used all {limit} analyses on your plan. Upgrade to continue.",
+                        "used": used, "limit": limit,
+                    })
     except HTTPException:
         raise
     except Exception as quota_e:
         logger.warning("Quota check failed (non-fatal): %s", quota_e)
 
+
+async def _increment_usage(current_user):
     try:
-        idea = payload.idea
-        if payload.target_pathogen:
-            idea = f"{idea}\n\nTarget pathogen: {payload.target_pathogen}"
+        if current_user and current_user.get("email") not in _DEV_EMAILS:
+            from app.db.user_repository import get_user_by_id, increment_free_report_count
+            user = await get_user_by_id(current_user["id"])
+            status = user.get("subscription_status", "none") if user else "none"
+            if status not in ("active", "trialing"):
+                await increment_free_report_count(current_user["id"])
+    except Exception as inc_e:
+        logger.warning(f"Failed to increment report count: {inc_e}")
+
+
+def _idea_from_payload(payload: "PIReportRequest") -> str:
+    idea = payload.idea
+    if payload.target_pathogen:
+        idea = f"{idea}\n\nTarget pathogen: {payload.target_pathogen}"
+    return idea
+
+
+@router.post("/pi-report", response_model=PIReport)
+async def get_pi_report(payload: PIReportRequest, current_user = Depends(get_current_user)):
+    """Full PI go-to-market intelligence report (synchronous). Kept for backward
+    compatibility; the frontend now uses the async pair below to avoid proxy
+    timeouts on the ~2-3 minute generation."""
+    await _enforce_quota(current_user)
+    try:
         report = await generate_pi_report(
-            idea, payload.product_type, payload.disease_domain,
+            _idea_from_payload(payload), payload.product_type, payload.disease_domain,
             payload.tier1_category, funding_pathway=payload.funding_pathway,
         )
-        # Increment usage counter after successful report
-        try:
-            if current_user and current_user.get("email") not in _dev_emails:
-                from app.db.user_repository import get_user_by_id, increment_free_report_count
-                user = await get_user_by_id(current_user["id"])
-                status = user.get("subscription_status", "none") if user else "none"
-                if status not in ("active", "trialing"):
-                    await increment_free_report_count(current_user["id"])
-        except Exception as inc_e:
-            logger.warning(f"Failed to increment report count: {inc_e}")
+        await _increment_usage(current_user)
         return report
     except ValueError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         logger.error(f"PI report failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/pi-report/async")
+async def get_pi_report_async(payload: PIReportRequest, current_user = Depends(get_current_user)):
+    """Start report generation in the background; returns a job_id immediately so
+    the client never holds a long request open. Poll /pi-report/status/{job_id}."""
+    await _enforce_quota(current_user)   # synchronous gate — 402 returns instantly
+    import asyncio
+    from app.services.report_jobs import create_job, set_done, set_error, update_report
+    job_id = await create_job()
+    idea = _idea_from_payload(payload)
+    _user = current_user
+
+    async def _run():
+        try:
+            # Phase 1: core report WITHOUT the slow verification — deliver it fast.
+            report = await generate_pi_report(
+                idea, payload.product_type, payload.disease_domain,
+                payload.tier1_category, funding_pathway=payload.funding_pathway,
+                user_id=(_user or {}).get("id"), skip_verification=True,
+            )
+            rd = report.model_dump(mode="json")
+            try:
+                from app.services.url_validator import clean_report_urls
+                logger.info("URL validation: %s", await clean_report_urls(rd))
+            except Exception as _u:
+                logger.warning("URL validation skipped (non-fatal): %s", _u)
+            await set_done(job_id, rd)            # report is now viewable
+            await _increment_usage(_user)
+
+            # Phase 2: run verification (validation + trust + self-correction) in the
+            # background, then patch the job so the badges fill in client-side.
+            try:
+                from app.services.alignment_service import run_report_verification, attach_competitive_landscape
+                await attach_competitive_landscape(report)   # reliable server-side sweep
+                await run_report_verification(report)
+                rd2 = report.model_dump(mode="json")
+                try:
+                    from app.services.url_validator import clean_report_urls
+                    await clean_report_urls(rd2)   # corrected sections may add URLs
+                except Exception:
+                    pass
+                await update_report(job_id, rd2)
+            except Exception as _ve:
+                logger.warning("Background verification failed (non-fatal): %s", _ve)
+        except ValueError as e:
+            await set_error(job_id, str(e))
+        except Exception as e:
+            logger.error(f"Async PI report failed: {e}", exc_info=True)
+            await set_error(job_id, str(e))
+
+    asyncio.create_task(_run())
+    return {"job_id": job_id, "status": "running"}
+
+
+@router.get("/pi-report/status/{job_id}")
+async def get_pi_report_status(job_id: str):
+    """Poll an async report job. Returns {status: running|done|error, report?, error?}."""
+    from app.services.report_jobs import get_job
+    job = await get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found or expired")
+    return {"status": job["status"], "report": job["report"], "error": job["error"]}
+
+
+@router.get("/world-graph")
+async def get_world_graph(disease: str):
+    """Commercialization world-model subgraph for a disease (P4): nodes + edges
+    accumulated across all reports. Powers the graph visualization."""
+    from app.services.world_model_graph import get_disease_subgraph
+    return await get_disease_subgraph(disease)
+
+
+# ── Outcome / feedback learning (P11) + evaluation dashboard (P10) ──────────────
+
+class FeedbackRequest(BaseModel):
+    report_id:         str
+    user_action:       Optional[str] = None   # accepted | rejected | edited | ignored
+    outcome:           Optional[str] = None   # patented | licensed | grant_funded | spun_out | deprioritized | ...
+    recommendation_id: Optional[str] = None
+    notes:             Optional[str] = None
+    outcome_date:      Optional[str] = None   # ISO date
+    institution_id:    Optional[str] = None
+
+
+@router.post("/feedback")
+async def submit_feedback(req: FeedbackRequest):
+    """Capture what the user/TTO did with a recommendation and how it turned out (P11)."""
+    from app.db.reports_repository import record_feedback
+    try:
+        return await record_feedback(
+            req.report_id, user_action=req.user_action, outcome=req.outcome,
+            recommendation_id=req.recommendation_id, notes=req.notes,
+            outcome_date=req.outcome_date, institution_id=req.institution_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/outcomes")
+async def get_outcomes(report_id: str = "", user_id: int = None):
+    from app.db.reports_repository import list_outcomes
+    return {"outcomes": await list_outcomes(report_id=report_id, user_id=user_id)}
+
+
+@router.get("/eval-dashboard")
+async def get_eval_dashboard(institution_id: str = None):
+    """Internal evaluation metrics: trust, priority, abstention, acceptance, outcomes (P10)."""
+    from app.db.reports_repository import eval_metrics
+    return await eval_metrics(institution_id=institution_id)
+
+
+# ── TTO review dashboard / workflow (Sprint 5) ──────────────────────────────────
+
+@router.get("/review-queue")
+async def review_queue(institution_id: str = None, status: str = "", reviewer: str = ""):
+    """The TTO review queue: inventions with triage scores, status, reviewer, next action."""
+    from app.db.reports_repository import list_review_queue
+    return {"inventions": await list_review_queue(
+        institution_id=institution_id, status=status, reviewer=reviewer)}
+
+
+@router.get("/invention/{report_id}")
+async def invention_detail(report_id: str):
+    from app.db.reports_repository import get_invention
+    inv = await get_invention(report_id)
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invention not found")
+    return inv
+
+
+class ReviewUpdateRequest(BaseModel):
+    report_id:         str
+    status:            Optional[str] = None   # intake | triaged | under_review | decided | deprioritized
+    assigned_reviewer: Optional[str] = None
+    next_action:       Optional[str] = None
+
+
+@router.post("/review-update")
+async def review_update(req: ReviewUpdateRequest):
+    from app.db.reports_repository import update_review
+    try:
+        return await update_review(req.report_id, status=req.status,
+                                   assigned_reviewer=req.assigned_reviewer,
+                                   next_action=req.next_action)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/examples")
@@ -694,19 +835,31 @@ async def competitive_sweep(
 
     try:
         loop = asyncio.get_event_loop()
-        landscape = await loop.run_in_executor(
-            None,
-            lambda: sweep_competitors(
-                disease_name=disease,
-                indication_keywords=keywords,
-                therapeutic_area=ta,
-                product_type=pt,
-            )
+        # Hard 30s cap so a slow external sweep can't hold the request open past the
+        # proxy timeout (which surfaced to the client as "Failed to fetch").
+        landscape = await asyncio.wait_for(
+            loop.run_in_executor(
+                None,
+                lambda: sweep_competitors(
+                    disease_name=disease,
+                    indication_keywords=keywords,
+                    therapeutic_area=ta,
+                    product_type=pt,
+                )
+            ),
+            timeout=30.0,
         )
         return to_dict(landscape)
+    except asyncio.TimeoutError:
+        logger.warning("Competitive sweep timed out for %s", disease)
+        return {"available": False, "competitors": [],
+                "note": "Live competitor sweep took too long; see the competitive pipeline "
+                        "summarized in the Opportunity section above."}
     except Exception as e:
         logger.error("Competitive sweep failed: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        return {"available": False, "competitors": [],
+                "note": "Live competitor sweep is temporarily unavailable; see the "
+                        "competitive pipeline in the Opportunity section above."}
 
 
 @router.post("/clarify")

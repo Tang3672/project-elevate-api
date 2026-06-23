@@ -93,35 +93,31 @@ def test_demand_signal_full_construction():
 
 @pytest.mark.asyncio
 async def test_cdc_places_row_to_signal():
-    """PLACES connector correctly maps a data row to a DemandSignal."""
+    """PLACES connector maps a wide-format county row to DemandSignals."""
     from app.ingestion.connectors.cdc_places import CDCPlacesConnector
     connector = CDCPlacesConnector()
 
+    # 2025 PLACES is wide format: one row per county, measures as columns.
     mock_row = {
-        "locationid": "48453",
-        "locationdesc": "Travis County",
         "stateabbr": "TX",
-        "measureid": "DIABETES",
-        "data_value": "23.4",
+        "countyname": "Travis County",
+        "countyfips": "48453",
         "totalpopulation": "1200000",
-        "year": "2023",
+        "diabetes_crudeprev": "23.4",
     }
 
-    signal = connector._row_to_signal(
-        mock_row,
-        "Type 2 Diabetes",
-        "SOFTWARE",
-        SignalType.DISEASE_BURDEN
-    )
+    signals = connector._row_to_signals(mock_row)
 
-    assert signal is not None
+    # The diabetes column (23.4% ≥ 8.0 burden threshold) should yield a signal.
+    assert len(signals) >= 1
+    signal = next(s for s in signals if s.condition_or_topic == "Type 2 Diabetes")
     assert signal.source == SignalSource.CDC_PLACES
     assert signal.magnitude == 23.4
     assert "Travis County" in signal.title
     assert "TX" in signal.title
     assert signal.signal_type == SignalType.DISEASE_BURDEN
     assert signal.state_code == "TX"
-    assert signal.data_year == 2023
+    assert signal.data_year == 2025
     assert len(signal.description) >= 20
 
 
@@ -132,13 +128,11 @@ async def test_cdc_places_fetch_yields_batches():
 
     mock_rows = [
         {
-            "locationid": f"4800{i}",
-            "locationdesc": f"County {i}",
             "stateabbr": "TX",
-            "measureid": "DIABETES",
-            "data_value": str(15 + i),
+            "countyname": f"County {i}",
+            "countyfips": f"4800{i}",
             "totalpopulation": "500000",
-            "year": "2023",
+            "diabetes_crudeprev": str(15 + i),
         }
         for i in range(5)
     ]
@@ -169,7 +163,7 @@ async def test_fda_adverse_events_produces_signals():
         "results": [
             {"term": "metformin", "count": 15000},
             {"term": "lisinopril", "count": 8500},
-            {"term": "aspirin",   "count": 200},  # below threshold, should skip
+            {"term": "aspirin",   "count": 50},   # below threshold (< 100), should skip
         ]
     }
 

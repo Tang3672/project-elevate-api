@@ -160,9 +160,9 @@ class HospitalNeedMatch(BaseModel):
 
 
 class MarketGeography(BaseModel):
-    description:  str
+    description:  str = ""
     top_states:   List[str] = Field(default_factory=list)
-    scope:        str
+    scope:        str = ""
 
 
 # ── Full PI Report ────────────────────────────────────────────────────────────
@@ -191,6 +191,15 @@ class PIReport(BaseModel):
     hospital_needs_searched: int = 0
     model_version:          str = "3.0-MoE"
     validation:             Optional[dict] = None
+    trust:                  Optional[dict] = None   # report-level Trust Layer scorecard (P2)
+    market_sizing_provenance: Optional[dict] = None # typed source-backed assumptions + scenarios (P1)
+    commercialization_scores: Optional[dict] = None # probabilistic decision engine block (P5)
+    expert_panel:           Optional[dict] = None   # structured 3-panel MoE outputs, for UI visibility
+    report_id:              Optional[str]  = None    # stable id for feedback/outcome linkage (P11)
+    portfolio_benchmark:    Optional[dict] = None    # institution-level percentile + comparables (P7)
+    routing_plan:           Optional[dict] = None     # cost-aware specialist routing plan (P3)
+    grounded_context:       Optional[list] = None      # retrieved facts used by synthesis, for trust judging
+    competitive_landscape:  Optional[dict] = None       # server-side competitor sweep (reliable, no client fetch)
     expert_domain:          Optional[str]  = None
     expert_name:            Optional[str]  = None
     expert_icon:            Optional[str]  = None

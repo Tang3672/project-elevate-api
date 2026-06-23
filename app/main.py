@@ -20,17 +20,43 @@ app = FastAPI(
     version="0.2.0"
 )
 
+# CORS — restricted to the Netlify frontends (prod + staging + preview deploys) and
+# localhost for dev, instead of a wide-open "*". Extra origins (e.g. a future custom
+# domain) can be added via the ALLOWED_ORIGINS env var (comma-separated).
+import os as _os
+_extra_origins = [o.strip() for o in _os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_extra_origins,
+    allow_origin_regex=r"https://([a-z0-9-]+\.)*netlify\.app|http://localhost(:\d+)?|http://127\.0\.0\.1(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# Security response headers (HSTS, nosniff, no-frame, referrer policy, …).
+from app.middleware.security_headers import SecurityHeadersMiddleware
+app.add_middleware(SecurityHeadersMiddleware)
+
 # Rate limiting — protects Anthropic/OpenAI API tokens from abuse
 from app.middleware.rate_limit import RateLimitMiddleware
 app.add_middleware(RateLimitMiddleware)
+
+
+# Global exception handler — never leak a stack trace; return a clean JSON 500.
+from fastapi import Request as _Request
+from fastapi.responses import JSONResponse as _JSONResponse
+import logging as _logging
+_log = _logging.getLogger("app.errors")
+
+
+@app.exception_handler(Exception)
+async def _unhandled_exception_handler(request: _Request, exc: Exception):
+    _log.error("Unhandled error on %s %s: %s", request.method, request.url.path, exc, exc_info=True)
+    return _JSONResponse(status_code=500, content={
+        "detail": "An unexpected error occurred. Please try again.",
+        "error": "internal_error",
+    })
 
 @app.on_event("startup")
 async def startup():
@@ -55,6 +81,14 @@ async def _init_background():
         await init_pi_memory_table()
         from app.services.research_world_model import init_world_model_table
         await init_world_model_table()
+        from app.db.market_sizing_repository import init_market_sizing_tables
+        await init_market_sizing_tables()
+        from app.services.world_model_graph import init_world_model_graph
+        await init_world_model_graph()
+        from app.db.reports_repository import init_reports_tables
+        await init_reports_tables()
+        from app.services.report_jobs import init_report_jobs_table
+        await init_report_jobs_table()
         from app.db.schema_ontology import init_ontology_tables
         await init_ontology_tables()
         from app.db.schema_priors import init_priors_tables
