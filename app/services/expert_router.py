@@ -25,6 +25,7 @@ from app.core.config import settings
 from app.services.expert_profiles import (
     ExpertProfile, EXPERT_REGISTRY, get_all_keywords, get_expert
 )
+from app.services.expert_profiles_v2 import get_sub_expert, SubExpertProfile
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,12 @@ class RouterResult:
     claude_classified: str            # what Claude classified
     mismatch_warning:  Optional[str]  # shown in UI if domains disagree
     routing_method:    str            # "auto" | "pi_confirmed" | "claude_override"
+    # Modality axis — the granular v2 sub-expert that actually authors the report.
+    # This is what stops a diagnostic/device/SaMD from being written by the drug
+    # (antibiotic) expert. `sub_expert` carries the modality-correct system prompt.
+    sub_expert:        Optional[SubExpertProfile] = None
+    sub_expert_id:     Optional[str] = None   # e.g. "digital_cds", "device_neurology"
+    modality:          Optional[str] = None   # tier1_category, e.g. "digital_health"
 
 
 ROUTER_SYSTEM = """You are a precision medical domain classifier for a Mixture-of-Experts system. Given a healthcare innovation, classify it into exactly ONE subcategory from the list below. Be specific — choose the most granular match, not the broadest.
@@ -111,8 +118,14 @@ Respond ONLY with valid JSON (no explanation outside JSON):
 Pick the MOST SPECIFIC matching subcategory. When in doubt between broad and specific, choose specific."""
 
 
-async def classify_with_claude(idea: str) -> tuple[str, float, str]:
-    """Use Claude Haiku to classify the idea into a disease domain."""
+async def classify_with_claude(idea: str) -> tuple[str, str, float, str]:
+    """Classify the idea. Returns (sub_expert_id, top_level_domain, confidence, reasoning).
+
+    - sub_expert_id: the GRANULAR v2 id (e.g. "digital_cds", "device_neurology") that
+      selects the modality-correct expert. Never collapsed to a drug default.
+    - top_level_domain: a guaranteed-valid v1 EXPERT_REGISTRY key, for disease-context
+      callers only.
+    """
     try:
         async with httpx.AsyncClient(timeout=ROUTER_TIMEOUT) as client:
             r = await client.post(
@@ -137,19 +150,20 @@ async def classify_with_claude(idea: str) -> tuple[str, float, str]:
                 if text.startswith("json"):
                     text = text[4:]
             data = json.loads(text.strip())
-            domain     = data.get("domain", _DEFAULT_DOMAIN)
+            raw_domain = data.get("domain", _DEFAULT_DOMAIN)
             confidence = float(data.get("confidence", 0.7))
             reasoning  = data.get("reasoning", "")
-            # Map granular router domain → expert profile domain, then coerce to a
-            # guaranteed-valid top-level EXPERT_REGISTRY key.
-            domain = _ROUTER_TO_EXPERT.get(domain, domain)
-            domain = _coerce_to_registry(domain)
-            return domain, confidence, reasoning
+            # Granular v2 sub-expert id (drives modality); top-level domain is a
+            # coerced v1 key used only for disease context.
+            sub_expert_id = _ROUTER_TO_EXPERT.get(raw_domain, raw_domain)
+            top_level     = _coerce_to_registry(sub_expert_id)
+            return sub_expert_id, top_level, confidence, reasoning
     except Exception as e:
         logger.warning(f"Claude router failed: {e} — falling back to keyword classification")
         raw = _keyword_classify(idea)
-        domain = _coerce_to_registry(_ROUTER_TO_EXPERT.get(raw, raw))
-        return domain, 0.6, "Classified by keyword matching (Claude router unavailable)"
+        sub_expert_id = _ROUTER_TO_EXPERT.get(raw, raw)
+        top_level     = _coerce_to_registry(sub_expert_id)
+        return sub_expert_id, top_level, 0.6, "Classified by keyword matching (Claude router unavailable)"
 
 
 _ROUTER_KEYWORD_MAP: dict[str, list[str]] = {
@@ -311,11 +325,12 @@ async def route(
         logger.warning(f"Unknown PI domain '{pi_domain}' — treating as auto")
         pi_domain = "auto"
 
-    # Always classify with Claude (returns expert profile domain after mapping)
-    claude_domain, confidence, reasoning = await classify_with_claude(idea)
-    logger.info(f"Claude classified: {claude_domain} (confidence={confidence:.2f})")
+    # Classify with Claude. sub_expert_id is the GRANULAR modality expert (e.g.
+    # "digital_cds"); claude_domain is the coerced top-level v1 key (disease context).
+    sub_expert_id, claude_domain, confidence, reasoning = await classify_with_claude(idea)
+    logger.info(f"Claude classified: sub_expert={sub_expert_id} top_level={claude_domain} (confidence={confidence:.2f})")
 
-    # Routing logic
+    # Routing logic — reconciles the PI-selected top-level disease domain with Claude.
     if pi_domain == "auto":
         # Pure Claude classification
         final_domain    = claude_domain
@@ -342,6 +357,16 @@ async def route(
 
     final_domain = _coerce_to_registry(final_domain)
     expert = EXPERT_REGISTRY[final_domain]
+
+    # Resolve the modality sub-expert (v2) that will actually author the report. This
+    # is the fix for the "diagnostic written by the antibiotic expert" bug: a non-drug
+    # idea keeps its own modality expert instead of being coerced to a drug default.
+    sub_expert = get_sub_expert(sub_expert_id) if sub_expert_id else None
+    if sub_expert is None:
+        # Unknown granular id — fall back to the v1 disease expert as the author.
+        logger.warning(f"No v2 sub-expert for '{sub_expert_id}' — using v1 expert '{final_domain}'")
+    modality = getattr(sub_expert, "tier1_category", None)
+
     return RouterResult(
         domain_id         = final_domain,
         expert            = expert,
@@ -350,4 +375,7 @@ async def route(
         claude_classified = claude_domain,
         mismatch_warning  = mismatch,
         routing_method    = routing_method,
+        sub_expert        = sub_expert,
+        sub_expert_id     = sub_expert_id,
+        modality          = modality,
     )

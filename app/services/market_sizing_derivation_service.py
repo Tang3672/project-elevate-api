@@ -113,12 +113,47 @@ _ARCHETYPE_KEYWORDS = {
 }
 
 
+def _is_combination_idea(idea: str) -> bool:
+    """Detect a genuine DUAL-modality product that needs a blended market model, e.g. a
+    bioelectronic/closed-loop device (hardware + recurring software), a drug-device combo
+    (drug-eluting stent, autoinjector), or a therapy + companion diagnostic. Conservative
+    on purpose: pure software (e.g. 'software as a medical device') is NOT a combination."""
+    l = idea.lower()
+    hardware = any(x in l for x in [
+        "implant", "stent", "catheter", "pacemaker", "defibrillator", "neurostimulat",
+        "electrode", " lead ", "infusion pump", "insulin pump", "balloon", "surgical mesh",
+        "probe", "wearable sensor", "closed-loop device"])
+    software = any(x in l for x in [
+        "closed-loop", "closed loop", "adaptive algorithm", "ai-enabled", "ai enabled",
+        "ai-powered", "machine learning", "software-enabled", "embedded algorithm", "companion app"])
+    drug_combo = any(x in l for x in [
+        "drug-eluting", "drug eluting", "drug-coated", "drug delivery", "prefilled",
+        "autoinjector", "combination product", "drug-device"])
+    companion_dx = "companion diagnostic" in l or "companion dx" in l
+    therapy = any(x in l for x in ["therapy", "drug", "inhibitor", "antibody", "biologic", "compound"])
+    if hardware and software:                    # bioelectronic / smart connected device
+        return True
+    if drug_combo and (hardware or "device" in l):  # integrated drug-device product
+        return True
+    if companion_dx and therapy:                 # therapy + companion diagnostic
+        return True
+    return False
+
+
 def _classify_archetype(idea: str, product_type: str) -> str:
     """Route innovation to the correct expert formula."""
     combined = (idea + " " + product_type).lower()
 
-    # Direct product_type override — most reliable signal
+    # Dual-modality products get the blended combination model — checked BEFORE the
+    # single-modality product_type override so a hybrid isn't collapsed to one archetype.
+    if _is_combination_idea(idea):
+        return "combination"
+
+    # Direct product_type override — most reliable signal. Accepts BOTH the tier1_category
+    # ids (drug_small_molecule, digital_health, …) and the ProductType enum values
+    # (software, diagnostic, medical_device, …) so a SaMD isn't priced as a drug.
     pt_map = {
+        # tier1_category ids
         "drug_small_molecule":   "pharma_small_molecule",
         "biologic":              "pharma_biologic",
         "gene_cell_therapy":     "gene_cell_therapy",
@@ -127,6 +162,12 @@ def _classify_archetype(idea: str, product_type: str) -> str:
         "diagnostic":            "in_vitro_diagnostic",
         "digital_health":        "software_samd",
         "other_platform":        "software_samd",
+        # ProductType enum values
+        "software":              "software_samd",
+        "gene_therapy":          "gene_cell_therapy",
+        "antibiotic":            "pharma_small_molecule",
+        "oncology_drug":         "pharma_small_molecule",
+        "orphan_drug":           "pharma_small_molecule",
     }
     if product_type.lower() in pt_map:
         archetype = pt_map[product_type.lower()]
@@ -1468,6 +1509,116 @@ def _derive_samd_formula(
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# COMBINATION / HYBRID PRODUCTS — blended multi-modality model
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Recurring software/services as a share of connected-device revenue over the product
+# lifecycle (remote programming, algorithm updates, analytics). Deloitte/McKinsey MedTech.
+_COMBO_SOFTWARE_SHARE = 0.25
+
+
+def _combo_result(idea, label, formula_name, steps, tam, sam, som, assumptions, citations, conf):
+    return MarketSizingDerivation(
+        idea=idea, archetype="combination", archetype_label=label,
+        formula_name=formula_name,
+        formula_overview=f"Blended TAM = {_fmt(tam)} | SAM = {_fmt(sam)} | SOM = {_fmt(som)}",
+        steps=steps, us_tam_usd=tam, us_sam_usd=sam, us_som_usd=som,
+        tam_fmt=_fmt(tam), sam_fmt=_fmt(sam), som_fmt=_fmt(som),
+        key_assumptions=assumptions, confidence_note=conf, primary_citations=citations,
+    )
+
+
+def _derive_combination_formula(
+    idea: str, disease_name: str, therapeutic_area: str,
+    us_prev: int, signals: dict,
+) -> MarketSizingDerivation:
+    """Hybrid products get a BLENDED model (two revenue streams), not a single archetype.
+    Reuses the component engines so each stream keeps its own research-grounded method."""
+    l = idea.lower()
+    hardware = any(x in l for x in ["implant", "stent", "catheter", "pacemaker", "defibrillator",
+                                    "neurostimulat", "electrode", " lead ", "pump", "balloon"])
+    software = any(x in l for x in ["closed-loop", "closed loop", "adaptive", "ai-enabled",
+                                    "ai enabled", "ai-powered", "machine learning", "algorithm"])
+    companion_dx = "companion diagnostic" in l or "companion dx" in l
+    device_dominant = any(x in l for x in ["stent", "balloon", "mesh", "implant", "catheter", "lead"])
+
+    # ── Subtype A: bioelectronic / connected device = hardware + recurring software ──
+    if hardware and software and not companion_dx:
+        base = _derive_device_surgical_formula(idea, disease_name, therapeutic_area, us_prev, signals)
+        sw_tam = base.us_tam_usd * _COMBO_SOFTWARE_SHARE
+        n = len(base.steps)
+        step = DerivationStep(
+            step_num=n + 1,
+            title=f"Step {n + 1} — Recurring Software/Services Layer (Combination Product)",
+            formula=f"Software ARR = Device TAM ({_fmt(base.us_tam_usd)}) × {_COMBO_SOFTWARE_SHARE:.0%} = {_fmt(sw_tam)}",
+            value=sw_tam, unit="USD",
+            source_paper="Deloitte 2023 MedTech connected-device economics; McKinsey 'Software-defined MedTech' 2023.",
+            source_url="https://www2.deloitte.com/us/en/insights/industry/life-sciences-health-care.html",
+            explanation=("Bioelectronic/connected devices earn recurring software & services revenue on top of the "
+                         "one-time hardware sale — remote programming, closed-loop algorithm updates, and data "
+                         "analytics. Connected-device software/services add ~20-30% of device revenue over the "
+                         "product lifecycle. Blended market = device hardware TAM + recurring software ARR."),
+            data_source="Deloitte/McKinsey MedTech connected-device benchmarks",
+            assumptions=[f"Software/services = {_COMBO_SOFTWARE_SHARE:.0%} of device revenue"],
+        )
+        f = 1 + _COMBO_SOFTWARE_SHARE
+        return _combo_result(
+            idea, "Bioelectronic / Connected Device + Software (Combination)",
+            "Device Hardware (CMS DRG) + Recurring Software ARR",
+            base.steps + [step], base.us_tam_usd * f, base.us_sam_usd * f, base.us_som_usd * f,
+            base.key_assumptions + [f"Recurring software/services layer (+{_COMBO_SOFTWARE_SHARE:.0%})",
+                                    "Blended TAM = device hardware + software ARR"],
+            base.primary_citations + [{"ref": "Deloitte MedTech 2023",
+                                       "title": "Connected-device economics", "url": "https://www2.deloitte.com/"}],
+            "95% CI wider than single-modality: combines device DRG uncertainty with software adoption uncertainty.")
+
+    # ── Subtype B: therapy + companion diagnostic = drug TAM + Dx test attach ──
+    if companion_dx:
+        base = _derive_pharma_formula(idea, disease_name, therapeutic_area, us_prev, "pharma_small_molecule", signals)
+        dx   = _derive_ivd_formula(idea, disease_name, therapeutic_area, us_prev, signals)
+        # Companion Dx testing pool ⊆ drug-eligible population — cap the attach so the Dx
+        # doesn't double-count the therapy market.
+        dx_tam = min(dx.us_tam_usd, base.us_tam_usd * 0.08)
+        n = len(base.steps)
+        step = DerivationStep(
+            step_num=n + 1,
+            title=f"Step {n + 1} — Companion Diagnostic Revenue Layer (Combination Product)",
+            formula=f"Companion Dx TAM = min(IVD model {_fmt(dx.us_tam_usd)}, 8% of therapy TAM) = {_fmt(dx_tam)}",
+            value=dx_tam, unit="USD",
+            source_paper="CMS Clinical Lab Fee Schedule 2024; DxRx companion-diagnostic co-development economics.",
+            source_url="https://www.cms.gov/medicare/payment/fee-schedules/clinical-laboratory-fee-schedule",
+            explanation=("A companion diagnostic adds a per-test revenue stream (patient selection) alongside the "
+                         "therapy. It is sized on the CMS Clinical Lab Fee Schedule × the tested (drug-eligible) "
+                         "population, capped so it does not double-count the therapy market."),
+            data_source="CMS CLFS; companion-diagnostic co-development benchmarks",
+            assumptions=["Companion Dx ⊆ drug-eligible population; one test per treated patient"],
+        )
+        return _combo_result(
+            idea, "Therapy + Companion Diagnostic (Combination)",
+            "Drug DisMod TAM + Companion Dx (CLFS) attach",
+            base.steps + [step], base.us_tam_usd + dx_tam, base.us_sam_usd + dx_tam * 0.5,
+            base.us_som_usd + dx_tam * 0.2,
+            base.key_assumptions + ["Companion-diagnostic per-test revenue layer added to therapy TAM"],
+            base.primary_citations + [{"ref": "CMS CLFS 2024", "title": "Clinical Lab Fee Schedule",
+                                       "url": "https://www.cms.gov/medicare/payment/fee-schedules/clinical-laboratory-fee-schedule"}],
+            "95% CI reflects therapy-market uncertainty plus companion-diagnostic testing-rate uncertainty.")
+
+    # ── Subtype C: integrated drug-device product — price via the dominant modality ──
+    if device_dominant:
+        base  = _derive_device_surgical_formula(idea, disease_name, therapeutic_area, us_prev, signals)
+        label = "Drug-Device Combination — device-dominant (e.g. drug-eluting stent)"
+    else:
+        base  = _derive_pharma_formula(idea, disease_name, therapeutic_area, us_prev, "pharma_small_molecule", signals)
+        label = "Drug-Device Combination — drug-dominant (e.g. prefilled autoinjector/inhaler)"
+    return _combo_result(
+        idea, label, base.formula_name + " (integrated combination product)", base.steps,
+        base.us_tam_usd, base.us_sam_usd, base.us_som_usd,
+        base.key_assumptions + ["Integrated single-unit combination product priced via the dominant modality's pathway"],
+        base.primary_citations,
+        base.confidence_note + " Combination products carry added CMC/regulatory risk (FDA OCP jurisdiction).")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # MIXTURE OF EXPERTS ROUTER — public entry point
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -1506,8 +1657,10 @@ def generate_market_sizing_derivation(
     if archetype == "vaccine":
         return _derive_vaccine_formula(idea, dn, therapeutic_area, us_patient_population, signals)
 
-    if archetype in ("medical_device_surgical", "medical_device_capital", "combination"):
-        # Combination products: device-dominant → device formula
+    if archetype == "combination":
+        return _derive_combination_formula(idea, dn, therapeutic_area, us_patient_population, signals)
+
+    if archetype in ("medical_device_surgical", "medical_device_capital"):
         return _derive_device_surgical_formula(idea, dn, therapeutic_area, us_patient_population, signals)
 
     if archetype == "in_vitro_diagnostic":
