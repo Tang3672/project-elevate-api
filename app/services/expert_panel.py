@@ -49,7 +49,39 @@ _REGULATORY_DOMAIN_HINTS: dict[str, str] = {
     "drug_cns":               "NDA 505(b)(1) or 505(b)(2). Breakthrough Therapy for serious condition. CNS trials: endpoint validation is key regulatory risk (FDA PDDS guidance).",
     "drug_mental_health":     "NDA pathway. BTD rarely granted for psychiatry. REMS required for high-risk medications. SSRI/SNRI precedents inform approval probability.",
     "drug_cardiology":        "NDA or BLA. Hard endpoints (MACE, HF hospitalization) typically required. Cardiovascular Safety Trial (CVOT) may be required post-approval.",
+    "digital_cds":            "FDA Software as a Medical Device (SaMD). De Novo for a novel AI/ML algorithm with no predicate; 510(k) if a cleared predicate exists; Predetermined Change Control Plan (PCCP) for adaptive models; Breakthrough Device Designation for serious conditions; 21st Century Cures CDS exemption if the clinician independently reviews the basis. Do NOT use QIDP/LPAD/NDA — those are antibiotic/drug-only.",
+    "digital_samd_radiology": "FDA SaMD. De Novo for novel AI imaging with no predicate; 510(k) with predicate; PCCP for adaptive models; Breakthrough Device Designation. Do NOT use QIDP/LPAD/NDA.",
+    "digital_rpm":            "FDA SaMD/device. 510(k) typical for connected monitors; CMS RPM CPT codes (99453-99458). Breakthrough Device for serious conditions. Do NOT use QIDP/LPAD/NDA.",
+    "diagnostic_companion":   "FDA companion diagnostic (CDx), typically PMA co-approved with a therapy. Breakthrough Device possible. Do NOT use QIDP/LPAD/NDA.",
+    "diagnostic_poc":         "FDA IVD; 510(k) or CLIA-waiver for point-of-care; De Novo if novel. Do NOT use QIDP/LPAD/NDA.",
+    "device_neurology":       "PMA for Class III (implantable neurostimulation); De Novo for novel moderate-risk; 510(k) with predicate; IDE for trials; Breakthrough Device Designation. Do NOT use QIDP/LPAD/NDA.",
+    "device_surgical_general":"PMA for Class III; De Novo for novel moderate-risk; 510(k) with predicate; IDE for trials; Breakthrough Device Designation. Do NOT use QIDP/LPAD/NDA.",
+    "device_ophthalmology":   "PMA for Class III implants; De Novo/510(k) otherwise; IDE for trials; Breakthrough Device Designation. Do NOT use QIDP/LPAD/NDA.",
 }
+
+
+def _regulatory_hint(sub_expert_id: str) -> str:
+    """Modality-appropriate regulatory hint for the panel. Falls back on the sub-expert
+    id PREFIX so a non-drug modality never defaults to inventing antibiotic designations
+    (QIDP/LPAD) just because it lacks an explicit dict entry."""
+    sid = (sub_expert_id or "").lower()
+    if sid in _REGULATORY_DOMAIN_HINTS:
+        return _REGULATORY_DOMAIN_HINTS[sid]
+    if sid.startswith("digital_"):
+        return _REGULATORY_DOMAIN_HINTS["digital_cds"]
+    if sid.startswith("diagnostic_"):
+        return "FDA in-vitro/imaging diagnostic. 510(k) with predicate (Class II); De Novo for novel; PMA for high-risk; CLIA/LDT for lab-developed tests; Breakthrough Device possible. Do NOT use QIDP/LPAD/NDA."
+    if sid.startswith("device_"):
+        return "PMA for Class III (high-risk); De Novo for novel moderate-risk; 510(k) with predicate; IDE for trials; Breakthrough Device Designation. Do NOT use QIDP/LPAD/NDA (drug-only)."
+    if sid.startswith("vaccine_"):
+        return "BLA pathway (FDA CBER). ACIP recommendation drives uptake; Phase 3 efficacy trial required. Do NOT use antibiotic QIDP/LPAD."
+    if sid.startswith("gene_therapy_"):
+        return "BLA via FDA CBER (OTAT). RMAT designation; 15-yr long-term follow-up; CMC is the #1 regulatory risk. Do NOT use antibiotic QIDP/LPAD."
+    if sid.startswith("biologic_"):
+        return "BLA pathway. BTD/Orphan as relevant; reference-product exclusivity 12 yrs. Do NOT use antibiotic QIDP/LPAD."
+    if sid.startswith("other_"):
+        return "Use the FDA pathway appropriate to the specific platform. Do NOT assume an antibiotic NDA/QIDP."
+    return ""   # drug/unknown — no injected hint (drug path unchanged)
 
 # ── Per-domain commercial hints for the commercial panel ─────────────────────
 _COMMERCIAL_DOMAIN_HINTS: dict[str, str] = {
@@ -246,7 +278,7 @@ async def _run_regulatory_panel(
     except Exception:
         pass  # Fall back to Haiku estimate if ptrs_tables unavailable
 
-    domain_hint = _REGULATORY_DOMAIN_HINTS.get(sub_expert_id, "")
+    domain_hint = _regulatory_hint(sub_expert_id)
     ptrs_anchor = (
         f"HISTORICAL FDA APPROVAL RATE (from published BIO/WONG data): "
         f"{calibrated_loa_pct:.1f}% probability of approval from {development_phase} stage. "

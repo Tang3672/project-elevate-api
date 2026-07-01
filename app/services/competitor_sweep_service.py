@@ -206,6 +206,11 @@ def _sweep_approved_fda_device(
             year      = (rec.get("decision_date") or "")[:4]
             if not name or name.lower() in seen:
                 continue
+            # Relevance filter: openFDA's OR-search returns loosely-related devices, so
+            # keep only devices whose name actually contains a disease keyword (drops
+            # noise like "acute dialysis kit" for a stroke-edema query).
+            if not any(t.lower() in name.lower() for t in terms):
+                continue
             seen.add(name.lower())
             products.append({
                 "name":          name,

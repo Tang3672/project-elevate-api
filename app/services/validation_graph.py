@@ -766,7 +766,8 @@ def _modality_contamination_flags(report: dict, sub_expert_id: str) -> list:
     import json as _json
     # Scan only the narrative/commercial sections most prone to antibiotic bleed.
     scan_fields = ("executive_summary", "regulatory_pathway", "market_sizing",
-                   "market_access", "strategic_playbook", "commercialization")
+                   "market_access", "strategic_playbook", "commercialization",
+                   "commercialization_scores", "expert_panel")
     blob = " ".join(
         _json.dumps(report.get(f, ""), default=str).lower() for f in scan_fields
     )
