@@ -185,7 +185,12 @@ def _sweep_approved_fda_device(
     indication. Used instead of the drug label API for device/diagnostic/SaMD products.
     Returns [] (honest empty) rather than unrelated drugs when nothing matches.
     """
-    terms = [p for p in (indication_phrases or [])[:3] if p]
+    # Drop over-generic medical words that match unrelated devices (e.g. "acute" →
+    # "acute dialysis kit"). Keep the disease-specific terms only.
+    _GENERIC = {"acute", "chronic", "related", "disease", "syndrome", "disorder",
+                "system", "care", "patient", "adult", "pediatric", "severe", "early",
+                "late", "stage", "condition", "based", "using"}
+    terms = [p for p in (indication_phrases or []) if p and p.lower() not in _GENERIC][:3]
     if not terms:
         return []
     search_str = " OR ".join(f'device_name:"{t}"' for t in terms)
