@@ -168,6 +168,64 @@ def _infer_advantages(prod: dict, context: dict) -> tuple[list[str], list[str], 
 # Source sweepers
 # ──────────────────────────────────────────────────────────────────────────────
 
+def _is_device_like(product_type: str = "", therapeutic_area: str = "") -> bool:
+    """True for device/diagnostic/SaMD/software products, which must NOT be swept via the
+    drug label API (that returned random oral drugs for Liz's AI diagnostic)."""
+    blob = f"{product_type or ''} {therapeutic_area or ''}".lower()
+    return any(k in blob for k in
+               ("device", "diagnostic", "software", "digital", "samd", "imaging_ai", "digital_cds"))
+
+
+def _sweep_approved_fda_device(
+    indication_phrases: list[str],
+    max_results: int = 12,
+) -> list[dict]:
+    """
+    Query the FDA 510(k) clearance API for cleared devices/diagnostics matching the
+    indication. Used instead of the drug label API for device/diagnostic/SaMD products.
+    Returns [] (honest empty) rather than unrelated drugs when nothing matches.
+    """
+    terms = [p for p in (indication_phrases or [])[:3] if p]
+    if not terms:
+        return []
+    search_str = " OR ".join(f'device_name:"{t}"' for t in terms)
+    products: list[dict] = []
+    seen: set = set()
+    try:
+        r = requests.get(
+            "https://api.fda.gov/device/510k.json",
+            params={"search": search_str, "limit": 25},
+            timeout=12,
+        )
+        if r.status_code != 200:
+            return products
+        for rec in r.json().get("results", [])[:25]:
+            name      = (rec.get("device_name") or "").strip()
+            applicant = (rec.get("applicant") or "").strip()[:50]
+            kno       = rec.get("k_number") or ""
+            year      = (rec.get("decision_date") or "")[:4]
+            if not name or name.lower() in seen:
+                continue
+            seen.add(name.lower())
+            products.append({
+                "name":          name,
+                "brand_name":    None,
+                "company":       applicant or "Unknown",
+                "route":         None,
+                "stage":         "approved",
+                "approval_year": int(year) if year.isdigit() else None,
+                "mechanism":     None,
+                "source":        "fda_510k",
+                "source_url":    (f"https://www.accessdata.fda.gov/scripts/cdrh/cfdocs/cfPMN/pmn.cfm?ID={kno}"
+                                  if kno else None),
+            })
+            if len(products) >= max_results:
+                break
+    except Exception as e:
+        logger.warning("FDA 510(k) device sweep failed: %s", e)
+    return products
+
+
 def _sweep_approved_openfda(
     indication_phrases: list[str],
     max_results: int = 12,
@@ -227,10 +285,17 @@ def _sweep_pipeline_ctgov(
     disease_name: str,
     indication_keywords: list[str],
     max_results: int = 10,
+    allowed_types: tuple = ("DRUG", "BIOLOGICAL", "GENETIC"),
+    device_like: bool = False,
 ) -> list[dict]:
     """
-    Query ClinicalTrials.gov Phase 2/3 trials for the indication.
-    Returns list of pipeline competitor dicts with drug name + sponsor.
+    Query ClinicalTrials.gov trials for the indication.
+    Returns list of pipeline competitor dicts with intervention name + sponsor.
+
+    allowed_types limits which intervention types count as competitors (drug set by
+    default; DEVICE/DIAGNOSTIC_TEST/OTHER for device/diagnostic/SaMD products). Device
+    trials frequently have no drug-style Phase 2/3, so the phase filter is dropped when
+    device_like is set.
     """
     products: list[dict] = []
     seen_drugs: set = set()
@@ -238,15 +303,17 @@ def _sweep_pipeline_ctgov(
     search_cond = disease_name or indication_keywords[0] if indication_keywords else "disease"
 
     try:
+        _params = {
+            "query.cond":           search_cond,
+            "filter.overallStatus": "RECRUITING,ACTIVE_NOT_RECRUITING,NOT_YET_RECRUITING",
+            "pageSize":             max_results * 2,
+            "format":               "json",
+        }
+        if not device_like:
+            _params["filter.phase"] = "PHASE2,PHASE3"
         r = requests.get(
             "https://clinicaltrials.gov/api/v2/studies",
-            params={
-                "query.cond":           search_cond,
-                "filter.overallStatus": "RECRUITING,ACTIVE_NOT_RECRUITING,NOT_YET_RECRUITING",
-                "filter.phase":         "PHASE2,PHASE3",
-                "pageSize":             max_results * 2,
-                "format":               "json",
-            },
+            params=_params,
             timeout=12,
         )
         if r.status_code != 200:
@@ -265,8 +332,9 @@ def _sweep_pipeline_ctgov(
             phase_str = "phase3" if "PHASE3" in phases else "phase2"
             nct_id    = ident.get("nctId", "")
 
+            phase_str = phase_str if not device_like else (phase_str if phases else "clinical")
             for iv in interv:
-                if iv.get("type") not in ("DRUG", "BIOLOGICAL", "GENETIC"):
+                if iv.get("type") not in allowed_types:
                     continue
                 drug_name = iv.get("name", "").strip()
                 if not drug_name or drug_name.lower() in seen_drugs:
@@ -488,13 +556,25 @@ def sweep_competitors(
     At 200-400ms per call this is fast enough for report generation.
     """
     context = {"disease": disease_name, "therapeutic_area": therapeutic_area}
+    device_like = _is_device_like(product_type, therapeutic_area)
 
-    # 1. Approved products
-    approved_raw = _sweep_approved_openfda(indication_keywords)
+    # 1. Approved products — device/diagnostic/SaMD products are swept via the FDA 510(k)
+    #    device API, NOT the drug label API (which returned unrelated oral drugs).
+    if device_like:
+        approved_raw = _sweep_approved_fda_device(indication_keywords)
+    else:
+        approved_raw = _sweep_approved_openfda(indication_keywords)
     time.sleep(_DELAY)
 
-    # 2. Pipeline products
-    pipeline_raw = _sweep_pipeline_ctgov(disease_name, indication_keywords)
+    # 2. Pipeline products — accept DEVICE/DIAGNOSTIC/OTHER interventions for device-like
+    #    products (drug set otherwise), and don't force drug-style Phase 2/3.
+    if device_like:
+        pipeline_raw = _sweep_pipeline_ctgov(
+            disease_name, indication_keywords,
+            allowed_types=("DEVICE", "DIAGNOSTIC_TEST", "OTHER", "PROCEDURE"),
+            device_like=True)
+    else:
+        pipeline_raw = _sweep_pipeline_ctgov(disease_name, indication_keywords)
     time.sleep(_DELAY)
 
     # 3. Literature signals

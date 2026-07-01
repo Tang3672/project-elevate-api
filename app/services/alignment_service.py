@@ -101,16 +101,28 @@ async def generate_pi_report(
         except Exception as e:
             logger.warning(f"PI memory load failed (non-fatal): {e}")
 
-    #  MoE Routing 
+    #  MoE Routing
     router_result = await route_expert(idea=idea, pi_domain=disease_domain)
-    expert        = router_result.expert
+    # Prefer the granular modality sub-expert (v2) as the report author — this is what
+    # keeps a diagnostic/device/SaMD from being written by the drug (antibiotic) expert.
+    expert = router_result.sub_expert or router_result.expert
+    # The classified modality is authoritative over the frontend's (unreliable)
+    # tier1_category default — the frontend hardcodes product_type='other' and defaults
+    # tier1 to drug_small_molecule, which is exactly what mislabelled Liz's AI diagnostic.
+    eff_tier1 = router_result.modality or tier1_category
+    if eff_tier1 and eff_tier1 != tier1_category:
+        try:
+            pt = _PT_MAP.get(eff_tier1.lower(), pt)
+        except AttributeError:
+            pass
     logger.info(
-        f"MoE Router: domain={expert.domain_id} "
-        f"method={router_result.routing_method} "
+        f"MoE Router: disease_domain={router_result.domain_id} "
+        f"sub_expert={router_result.sub_expert_id} modality={eff_tier1} "
+        f"product_type={pt} method={router_result.routing_method} "
         f"confidence={router_result.confidence:.2f}"
     )
 
-    #  Generate with Expert context 
+    #  Generate with Expert context
     report = await _generate_expert_report(
         idea, pt, expert, demand_results, hospital_matches_raw, total_signals,
         pi_memory_context=pi_memory_context, funding_pathway=funding_pathway, user_id=user_id)
@@ -570,6 +582,101 @@ You must respond with ONLY a valid JSON object. No markdown, no preamble. Use th
 }"""
 
 
+
+
+# Per-modality framing used to override the antibiotic-flavoured JSON schema examples.
+# key → (label, regulatory, pricing/market, reimbursement/payment, IP framing)
+_MODALITY_FRAMING = {
+    "device": ("medical device",
+        "FDA device pathway — 510(k) if a predicate exists, De Novo for a novel low/moderate-risk device, or PMA for high-risk; no drug NDA/BLA",
+        "priced per unit / per procedure or as a capital purchase — NOT drug WAC or 'price per course'",
+        "hospital value-analysis committee (VAC) purchasing, DRG bundling / NTAP, CPT procedure codes, GPO contracts, and direct institutional sales",
+        "device design, method-of-use, and system claims — NOT 'small-molecule composition of matter'"),
+    "diagnostic": ("diagnostic / in-vitro or imaging test",
+        "FDA pathway for a diagnostic — 510(k)/De Novo/PMA (or CLIA/LDT for lab-developed tests); no drug NDA/BLA/QIDP",
+        "priced per test / per read, or as an institutional service contract — NOT drug WAC or 'price per course'",
+        "CPT/PLA codes, MolDX/MAC local coverage determinations, hospital lab buy-vs-send-out economics, and direct institutional sales",
+        "assay, method, and biomarker-panel claims — NOT 'small-molecule composition of matter'"),
+    "samd": ("Software as a Medical Device (AI/ML clinical software)",
+        "FDA SaMD pathway — De Novo for a novel AI/ML algorithm with no predicate, 510(k) if a predicate exists, with a Predetermined Change Control Plan (PCCP) for adaptive models; 21st Century Cures CDS-exemption analysis. NO QIDP/LPAD/NDA",
+        "priced as an annual institutional SaaS license, per-study/per-read fee, or value-based (LOS/readmission reduction) — NOT drug WAC or 'price per course'",
+        "hospital IT procurement (Epic/Cerner integration), AI-specific CPT (often Category III), payer LCDs for AI, value-based purchasing, AND direct institutional/enterprise sales — cover the full sales pipeline, not only pharmacy reimbursement",
+        "software, algorithm, and method claims plus training-data/model IP — NOT 'small-molecule composition of matter'"),
+    "biologic": ("biologic",
+        "FDA BLA pathway (351(a)); biosimilar/interchangeability context where relevant — NOT antibiotic QIDP/LPAD/GAIN Act",
+        "biologic specialty pricing / buy-and-bill — NOT antibiotic 'price per course'",
+        "J-code / buy-and-bill, specialty pharmacy, and payer coverage",
+        "biologic composition, formulation, and manufacturing claims"),
+    "gene_therapy": ("gene / cell therapy",
+        "FDA CBER (OTAT) BLA pathway; RMAT designation; 15-yr long-term follow-up — NOT antibiotic QIDP/LPAD/GAIN Act",
+        "one-time high-cost therapy with annuity/outcomes-based payer contracts — NOT antibiotic 'price per course'",
+        "outcomes-based / annuity payer contracts, specialty distribution",
+        "vector, construct, and manufacturing claims"),
+    "vaccine": ("vaccine / immunotherapy",
+        "FDA CBER BLA pathway; ACIP recommendation drives uptake — NOT antibiotic QIDP/LPAD/GAIN Act",
+        "public-market / tiered government pricing (CDC contract, VFC) — NOT antibiotic 'price per course'",
+        "ACIP/VFC, government purchase, and payer coverage mandates",
+        "antigen, formulation, and platform claims"),
+    "platform": ("platform / other modality",
+        "the regulatory pathway appropriate to the specific product — do NOT assume an antibiotic NDA/QIDP",
+        "the pricing model appropriate to the modality — do NOT assume drug 'price per course'",
+        "the payment mechanisms appropriate to the modality",
+        "the IP framing appropriate to the modality"),
+    "nonamr_drug": ("small-molecule drug (NOT an antibiotic)",
+        "the appropriate small-molecule NDA pathway (505(b)(1)/(b)(2)), with Breakthrough/Orphan/Accelerated Approval as relevant — do NOT use antibiotic-only tools (QIDP, LPAD, GAIN Act, BLI combinations, PASTEUR Act, CARB-X, BARDA antibacterial)",
+        "small-molecule specialty/retail pricing appropriate to the indication",
+        "the payer/reimbursement pathway appropriate to the indication",
+        "small-molecule composition-of-matter and method-of-use claims"),
+}
+
+def _modality_class(sub_expert_id: str, product_type) -> str:
+    """Map the granular sub-expert id (preferred) or product_type to a modality framing
+    key. Returns "" for antibiotics so the existing antibiotic path is untouched."""
+    sid = (sub_expert_id or "").lower()
+    if sid.startswith("drug_amr"):
+        return ""                       # antibiotic — unchanged behaviour
+    if sid.startswith("digital_"):
+        return "samd"
+    if sid.startswith("device_"):
+        return "device"
+    if sid.startswith("diagnostic_"):
+        return "diagnostic"
+    if sid.startswith("biologic_"):
+        return "biologic"
+    if sid.startswith("gene_therapy_"):
+        return "gene_therapy"
+    if sid.startswith("vaccine_"):
+        return "vaccine"
+    if sid.startswith("other_"):
+        return "platform"
+    if sid.startswith("drug_"):
+        return "nonamr_drug"
+    # No usable sub-expert id — fall back to the coarse product_type enum/string.
+    pt = str(getattr(product_type, "value", product_type) or "").lower()
+    return {"medical_device": "device", "diagnostic": "diagnostic", "software": "samd",
+            "gene_therapy": "gene_therapy"}.get(pt, "")
+
+def _modality_directive(sub_expert_id: str, product_type) -> str:
+    """A hard framing block that overrides the antibiotic-flavoured schema examples so a
+    device/diagnostic/SaMD/biologic report never inherits antibiotic content. Empty for
+    antibiotics (preserves the working antibiotic path)."""
+    key = _modality_class(sub_expert_id, product_type)
+    if not key:
+        return ""
+    label, regulatory, pricing, payment, ip = _MODALITY_FRAMING[key]
+    return (
+        f"\n\nMODALITY LOCK (CRITICAL — this overrides any conflicting example in the JSON "
+        f"schema below): This product is a {label}. The schema's illustrative examples were "
+        f"written for antibiotics (QIDP, LPAD, 'price per course', pathogen, BLI, PASTEUR) — "
+        f"IGNORE them. For THIS product you MUST:\n"
+        f"- Regulatory pathway & designations: {regulatory}.\n"
+        f"- Market sizing / pricing: {pricing}.\n"
+        f"- Reimbursement & go-to-market: {payment}.\n"
+        f"- Competitors: name real {label} competitors — never unrelated oral drugs.\n"
+        f"- Patentability / IP: {ip}.\n"
+        f"Any antibiotic- or (unless stated) small-molecule-specific content in a {label} "
+        f"report is a categorization error and MUST NOT appear."
+    )
 
 
 async def _generate_expert_report(idea, product_type, expert, demand_results, hospital_matches_raw, total_signals, pi_memory_context="", funding_pathway="commercial", user_id=None):
@@ -1121,8 +1228,8 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
         "\n\nREPORTING RULES: "
         "(1) Every number must cite its source by name. "
         "(2) TAM/SAM/SOM: use ONLY the values from the derivation above — no other estimates. "
-        "(3) Regulatory timelines: cite a comparable approved drug. "
-        "(4) Market access prices: cite CMS ASP or reimbursement data. "
+        "(3) Regulatory timelines: cite a comparable approved product (drug, device, or diagnostic as applicable). "
+        "(4) Market access prices: cite CMS ASP, the applicable fee schedule, or reimbursement data. "
         "(5) If uncertain, state a range with sources for both ends. "
         "(6) GROUNDING (critical for trust): every factual or numerical claim in EVERY narrative "
         "field — including the executive summary — must be traceable to the database-grounded "
@@ -1164,7 +1271,9 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
         )
     )
 
-    system = expert.system_prompt + "\n\n" + EXPERT_JSON_SCHEMA + reporting_instructions
+    modality_directive = _modality_directive(sub_expert_id, product_type)
+    system = (expert.system_prompt + modality_directive + "\n\n"
+              + EXPERT_JSON_SCHEMA + reporting_instructions)
 
     # ── Cost-aware specialist router (P3) — pick the synthesis model tier; the
     #    frontier model is used only when complexity/uncertainty is high. ──
@@ -1340,7 +1449,9 @@ def _build_expert_context(idea, expert, demand_results, hospital_matches, diseas
         f"DOMAIN: {expert.display_name}",
         "",
         "DISEASE KNOWLEDGE (use these facts and source URLs):",
-        disease_knowledge or expert.knowledge_base,
+        # v1 experts carry a knowledge_base; v2 modality sub-experts don't — fall back
+        # to their system_prompt so a diagnostic/device report still gets expert context.
+        disease_knowledge or getattr(expert, "knowledge_base", None) or getattr(expert, "system_prompt", ""),
         "",
         f"DEMAND SIGNALS FROM FEDERAL DATABASES ({len(demand_results)} signals):",
     ]

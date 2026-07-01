@@ -117,8 +117,11 @@ def _classify_archetype(idea: str, product_type: str) -> str:
     """Route innovation to the correct expert formula."""
     combined = (idea + " " + product_type).lower()
 
-    # Direct product_type override — most reliable signal
+    # Direct product_type override — most reliable signal. Accepts BOTH the tier1_category
+    # ids (drug_small_molecule, digital_health, …) and the ProductType enum values
+    # (software, diagnostic, medical_device, …) so a SaMD isn't priced as a drug.
     pt_map = {
+        # tier1_category ids
         "drug_small_molecule":   "pharma_small_molecule",
         "biologic":              "pharma_biologic",
         "gene_cell_therapy":     "gene_cell_therapy",
@@ -127,6 +130,12 @@ def _classify_archetype(idea: str, product_type: str) -> str:
         "diagnostic":            "in_vitro_diagnostic",
         "digital_health":        "software_samd",
         "other_platform":        "software_samd",
+        # ProductType enum values
+        "software":              "software_samd",
+        "gene_therapy":          "gene_cell_therapy",
+        "antibiotic":            "pharma_small_molecule",
+        "oncology_drug":         "pharma_small_molecule",
+        "orphan_drug":           "pharma_small_molecule",
     }
     if product_type.lower() in pt_map:
         archetype = pt_map[product_type.lower()]

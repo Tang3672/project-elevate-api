@@ -740,6 +740,56 @@ async def correct_flagged_sections(report: dict, error_flags: list) -> dict:
 
 # ── Public Entry Point ────────────────────────────────────────────────────────
 
+# Antibiotic/small-molecule tokens that must NOT appear in a non-drug (device /
+# diagnostic / SaMD / biologic / gene-therapy / vaccine) report. Deterministic backstop
+# in case any antibiotic content survives the modality-locked generation prompt.
+_ANTIBIOTIC_TOKENS = [
+    "qidp", "lpad", "gain act", "pasteur act", "carb-x", "beta-lactam", "bli combination",
+    "price per course", "per course", "pathogen", "antimicrobial resistance", "antibiotic",
+]
+_SMALL_MOLECULE_TOKENS = ["small molecule", "small-molecule", "composition of matter", "drug wac"]
+
+
+def _modality_contamination_flags(report: dict, sub_expert_id: str) -> list:
+    """Deterministically flag cross-modality contamination for non-drug products so the
+    existing self-correction regenerates the offending sections. Returns [] for
+    antibiotics and small-molecule drugs (their tokens are legitimate there)."""
+    sid = (sub_expert_id or "").lower()
+    if sid.startswith("drug_amr"):
+        return []                          # antibiotic — tokens are expected
+    is_drug = sid.startswith("drug_")
+    is_non_drug = sid.startswith(("device_", "diagnostic_", "digital_", "biologic_",
+                                  "gene_therapy_", "vaccine_", "other_"))
+    if not (is_drug or is_non_drug):
+        return []
+
+    import json as _json
+    # Scan only the narrative/commercial sections most prone to antibiotic bleed.
+    scan_fields = ("executive_summary", "regulatory_pathway", "market_sizing",
+                   "market_access", "strategic_playbook", "commercialization")
+    blob = " ".join(
+        _json.dumps(report.get(f, ""), default=str).lower() for f in scan_fields
+    )
+    tokens = list(_ANTIBIOTIC_TOKENS)
+    if is_non_drug:
+        tokens += _SMALL_MOLECULE_TOKENS
+    hits = sorted({t for t in tokens if t in blob})
+    if not hits:
+        return []
+    label = ("a non-drug medical product" if is_non_drug else "a non-antibiotic drug")
+    return [{
+        "agent":      "Modality Guard",
+        "severity":   "ERROR",
+        "category":   "REGULATORY",
+        "field":      "regulatory_pathway",
+        "issue":      (f"This is {label} ({sub_expert_id}), but the report contains "
+                       f"antibiotic/small-molecule-specific content: {', '.join(hits)}."),
+        "suggestion": ("Remove all antibiotic/small-molecule framing (QIDP, LPAD, GAIN/PASTEUR, "
+                       "CARB-X, BLI, 'price per course', 'small molecule') and use the pathway, "
+                       "pricing, and reimbursement appropriate to this modality."),
+    }]
+
+
 async def validate_pi_report(report: dict, sub_expert_id: str = "drug_amr") -> dict:
     """
     Run PI report through 5-agent parallel validation graph.
@@ -788,6 +838,26 @@ async def validate_pi_report(report: dict, sub_expert_id: str = "drug_amr") -> d
     try:
         final_state = await graph.ainvoke(initial_state)
         result = final_state.get("validated_report", report)
+
+        # Deterministic modality-contamination backstop — merge into the validation
+        # result so any residual antibiotic/small-molecule bleed is flagged as an ERROR
+        # and picked up by the self-correction pass.
+        try:
+            contam = _modality_contamination_flags(report, sub_expert_id)
+            if contam:
+                v = result.setdefault("validation", {})
+                v["errors"] = (v.get("errors") or []) + contam
+                v["total_flags"] = (v.get("total_flags") or 0) + len(contam)
+                v["status"] = "ERROR"
+                v["passed"] = False
+                agents = v.get("agents_run") or []
+                if "Modality Guard" not in agents:
+                    v["agents_run"] = agents + ["Modality Guard"]
+                logger.warning("Modality Guard flagged contamination for %s: %s",
+                               sub_expert_id, contam[0]["issue"])
+        except Exception as _mg:
+            logger.warning("Modality Guard check failed (non-fatal): %s", _mg)
+
         agents_run = len(result.get("validation", {}).get("agents_run", []))
         total_flags = result.get("validation", {}).get("total_flags", 0)
         logger.info(f"Validation complete: {agents_run} agents, {total_flags} flags")
