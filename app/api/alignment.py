@@ -53,7 +53,8 @@ async def check_alignment(payload: AlignmentRequest):
 
 
 _DEV_EMAILS = {"test@projectelevate.io", "ijw91021@gmail.com",
-               "admin@projectelevate.io", "oneonesie100@gmail.com"}
+               "admin@projectelevate.io", "oneonesie100@gmail.com",
+               "lizpeek11@gmail.com", "peek@wustl.edu"}
 _PLAN_LIMITS = {
     "basic":        5,    # Explorer $49
     "starter":      20,   # Innovator $149
