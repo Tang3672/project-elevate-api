@@ -318,18 +318,77 @@ DOMAIN_SPECIFIC_STRATEGIES = {
 
 # ── MASTER STRATEGY LOOKUP ─────────────────────────────────────────────────────
 
+# Device/diagnostic/SaMD universal strategies — used to pad NON-DRUG modalities so they
+# never inherit the drug playbook (Fast Track / pediatric exclusivity / pre-NDA meeting).
+UNIVERSAL_STRATEGIES_DEVICE = [
+    {
+        "category": "Regulatory Acceleration",
+        "strategy": "Stack Breakthrough Device Designation (BDD) with an early Q-Sub (pre-submission) meeting",
+        "detail": "For a novel device/SaMD, BDD grants priority FDA interaction and a sprint-team review; pairing it with a Q-Sub locks in agreement on the validation study design and endpoints before you build the pivotal dataset.",
+        "example_company": "Viz.ai",
+        "example_drug": "Viz ContaCT (LVO stroke triage AI)",
+        "what_they_did": "Viz.ai took ContaCT through FDA De Novo (2018) as the first AI stroke-triage tool, using early FDA engagement to define the clinical validation package.",
+        "how_to_apply": "Request BDD as soon as you have preliminary performance data; file a Q-Sub 3-6 months before the pivotal validation study to pre-align on sensitivity/specificity endpoints and reference standard.",
+        "source_url": "https://www.fda.gov/medical-devices/breakthrough-devices-program",
+        "applicability": "Any novel device/SaMD addressing a serious condition with no cleared predicate.",
+    },
+    {
+        "category": "Reimbursement",
+        "strategy": "Pursue a New Technology Add-on Payment (NTAP) so hospitals are paid for using the software on top of the DRG",
+        "detail": "AI/SaMD historically had no dedicated payment. NTAP (and now the outpatient NTCAP equivalent) lets hospitals recover incremental cost above the DRG bundle — the single biggest unlock for adoption.",
+        "example_company": "Viz.ai",
+        "example_drug": "Viz ContaCT — first CMS NTAP for AI software",
+        "what_they_did": "Viz.ai secured the first-ever CMS NTAP for AI software (FY2021, up to ~$1,040 per use), establishing the reimbursement template later followed by other imaging-AI vendors.",
+        "how_to_apply": "Apply to CMS for NTAP with cost + substantial-clinical-improvement evidence ~1 year before your target fiscal year; in parallel pursue a Category III CPT and payer LCDs.",
+        "source_url": "https://www.cms.gov/medicare/payment/prospective-payment-systems/acute-inpatient-pps/new-medical-services-and-new-technologies",
+        "applicability": "Device/SaMD used in the inpatient setting with a demonstrable outcome or cost benefit.",
+    },
+    {
+        "category": "Product Lifecycle",
+        "strategy": "Use a Predetermined Change Control Plan (PCCP) to update the algorithm without a new submission",
+        "detail": "FDA's PCCP (2023) lets an AI/ML developer pre-specify how the model will be retrained and updated, so post-market improvements don't each require a new 510(k)/De Novo — a decisive moat and cost saver for adaptive software.",
+        "example_company": "FDA AI/ML Action Plan",
+        "example_drug": "Predetermined Change Control Plan (PCCP)",
+        "what_they_did": "FDA finalized PCCP guidance so cleared AI/ML devices can iterate within an authorized envelope; early adopters lock in a durable update pathway competitors lack.",
+        "how_to_apply": "Include a PCCP in your De Novo/510(k) specifying the modification protocol, performance bounds, and re-validation approach for model updates.",
+        "source_url": "https://www.fda.gov/medical-devices/software-medical-device-samd/artificial-intelligence-and-machine-learning-software-medical-device",
+        "applicability": "Any adaptive AI/ML SaMD expected to retrain or improve post-market.",
+    },
+    {
+        "category": "Go-to-Market",
+        "strategy": "Land-and-expand: pilot at academic centers, publish outcomes, then expand across the IDN",
+        "detail": "Enterprise health-system sales are slow and committee-gated. Winning a lighthouse academic site, generating peer-reviewed outcome/ROI data, then expanding across the integrated delivery network is the proven SaMD commercial motion.",
+        "example_company": "Aidoc / RapidAI",
+        "example_drug": "Enterprise imaging-AI deployment",
+        "what_they_did": "Modern imaging-AI vendors landed flagship stroke centers, published time-to-treatment and outcome improvements, and used that evidence to expand enterprise-wide.",
+        "how_to_apply": "Sign 2-3 lighthouse academic sites at a pilot price; instrument LOS/time-to-treatment/readmission outcomes; convert the published data into an enterprise value-based contract.",
+        "source_url": "https://www.himss.org/",
+        "applicability": "Any enterprise-sold device/SaMD dependent on clinician adoption and hospital procurement.",
+    },
+]
+
+
+def _universal_for(sub_expert_id: str) -> list:
+    """Pick the modality-appropriate universal strategy set — device/SaMD/diagnostic get
+    the device playbook, everything else (drugs/biologics/gene/vaccine) gets the drug one."""
+    sid = (sub_expert_id or "").lower()
+    if sid.startswith(("device_", "diagnostic_", "digital_")):
+        return UNIVERSAL_STRATEGIES_DEVICE
+    return UNIVERSAL_STRATEGIES
+
+
 def get_strategies_for_domain(sub_expert_id: str, max_strategies: int = 4) -> list:
     """
-    Returns domain-specific strategies first, then universal strategies as supplements.
-    Domain strategies are most relevant to the specific product type.
+    Returns domain-specific strategies first, then modality-appropriate universal
+    strategies as supplements (device/SaMD never inherit the drug playbook).
     """
     domain = DOMAIN_SPECIFIC_STRATEGIES.get(sub_expert_id, [])
-    
+
     if len(domain) >= max_strategies:
         return domain[:max_strategies]
-    
-    # Fill remaining slots with universal strategies not already covered
-    universal = UNIVERSAL_STRATEGIES[:max_strategies]
+
+    # Fill remaining slots with the modality-correct universal strategies.
+    universal = _universal_for(sub_expert_id)[:max_strategies]
     combined = domain + universal
     return combined[:max_strategies]
 

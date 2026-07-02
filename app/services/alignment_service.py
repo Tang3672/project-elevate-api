@@ -588,9 +588,9 @@ You must respond with ONLY a valid JSON object. No markdown, no preamble. Use th
 # key → (label, regulatory, pricing/market, reimbursement/payment, IP framing)
 _MODALITY_FRAMING = {
     "device": ("medical device",
-        "FDA device pathway — 510(k) if a predicate exists, De Novo for a novel low/moderate-risk device, or PMA for high-risk; no drug NDA/BLA",
-        "priced per unit / per procedure or as a capital purchase — NOT drug WAC or 'price per course'",
-        "hospital value-analysis committee (VAC) purchasing, DRG bundling / NTAP, CPT procedure codes, GPO contracts, and direct institutional sales",
+        "FDA device pathway — 510(k) if a predicate exists, De Novo for a novel low/moderate-risk device, or PMA for high-risk; IDE for pivotal studies. The ONLY expedited programs are Breakthrough Device Designation (BDD) and TAP. NEVER use Fast Track, Priority Review, QIDP, LPAD, NDA/BLA, or BIO/Thomas Phase 1/2/3 drug rates. Clinical program = bench + pivotal IDE/validation study (SSED), NOT drug Phase 1/2/3",
+        "priced per unit / per procedure or as a capital purchase — NOT drug WAC or 'price per course'; size via CMS procedure volume × DRG/device ASP",
+        "hospital value-analysis committee (VAC) purchasing, capital/operating-budget sales, value-based care (bed-day / complication savings under DRG bundles), DRG bundling / NTAP, CPT procedure codes, GPO contracts, and dual IT/procurement timelines",
         "device design, method-of-use, and system claims — NOT 'small-molecule composition of matter'"),
     "diagnostic": ("diagnostic / in-vitro or imaging test",
         "FDA pathway for a diagnostic — 510(k)/De Novo/PMA (or CLIA/LDT for lab-developed tests); no drug NDA/BLA/QIDP",
@@ -598,9 +598,9 @@ _MODALITY_FRAMING = {
         "CPT/PLA codes, MolDX/MAC local coverage determinations, hospital lab buy-vs-send-out economics, and direct institutional sales",
         "assay, method, and biomarker-panel claims — NOT 'small-molecule composition of matter'"),
     "samd": ("Software as a Medical Device (AI/ML clinical software)",
-        "FDA SaMD pathway — De Novo for a novel AI/ML algorithm with no predicate, 510(k) if a predicate exists, with a Predetermined Change Control Plan (PCCP) for adaptive models; 21st Century Cures CDS-exemption analysis. NO QIDP/LPAD/NDA",
-        "priced as an annual institutional SaaS license, per-study/per-read fee, or value-based (LOS/readmission reduction) — NOT drug WAC or 'price per course'",
-        "hospital IT procurement (Epic/Cerner integration), AI-specific CPT (often Category III), payer LCDs for AI, value-based purchasing, AND direct institutional/enterprise sales — cover the full sales pipeline, not only pharmacy reimbursement",
+        "FDA SaMD pathway — De Novo for a novel AI/ML algorithm with no predicate, 510(k) if a predicate exists, with a Predetermined Change Control Plan (PCCP) for adaptive models; 21st Century Cures CDS-exemption analysis. The ONLY expedited programs are Breakthrough Device Designation (BDD) and TAP. NEVER use Fast Track, Priority Review, Accelerated Approval, QIDP, LPAD, NDA, or BIO/Thomas Phase 1/2/3 drug success rates — they do not exist for devices. The development program is bench + retrospective then prospective VALIDATION studies (sensitivity/specificity, SSED), NOT Phase 1/2/3 human safety trials",
+        "B2B SaaS: TAM = (eligible target hospitals/sites, ~6,000 US hospitals) × (annual SaaS subscription per site). NEVER compute TAM as patients × per-patient price, and NEVER show a 'net realized price per patient' or drug WAC — an imaging SaMD is a flat institutional license (~$2k–$150k/site/yr), not a per-patient drug price",
+        "map ALL payment pipelines, not just CPT: (1) enterprise capital/operating-budget sales to the hospital, (2) value-based care — quantify how the tool saves money under capitated/DRG bundles (ICU bed-days avoided, reduced readmissions/LOS), (3) dual-gated IT + procurement approval timelines (Epic/Cerner integration), (4) AI CPT (often Category III) and payer LCDs where they exist",
         "software, algorithm, and method claims plus training-data/model IP — NOT 'small-molecule composition of matter'"),
     "biologic": ("biologic",
         "FDA BLA pathway (351(a)); biosimilar/interchangeability context where relevant — NOT antibiotic QIDP/LPAD/GAIN Act",
@@ -672,10 +672,13 @@ def _modality_directive(sub_expert_id: str, product_type) -> str:
         f"- Regulatory pathway & designations: {regulatory}.\n"
         f"- Market sizing / pricing: {pricing}.\n"
         f"- Reimbursement & go-to-market: {payment}.\n"
-        f"- Competitors: name real {label} competitors — never unrelated oral drugs.\n"
+        f"- Competitors: name real {label} competitors — never unrelated drugs or legacy hardware.\n"
         f"- Patentability / IP: {ip}.\n"
-        f"Any antibiotic- or (unless stated) small-molecule-specific content in a {label} "
-        f"report is a categorization error and MUST NOT appear."
+        f"HARD BLOCK for a {label}: the following drug/biologic concepts MUST NOT appear "
+        f"anywhere in the report — Fast Track, Priority Review, Accelerated Approval, QIDP, "
+        f"LPAD, GAIN Act, PASTEUR, BLI, NDA/BLA, WAC, 'price per course', 'net realized price "
+        f"per patient', Phase 1/2/3 human safety trials, and BIO/Thomas drug likelihood-of-"
+        f"approval rates. Using any of these is a categorization error."
     )
 
 
