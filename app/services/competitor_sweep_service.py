@@ -179,6 +179,7 @@ def _is_device_like(product_type: str = "", therapeutic_area: str = "") -> bool:
 def _sweep_approved_fda_device(
     indication_phrases: list[str],
     max_results: int = 12,
+    samd: bool = False,
 ) -> list[dict]:
     """
     Query the FDA 510(k) clearance API for cleared devices/diagnostics matching the
@@ -216,6 +217,15 @@ def _sweep_approved_fda_device(
             # noise like "acute dialysis kit" for a stroke-edema query).
             if not any(t.lower() in name.lower() for t in terms):
                 continue
+            # For a SaMD/AI product, legacy hardware clearances are NOT real competitors
+            # (AI/ML software is all post-2015). Drop pre-2016 clearances — this removes
+            # the 1980s/1990s oximeters and X-ray units that mislabelled the landscape.
+            if samd:
+                try:
+                    if int((rec.get("decision_date") or "0")[:4]) < 2016:
+                        continue
+                except (ValueError, TypeError):
+                    continue
             seen.add(name.lower())
             products.append({
                 "name":          name,
@@ -523,8 +533,19 @@ def _classify_market_structure(n_approved: int, n_pipeline: int) -> str:
     return "crowded"
 
 
-def _differentiation_levers(competitors: list[CompetitorProduct], ta: str) -> list[str]:
+def _differentiation_levers(competitors: list[CompetitorProduct], ta: str, device_like: bool = False) -> list[str]:
     """Identify unexploited differentiation levers from the competitive landscape."""
+    # Device/diagnostic/SaMD get technology/workflow levers — NOT drug levers like
+    # "oral formulation", "Fast Track", or "resistance mechanism".
+    if device_like:
+        return [
+            "Native EHR workflow integration (Epic/Cerner) — fits existing clinician workflow vs bolt-on tools",
+            "Higher sensitivity/specificity and faster time-to-result than the installed standard of care",
+            "Autonomous or point-of-care operation — reduces specialist dependency and turnaround time",
+            "Value-based ROI — quantified reduction in length-of-stay, readmissions, or avoided complications",
+            "Multi-condition / platform breadth vs single-purpose incumbents; cloud deployment with no capital hardware",
+        ][:5]
+
     levers: list[str] = []
     routes = {(c.route or "").upper() for c in competitors}
     stages = {c.stage for c in competitors}
@@ -567,11 +588,14 @@ def sweep_competitors(
     """
     context = {"disease": disease_name, "therapeutic_area": therapeutic_area}
     device_like = _is_device_like(product_type, therapeutic_area)
+    _blob = f"{product_type or ''} {therapeutic_area or ''}".lower()
+    is_samd = any(k in _blob for k in ("software", "digital", "samd", "imaging_ai", "digital_cds"))
 
     # 1. Approved products — device/diagnostic/SaMD products are swept via the FDA 510(k)
-    #    device API, NOT the drug label API (which returned unrelated oral drugs).
+    #    device API, NOT the drug label API (which returned unrelated oral drugs). For
+    #    SaMD we also drop pre-2016 legacy hardware (AI/ML software is all recent).
     if device_like:
-        approved_raw = _sweep_approved_fda_device(indication_keywords)
+        approved_raw = _sweep_approved_fda_device(indication_keywords, samd=is_samd)
     else:
         approved_raw = _sweep_approved_openfda(indication_keywords)
     time.sleep(_DELAY)
@@ -619,7 +643,7 @@ def sweep_competitors(
     n_approved = sum(1 for c in competitors if c.stage == "approved")
     n_pipeline = len(competitors) - n_approved
     structure  = _classify_market_structure(n_approved, n_pipeline)
-    levers     = _differentiation_levers(competitors, therapeutic_area)
+    levers     = _differentiation_levers(competitors, therapeutic_area, device_like=device_like)
 
     # 7. Competitive summary
     if not competitors:

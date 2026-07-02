@@ -704,16 +704,29 @@ def get_ptrs(
     ptrs_pct: 0.0 - 100.0 (e.g., 7.9)
     citation: source string
     """
+    sid = (subcategory_id or "").lower()
     profile = PTRS_REGISTRY.get(subcategory_id)
+    # Non-drug modalities have NO drug Phase 1/2/3 LoA. Use FDA CDRH device/SaMD
+    # CLEARANCE likelihood instead of the 7.5% drug all-indications baseline — that
+    # fallback was producing the nonsensical "7% approval probability" on device reports.
+    if not profile and sid.startswith(("device_", "diagnostic_", "digital_")):
+        if sid.startswith("diagnostic_"):
+            profile = PTRS_REGISTRY.get("diagnostic_molecular_lab")
+        elif sid.startswith("device_"):
+            profile = PTRS_REGISTRY.get("device_cardiovascular")
+        if not profile:   # SaMD / digital — clearance likelihood, not phase-based LoA
+            return 0.76, 76.0, ("[FDA_CDRH] SaMD De Novo grant rate ~76% / 510(k) clearance ~84% "
+                                "(CDRH FY2023). Device/SaMD CLEARANCE likelihood — NOT a drug "
+                                "Phase 1/2/3 likelihood-of-approval.")
     if not profile:
-        # Default to all-indications baseline
+        # Default to all-indications baseline (drug/biologic)
         loa = _phase_loa(_ALL_INDICATIONS_BASELINE, development_phase)
         cit = _ALL_INDICATIONS_BASELINE.citation
     else:
         loa = _phase_loa(profile.transitions, development_phase)
         cit = profile.transitions.citation
 
-    if has_biomarker:
+    if has_biomarker and sid.startswith(("drug_", "biologic_", "gene_", "vaccine_")):
         loa = min(loa * BIOMARKER_LOA_MULTIPLIER, BIOMARKER_LOA_MAX)
 
     return round(loa, 4), round(loa * 100, 2), cit

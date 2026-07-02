@@ -748,6 +748,10 @@ _ANTIBIOTIC_TOKENS = [
     "price per course", "per course", "pathogen", "antimicrobial resistance", "antibiotic",
 ]
 _SMALL_MOLECULE_TOKENS = ["small molecule", "small-molecule", "composition of matter", "drug wac"]
+# Drug/biologic-only regulatory + pricing concepts that must not appear on a device/SaMD.
+_DRUG_ONLY_TOKENS = ["fast track", "priority review", "accelerated approval",
+                     "net realized price per patient", "price per course", "price per patient per year",
+                     "bio/informa", "bio/thomas", "phase 1/2/3", "wac"]
 
 
 def _modality_contamination_flags(report: dict, sub_expert_id: str) -> list:
@@ -774,6 +778,9 @@ def _modality_contamination_flags(report: dict, sub_expert_id: str) -> list:
     tokens = list(_ANTIBIOTIC_TOKENS)
     if is_non_drug:
         tokens += _SMALL_MOLECULE_TOKENS
+        # Devices/SaMD/diagnostics must not carry drug-only regulatory/pricing concepts.
+        if sid.startswith(("device_", "diagnostic_", "digital_")):
+            tokens += _DRUG_ONLY_TOKENS
     hits = sorted({t for t in tokens if t in blob})
     if not hits:
         return []

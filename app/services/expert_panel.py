@@ -49,7 +49,7 @@ _REGULATORY_DOMAIN_HINTS: dict[str, str] = {
     "drug_cns":               "NDA 505(b)(1) or 505(b)(2). Breakthrough Therapy for serious condition. CNS trials: endpoint validation is key regulatory risk (FDA PDDS guidance).",
     "drug_mental_health":     "NDA pathway. BTD rarely granted for psychiatry. REMS required for high-risk medications. SSRI/SNRI precedents inform approval probability.",
     "drug_cardiology":        "NDA or BLA. Hard endpoints (MACE, HF hospitalization) typically required. Cardiovascular Safety Trial (CVOT) may be required post-approval.",
-    "digital_cds":            "FDA Software as a Medical Device (SaMD). De Novo for a novel AI/ML algorithm with no predicate; 510(k) if a cleared predicate exists; Predetermined Change Control Plan (PCCP) for adaptive models; Breakthrough Device Designation for serious conditions; 21st Century Cures CDS exemption if the clinician independently reviews the basis. Do NOT use QIDP/LPAD/NDA — those are antibiotic/drug-only.",
+    "digital_cds":            "FDA Software as a Medical Device (SaMD). De Novo for a novel AI/ML algorithm with no predicate; 510(k) if a cleared predicate exists; Predetermined Change Control Plan (PCCP) for adaptive models; 21st Century Cures CDS exemption if the clinician independently reviews the basis. The ONLY expedited programs for a device/SaMD are Breakthrough Device Designation (BDD) and TAP (Total Product Lifecycle Advisory Program). Do NOT use Fast Track, Priority Review, Accelerated Approval, QIDP, LPAD, or NDA — those are drug/biologic (CDER/CBER) programs that do NOT exist for devices.",
     "digital_samd_radiology": "FDA SaMD. De Novo for novel AI imaging with no predicate; 510(k) with predicate; PCCP for adaptive models; Breakthrough Device Designation. Do NOT use QIDP/LPAD/NDA.",
     "digital_rpm":            "FDA SaMD/device. 510(k) typical for connected monitors; CMS RPM CPT codes (99453-99458). Breakthrough Device for serious conditions. Do NOT use QIDP/LPAD/NDA.",
     "diagnostic_companion":   "FDA companion diagnostic (CDx), typically PMA co-approved with a therapy. Breakthrough Device possible. Do NOT use QIDP/LPAD/NDA.",
@@ -58,6 +58,27 @@ _REGULATORY_DOMAIN_HINTS: dict[str, str] = {
     "device_surgical_general":"PMA for Class III; De Novo for novel moderate-risk; 510(k) with predicate; IDE for trials; Breakthrough Device Designation. Do NOT use QIDP/LPAD/NDA.",
     "device_ophthalmology":   "PMA for Class III implants; De Novo/510(k) otherwise; IDE for trials; Breakthrough Device Designation. Do NOT use QIDP/LPAD/NDA.",
 }
+
+
+# Designations that exist ONLY for drugs/biologics (CDER/CBER) and must never appear on
+# a device/SaMD report. Stripped deterministically regardless of the LLM's output.
+_DRUG_ONLY_DESIGNATIONS = [
+    "fast track", "priority review", "accelerated approval", "breakthrough therapy",
+    "qidp", "lpad", "gain act", "rmat", "orphan drug", "nda", "bla", "505(b)",
+]
+
+
+def _sanitize_designations(desigs: list, sub_expert_id: str) -> list:
+    """For device/diagnostic/SaMD, remove drug/biologic-only designations (Fast Track,
+    Priority Review, QIDP, …). Ensures Breakthrough DEVICE Designation is offered instead."""
+    sid = (sub_expert_id or "").lower()
+    if not sid.startswith(("device_", "diagnostic_", "digital_")):
+        return desigs
+    cleaned = [d for d in (desigs or [])
+               if d and not any(bad in d.lower() for bad in _DRUG_ONLY_DESIGNATIONS)]
+    if not any("breakthrough device" in (d or "").lower() for d in cleaned):
+        cleaned.insert(0, "Breakthrough Device Designation (BDD)")
+    return cleaned
 
 
 def _regulatory_hint(sub_expert_id: str) -> str:
@@ -70,9 +91,9 @@ def _regulatory_hint(sub_expert_id: str) -> str:
     if sid.startswith("digital_"):
         return _REGULATORY_DOMAIN_HINTS["digital_cds"]
     if sid.startswith("diagnostic_"):
-        return "FDA in-vitro/imaging diagnostic. 510(k) with predicate (Class II); De Novo for novel; PMA for high-risk; CLIA/LDT for lab-developed tests; Breakthrough Device possible. Do NOT use QIDP/LPAD/NDA."
+        return "FDA in-vitro/imaging diagnostic. 510(k) with predicate (Class II); De Novo for novel; PMA for high-risk; CLIA/LDT for lab-developed tests. Only device expedited programs: Breakthrough Device Designation (BDD) and TAP. Do NOT use Fast Track, Priority Review, QIDP, LPAD, or NDA (drug-only)."
     if sid.startswith("device_"):
-        return "PMA for Class III (high-risk); De Novo for novel moderate-risk; 510(k) with predicate; IDE for trials; Breakthrough Device Designation. Do NOT use QIDP/LPAD/NDA (drug-only)."
+        return "PMA for Class III (high-risk); De Novo for novel moderate-risk; 510(k) with predicate; IDE for trials. Only device expedited programs: Breakthrough Device Designation (BDD) and TAP (Total Product Lifecycle Advisory Program). Do NOT use Fast Track, Priority Review, Accelerated Approval, QIDP, LPAD, or NDA — those are drug/biologic programs that do NOT exist for devices."
     if sid.startswith("vaccine_"):
         return "BLA pathway (FDA CBER). ACIP recommendation drives uptake; Phase 3 efficacy trial required. Do NOT use antibiotic QIDP/LPAD."
     if sid.startswith("gene_therapy_"):
@@ -279,13 +300,26 @@ async def _run_regulatory_panel(
         pass  # Fall back to Haiku estimate if ptrs_tables unavailable
 
     domain_hint = _regulatory_hint(sub_expert_id)
-    ptrs_anchor = (
-        f"HISTORICAL FDA APPROVAL RATE (from published BIO/WONG data): "
-        f"{calibrated_loa_pct:.1f}% probability of approval from {development_phase} stage. "
-        f"Source: {calibrated_citation}. "
-        f"Use this as your baseline — you may adjust ±5% only with specific cited reasoning.\n"
-        if calibrated_loa_pct is not None else ""
-    )
+    _sid = (sub_expert_id or "").lower()
+    _is_device = _sid.startswith(("device_", "diagnostic_", "digital_"))
+    if calibrated_loa_pct is None:
+        ptrs_anchor = ""
+    elif _is_device:
+        # Devices/SaMD: this is an FDA CDRH CLEARANCE likelihood, not a drug LoA. Do NOT
+        # frame it as Phase 1/2/3 approval probability.
+        ptrs_anchor = (
+            f"FDA CDRH CLEARANCE LIKELIHOOD (device/SaMD — NOT a drug Phase 1/2/3 rate): "
+            f"~{calibrated_loa_pct:.0f}% based on De Novo grant / 510(k) clearance rates. "
+            f"Source: {calibrated_citation}. Frame the roadmap as bench + validation studies "
+            f"(retrospective then prospective), NOT drug Phase 1/2/3 human safety trials.\n"
+        )
+    else:
+        ptrs_anchor = (
+            f"HISTORICAL FDA APPROVAL RATE (from published BIO/WONG data): "
+            f"{calibrated_loa_pct:.1f}% probability of approval from {development_phase} stage. "
+            f"Source: {calibrated_citation}. "
+            f"Use this as your baseline — you may adjust ±5% only with specific cited reasoning.\n"
+        )
     system = (
         "You are an FDA regulatory strategist specializing in biomedical product development.\n"
         + (f"Domain context: {domain_hint}\n" if domain_hint else "")
@@ -323,7 +357,7 @@ async def _run_regulatory_panel(
             approval_probability_pct= clamped,
             precedent_product       = str(data.get("precedent_product", "")),
             expected_timeline_yrs   = float(data.get("expected_timeline_yrs", 8.0)),
-            available_designations  = list(data.get("available_designations", [])),
+            available_designations  = _sanitize_designations(list(data.get("available_designations", [])), _sid),
             top_regulatory_risk     = str(data.get("top_regulatory_risk", "")),
         )
     except Exception as e:
