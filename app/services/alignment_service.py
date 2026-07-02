@@ -2093,10 +2093,23 @@ def _enforce_market_consistency(report, deriv) -> None:
         def _fmt(v):
             return f"${v/1e9:.2f}B" if v >= 1e9 else f"${v/1e6:.1f}M"
 
+        # Describe TAM in the unit the derivation actually used — a SaMD is priced per
+        # hospital site, a diagnostic per test, a device per procedure — NOT per patient.
+        _arch = (getattr(deriv, "archetype", "") or "").lower()
+        _tam_basis = {
+            "software_samd":          "eligible hospital sites × annual SaaS license",
+            "in_vitro_diagnostic":    "annual test volume × price per test",
+            "medical_device_surgical":"annual procedures × device revenue per procedure",
+            "medical_device_capital": "installed base × equipment ASP",
+            "combination":            "blended device + software/diagnostic revenue streams",
+            "gene_cell_therapy":      "annual treated cohort × one-time price",
+            "vaccine":                "population at risk × immunization rate × price",
+        }.get(_arch, "eligible patients × annual price")
+
         ms.total_addressable_market_usd = float(tam)
         ms.serviceable_market_usd = float(sam)
         ms.formula = (
-            f"TAM = ${tam:,.0f} ({_fmt(tam)}, eligible patients × annual price). "
+            f"TAM = ${tam:,.0f} ({_fmt(tam)}, {_tam_basis}). "
             f"SAM = TAM × {pen}% reachable penetration = ${sam:,.0f} ({_fmt(sam)}). "
             f"SOM = SAM × {cap}% Year-1 capture = ${som:,.0f} ({_fmt(som)}). "
             f"US, annual; figures from the deterministic bottom-up derivation."
