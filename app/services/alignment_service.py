@@ -1400,18 +1400,14 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
         _rdict = report.model_dump(mode="json")
         report.report_id = report_id_for(_rdict)
 
-        # Portfolio benchmark (P7): percentile + comparables vs THIS owner's prior
-        # disclosures only (scoped by user_id — never a cross-account global pool).
-        try:
-            from app.services.portfolio_benchmark_service import portfolio_benchmark
-            report.portfolio_benchmark = await portfolio_benchmark(_rdict, user_id=user_id)
-        except Exception as _pb_e:
-            logger.warning("Portfolio benchmark failed (non-fatal): %s", _pb_e)
+        # Portfolio "internal disclosures" benchmark REMOVED for privacy — every idea was
+        # being written to a shared reports pool and ranked against other disclosures.
+        # We no longer attach the benchmark, and no longer persist the idea to that pool.
+        report.portfolio_benchmark = None
 
-        # Persist report metrics (P7/P10 backbone) + ingest into the graph (P4) — background.
+        # Ingest into the research knowledge graph only (diseases/mechanisms — not a
+        # disclosure registry). Personal "Save to My Reports" is a separate opt-in table.
         import asyncio as _aio_s7
-        from app.db.reports_repository import save_report_metrics
-        _aio_s7.create_task(save_report_metrics(_rdict, user_id=user_id))
         _aio_s7.create_task(ingest_report_to_graph(_rdict, disease_name=disease_name, user_id=user_id))
     except Exception as _s7_e:
         logger.debug("Sprint-7 wiring failed (non-fatal): %s", _s7_e)
