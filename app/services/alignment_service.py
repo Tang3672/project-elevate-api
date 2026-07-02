@@ -733,23 +733,12 @@ Do NOT include commercial pricing, sales channels, or go-to-market strategy.""",
     expert_critic_rules  = getattr(expert, "critic_rules", "")
     domain_static        = getattr(expert, "knowledge_base", "")
 
-    # Load research world model — prior knowledge from previous analyses of this disease.
-    # Edison Scientific's key differentiator: the system accumulates structured knowledge
-    # across research runs rather than starting cold every time.
+    # PRIVACY: cross-user knowledge accumulation is DISABLED. The research world model and
+    # the world-model graph were keyed by disease across ALL users, so one PI/TTO's report
+    # could surface in another's. To guarantee no idea spillover, we no longer read any
+    # shared knowledge store — each report is built only from public data + this user's own
+    # inputs. (Writes are disabled below.)
     world_model_ctx = ""
-    try:
-        from app.services.research_world_model import load_world_model
-        world_model_ctx = await load_world_model(disease_name)
-    except Exception as _wm_e:
-        logger.debug("World model load skipped: %s", _wm_e)
-    # Commercialization world-model GRAPH context (P4) — accumulated nodes/edges
-    try:
-        from app.services.world_model_graph import load_graph_context
-        _graph_ctx = await load_graph_context(disease_name)
-        if _graph_ctx:
-            world_model_ctx = (world_model_ctx + "\n\n" + _graph_ctx).strip()
-    except Exception as _gctx_e:
-        logger.debug("World-model graph context load skipped: %s", _gctx_e)
 
     researcher_ctx = ""
     critic_ctx     = ""
@@ -1394,35 +1383,21 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
     except Exception as _ep_e:
         logger.debug("Expert panel attach failed (non-fatal): %s", _ep_e)
 
-    # ── Sprint 7: stable id, portfolio benchmark (P7), persistence + graph ingest (P4/P11) ──
+    # ── Stable report id only. PRIVACY: no cross-user persistence. ──
     try:
-        from app.services.world_model_graph import report_id_for, ingest_report_to_graph
-        _rdict = report.model_dump(mode="json")
-        report.report_id = report_id_for(_rdict)
-
-        # Portfolio "internal disclosures" benchmark REMOVED for privacy — every idea was
-        # being written to a shared reports pool and ranked against other disclosures.
-        # We no longer attach the benchmark, and no longer persist the idea to that pool.
-        report.portfolio_benchmark = None
-
-        # Ingest into the research knowledge graph only (diseases/mechanisms — not a
-        # disclosure registry). Personal "Save to My Reports" is a separate opt-in table.
-        import asyncio as _aio_s7
-        _aio_s7.create_task(ingest_report_to_graph(_rdict, disease_name=disease_name, user_id=user_id))
+        from app.services.world_model_graph import report_id_for
+        report.report_id = report_id_for(report.model_dump(mode="json"))
     except Exception as _s7_e:
-        logger.debug("Sprint-7 wiring failed (non-fatal): %s", _s7_e)
+        logger.debug("report_id wiring failed (non-fatal): %s", _s7_e)
 
-    # Update research world model asynchronously — fire and forget, non-blocking.
-    # Next report for this disease will have richer prior context.
-    try:
-        import asyncio as _aio
-        _ci_for_wm = _competitive_intelligence if isinstance(_competitive_intelligence, dict) else {}
-        _pub_for_wm = pub_data if not isinstance(pub_data, Exception) else {}
-        _aio.create_task(
-            _update_world_model_bg(disease_name, report, _pub_for_wm, _ci_for_wm)
-        )
-    except Exception as _wm_upd_e:
-        logger.debug("World model update scheduling failed (non-fatal): %s", _wm_upd_e)
+    # Portfolio "internal disclosures" benchmark REMOVED for privacy.
+    report.portfolio_benchmark = None
+
+    # PRIVACY: the report is NOT persisted to any shared cross-user store. We no longer
+    # ingest it into the shared world-model graph, nor update the disease-keyed research
+    # world model — both accumulated one user's ideas into a pool other users' reports read
+    # from. A PI/TTO's submitted idea now stays isolated to their own session (and their
+    # own opt-in "Save to My Reports").
 
     return report
 
@@ -2118,10 +2093,23 @@ def _enforce_market_consistency(report, deriv) -> None:
         def _fmt(v):
             return f"${v/1e9:.2f}B" if v >= 1e9 else f"${v/1e6:.1f}M"
 
+        # Describe TAM in the unit the derivation actually used — a SaMD is priced per
+        # hospital site, a diagnostic per test, a device per procedure — NOT per patient.
+        _arch = (getattr(deriv, "archetype", "") or "").lower()
+        _tam_basis = {
+            "software_samd":          "eligible hospital sites × annual SaaS license",
+            "in_vitro_diagnostic":    "annual test volume × price per test",
+            "medical_device_surgical":"annual procedures × device revenue per procedure",
+            "medical_device_capital": "installed base × equipment ASP",
+            "combination":            "blended device + software/diagnostic revenue streams",
+            "gene_cell_therapy":      "annual treated cohort × one-time price",
+            "vaccine":                "population at risk × immunization rate × price",
+        }.get(_arch, "eligible patients × annual price")
+
         ms.total_addressable_market_usd = float(tam)
         ms.serviceable_market_usd = float(sam)
         ms.formula = (
-            f"TAM = ${tam:,.0f} ({_fmt(tam)}, eligible patients × annual price). "
+            f"TAM = ${tam:,.0f} ({_fmt(tam)}, {_tam_basis}). "
             f"SAM = TAM × {pen}% reachable penetration = ${sam:,.0f} ({_fmt(sam)}). "
             f"SOM = SAM × {cap}% Year-1 capture = ${som:,.0f} ({_fmt(som)}). "
             f"US, annual; figures from the deterministic bottom-up derivation."
