@@ -892,18 +892,26 @@ async def generate_clarifying_questions(
         # Extract keywords from idea + disease hint
         keywords = [w for w in (disease_hint or idea).split() if len(w) > 4][:4]
         loop = asyncio.get_event_loop()
-        landscape = await loop.run_in_executor(
-            None,
-            lambda: sweep_competitors(
-                disease_name=disease_hint or idea[:60],
-                indication_keywords=keywords,
-                therapeutic_area="other",
-            )
+        # Bounded so /clarify stays well under the proxy timeout — an unbounded sweep was
+        # pushing total latency to ~40s and intermittently forcing the client onto the
+        # generic fallback questions. product_type steers a device/SaMD sweep to real
+        # device/AI competitors instead of drugs.
+        landscape = await asyncio.wait_for(
+            loop.run_in_executor(
+                None,
+                lambda: sweep_competitors(
+                    disease_name=disease_hint or idea[:60],
+                    indication_keywords=keywords,
+                    therapeutic_area="other",
+                    product_type=product_type or "drug_small_molecule",
+                )
+            ),
+            timeout=12.0,
         )
         if landscape.competitors:
             competitive_context = format_for_prompt(landscape)
     except Exception as ce:
-        logger.warning("Competitor sweep for clarify failed: %s", ce)
+        logger.warning("Competitor sweep for clarify failed/timed out: %s", ce)
 
     pathway_context = {
         "commercial": "a commercial product seeking go-to-market strategy (TAM/SAM, FDA pathway, buyers, pricing, competitive landscape)",
@@ -931,6 +939,57 @@ async def generate_clarifying_questions(
     except Exception:
         pass
 
+    # Determine modality so the questions match the KIND of product. A device/SaMD must
+    # NOT get drug patient-population / line-of-therapy / MIC-IC50 questions.
+    _mod_sid = ""
+    try:
+        from app.services.soft_router import soft_route
+        _mod_sid = (soft_route(idea).primary or "")
+    except Exception:
+        pass
+    _mk = f"{_mod_sid} {product_type}".lower()
+    _is_devicelike = (_mod_sid.lower().startswith(("device_", "diagnostic_", "digital_"))
+                      or any(x in _mk for x in ("software", "samd", "medical_device", "diagnostic", "digital")))
+
+    if _is_devicelike:
+        param_block = """REQUIRED PARAMETERS TO UNLOCK (one question per parameter) — this is a DEVICE / DIAGNOSTIC / SaMD, so ask about the software/device, NOT drug patient populations:
+  Q1 → INTENDED USE & CLINICAL WORKFLOW: Where in the care pathway does it act, and is it assistive or autonomous?
+       (e.g., "CT triage/notification for suspected LVO" vs "diagnostic read"; clinician-in-the-loop vs autonomous)
+  Q2 → TARGET SITES & SETTING: Which facilities/departments and care setting are the unit of sale?
+       (e.g., comprehensive stroke centers, ED, radiology/PACS; inpatient vs outpatient; # of US sites)
+  Q3 → TECHNICAL DIFFERENTIATION: What is genuinely different technically vs the installed standard?
+       (input modality, sensitivity/specificity, time-to-result, multi-condition breadth, on-prem/edge/cloud, EHR/PACS integration)
+  Q4 → VALIDATION EVIDENCE: What validation data exists (this replaces drug trials — do NOT ask about Phase 1/2/3 or MIC/IC50)?
+       (retrospective AUC/sensitivity/specificity, # of sites/scanners, prospective study status, reference standard / ground truth)
+  Q5 → ECONOMIC BUYER & PAYMENT PATHWAY: Who signs the check and how is it funded?
+       (hospital IT/procurement, service-line capital vs operating budget, NTAP / Category III CPT, value-based ROI e.g. bed-days or readmissions avoided)
+  Q6 → COMPETITIVE ADVANTAGE vs a NAMED cleared AI/device: vs the closest cleared tool (e.g. RapidAI, Viz.ai, Aidoc, Brainomix), what is the measurable edge?
+       (e.g., higher sensitivity, faster time-to-notification, native Epic/PACS integration, broader condition coverage)"""
+        options_rules = """RULES FOR OPTIONS:
+- Every option must be specific to THIS software/device and clinical use — never abstract, and never drug-shaped
+- Use real device/AI competitor names and real technical endpoints (sensitivity, specificity, AUC, time-to-result) — NOT drug names, organisms, MIC/IC50, or lines of therapy
+- Options should cover the realistic range for this specific product
+- Include a "None of these — explain:" option when appropriate"""
+    else:
+        param_block = """REQUIRED FORMULA PARAMETERS TO UNLOCK (one question per parameter):
+  Q1 → ELIGIBLE SUBPOPULATION: Which specific patient subset does this target?
+       (e.g., "Exon 51-skippable DMD patients" vs "all DMD", or "CRE bacteremia, not just colonization")
+  Q2 → LINE OF THERAPY / TREATMENT SETTING: Where does this fit in the clinical pathway?
+       (1st-line vs salvage, inpatient ICU vs outpatient, post-surgical vs prophylactic)
+  Q3 → CLINICAL MECHANISM NOVELTY: What is genuinely different about the mechanism?
+       (Not the disease area — specifically what does this do that approved drugs don't)
+  Q4 → DEVELOPMENT EVIDENCE: What data already exists to validate efficacy?
+       (In vitro MIC/IC50, animal model survival, Phase 1 safety, Phase 2 ORR — be specific)
+  Q5 → PRIMARY ECONOMIC BUYER: Who signs the check and what is their price sensitivity?
+       (Hospital P&T committee, specialty pharmacy PBM, patient OOP, payer formulary tier)
+  Q6 → COMPETITIVE CLINICAL ADVANTAGE: vs the single closest approved therapy, what is the measurable advantage?
+       (e.g., "vs ceftazidime-avibactam, your drug covers NDM-1 producing organisms — confirmed by MIC data?")"""
+        options_rules = """RULES FOR OPTIONS:
+- Every option must be specific to THIS innovation and disease area — never abstract
+- Use real drug names, real organism names, real clinical endpoints
+- Options should cover the realistic range for this specific product
+- Include a "None of these — explain:" option when appropriate"""
+
     prompt = f"""You are conducting deep research on a health innovation before generating a market intelligence report.
 Your goal: ask the 6 most important questions that will make this specific report dramatically more accurate.
 
@@ -943,31 +1002,15 @@ Product type: {product_type}
 
 DEEP RESEARCH PRINCIPLES (follow these exactly):
 1. We already know the rough market size and standard pricing — DO NOT ask generic "what is your market size" questions
-2. Ask what would CHANGE the formula significantly: biomarker restriction, line of therapy, specific subpopulation
-3. Reference SPECIFIC named drugs/devices as comparators — never say "competitor A"
-4. Ask about things our databases can't know: unpublished preclinical data, specific mechanism novelty, proprietary IP
-5. Each question should unlock a DIFFERENT formula parameter — no redundancy
+2. Ask what would CHANGE the analysis significantly for THIS kind of product
+3. Reference SPECIFIC named products/competitors as comparators — never say "competitor A"
+4. Ask about things our databases can't know: unpublished data, specific novelty, proprietary IP
+5. Each question should unlock a DIFFERENT parameter — no redundancy
 6. Questions must be answerable by the PI in 1 sentence based on what they know about their own work
 
-REQUIRED FORMULA PARAMETERS TO UNLOCK (one question per parameter):
-  Q1 → ELIGIBLE SUBPOPULATION: Which specific patient subset does this target?
-       (e.g., "Exon 51-skippable DMD patients" vs "all DMD", or "CRE bacteremia, not just colonization")
-  Q2 → LINE OF THERAPY / TREATMENT SETTING: Where does this fit in the clinical pathway?
-       (1st-line vs salvage, inpatient ICU vs outpatient, post-surgical vs prophylactic)
-  Q3 → CLINICAL MECHANISM NOVELTY: What is genuinely different about the mechanism?
-       (Not the disease area — specifically what does this do that approved drugs don't)
-  Q4 → DEVELOPMENT EVIDENCE: What data already exists to validate efficacy?
-       (In vitro MIC/IC50, animal model survival, Phase 1 safety, Phase 2 ORR — be specific)
-  Q5 → PRIMARY ECONOMIC BUYER: Who signs the check and what is their price sensitivity?
-       (Hospital P&T committee, specialty pharmacy PBM, patient OOP, payer formulary tier)
-  Q6 → COMPETITIVE CLINICAL ADVANTAGE: vs the single closest approved therapy, what is the measurable advantage?
-       (e.g., "vs ceftazidime-avibactam, your drug covers NDM-1 producing organisms — confirmed by MIC data?")
+{param_block}
 
-RULES FOR OPTIONS:
-- Every option must be specific to THIS innovation and disease area — never abstract
-- Use real drug names, real organism names, real clinical endpoints
-- Options should cover the realistic range for this specific product
-- Include a "None of these — explain:" option when appropriate
+{options_rules}
 
 Return ONLY a JSON array of 6 objects. No other text.
 [{{
