@@ -171,9 +171,13 @@ def _classify_archetype(idea: str, product_type: str) -> str:
     }
     if product_type.lower() in pt_map:
         archetype = pt_map[product_type.lower()]
-        # Refine medical_device to surgical vs capital
+        # Refine medical_device to surgical vs capital (imaging systems, robots, linacs are
+        # capital equipment sized on install base × ASP, not procedures × DRG).
         if archetype == "medical_device_surgical":
-            if any(x in combined for x in ["imaging", "mri", "ct scan", "radiation", "robot system"]):
+            if any(x in combined for x in ["imaging", "mri", "ct scan", "ct imaging", "radiation",
+                                           "linac", "radiotherapy", "proton", "robot system",
+                                           "surgical robot", "robotic surg", "ultrasound system",
+                                           "capital equipment", "pet scanner", "angiography suite"]):
                 return "medical_device_capital"
         return archetype
 
@@ -1177,6 +1181,84 @@ def _derive_device_surgical_formula(
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# EXPERT 5b: CAPITAL MEDICAL EQUIPMENT (imaging systems, robots, linacs)
+# TAM = Addressable install base × equipment ASP (NOT procedures×DRG, NOT drug pricing)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _derive_device_capital_formula(
+    idea: str, disease_name: str, therapeutic_area: str,
+    us_prev: int, signals: dict,
+) -> MarketSizingDerivation:
+    """Capital equipment (MRI/CT/ultrasound imaging systems, surgical robots, linacs) is
+    sized on the addressable install base × system ASP over a replacement cycle — NOT
+    procedure volume × DRG, and NOT patient prevalence × drug price."""
+    idea_l = idea.lower()
+    if any(x in idea_l for x in ["mri", "magnetic resonance"]):
+        sites, asp, cycle, seg = 3_500, 1_500_000, 10, "MRI-capable imaging sites"
+        src = "IMV/COCIR MRI census (~3,500 US MRI sites); system ASP $1-3M, 7-10yr replacement"
+    elif any(x in idea_l for x in ["ct scan", "ct imaging", "computed tomography", "portable ct", "point-of-care ct"]):
+        sites, asp, cycle, seg = 5_000, 1_200_000, 8, "CT-capable imaging sites"
+        src = "IMV CT census (~5,000 US CT sites); system ASP $0.3-2M depending on portability"
+    elif any(x in idea_l for x in ["surgical robot", "robotic surgery", "robot system"]):
+        sites, asp, cycle, seg = 3_000, 1_500_000, 8, "hospitals adopting surgical robotics"
+        src = "Intuitive Surgical installed-base disclosures; system ASP $0.5-2.5M"
+    elif any(x in idea_l for x in ["radiation", "linac", "radiotherapy", "proton"]):
+        sites, asp, cycle, seg = 2_500, 3_000_000, 12, "radiation oncology centers"
+        src = "ASTRO/IMV radiation-oncology census; linac ASP $2-5M, 10-15yr life"
+    elif any(x in idea_l for x in ["ultrasound", "pocus"]):
+        sites, asp, cycle, seg = 8_000, 150_000, 7, "sites adopting ultrasound systems"
+        src = "IMV ultrasound census; cart/POCUS ASP $30-250k"
+    else:
+        sites, asp, cycle, seg = 4_000, 500_000, 8, f"facilities addressable for {disease_name}"
+        src = "AHA hospital counts + ECRI capital-equipment benchmarks; ASP proxy ~$0.5M"
+
+    annual_market = sites * asp / cycle
+    tam = float(sites * asp)
+    p, q = 0.015, 0.220
+    if signals.get("is_first_in_class"):
+        p *= 1.3
+    bass_y5 = _bass_cumulative(5.0, p, q)
+    sam = tam * bass_y5
+    som = sam * (0.30 if signals.get("is_first_in_class") else 0.20)
+
+    steps = [
+        DerivationStep(step_num=1, title="Step 1 — Addressable Install Base (Capital Equipment)",
+            formula=f"N_sites = {sites:,} {seg}", value=float(sites), unit="facilities",
+            source_paper=src, source_url="https://www.imvinfo.com/",
+            explanation=("**Capital-equipment TAM is the addressable install base × system price — "
+                         "NOT procedure volume or patient prevalence.** Revenue comes from selling and "
+                         f"replacing the system at {sites:,} {seg}."),
+            data_source="IMV/COCIR imaging census; AHA; ECRI capital benchmarks",
+            assumptions=[f"~{cycle}-yr replacement cycle"]),
+        DerivationStep(step_num=2, title="Step 2 — Equipment ASP (capital price per system)",
+            formula=f"ASP = ${asp:,} per system (annualized over {cycle}-yr life)", value=float(asp),
+            unit="USD per system", source_paper=src, source_url="https://www.ecri.org/",
+            explanation=(f"Capital ASP ${asp:,} per system. Annualized addressable market = "
+                         f"{sites:,} x ${asp:,} / {cycle}yr = {_fmt(annual_market)}/yr (placements + replacements)."),
+            data_source="ECRI/IMV capital-equipment pricing", assumptions=["ASP stable; service contracts excluded"]),
+        DerivationStep(step_num=3, title="Step 3 — TAM, SAM, SOM",
+            formula=f"TAM = {sites:,} x ${asp:,} = {_fmt(tam)} | SAM(Y5) = {_fmt(sam)} | SOM = {_fmt(som)}",
+            value=tam, unit="USD", source_paper="Bass 1969; ECRI capital-adoption benchmarks",
+            source_url="https://pubsonline.informs.org/doi/10.1287/mnsc.15.5.215",
+            explanation=(f"TAM {_fmt(tam)} = full install-base value. SAM {_fmt(sam)} = Year-5 penetration (Bass); "
+                         f"capital cycles are slow (budget approval, siting). SOM {_fmt(som)} = realistic share."),
+            data_source="Computed from Steps 1-2", assumptions=["Year-5 capital penetration via Bass"]),
+    ]
+    return MarketSizingDerivation(
+        idea=idea, archetype="medical_device_capital",
+        archetype_label="Medical Device — Capital Equipment (Install Base x ASP)",
+        formula_name="Capital Equipment Install-Base Model",
+        formula_overview=f"TAM = {sites:,} sites x ${asp:,} = {_fmt(tam)} | SAM = {_fmt(sam)} | SOM = {_fmt(som)}",
+        steps=steps, us_tam_usd=tam, us_sam_usd=sam, us_som_usd=som,
+        tam_fmt=_fmt(tam), sam_fmt=_fmt(sam), som_fmt=_fmt(som),
+        key_assumptions=[f"{sites:,} addressable sites", f"${asp:,} system ASP", f"{cycle}-yr replacement cycle",
+                         "Install-base model, NOT procedures x DRG or drug pricing"],
+        confidence_note=f"95% CI: {_fmt(tam*0.4)}-{_fmt(tam*1.8)}. Capital sales cycles (budget/siting) add timing variance.",
+        primary_citations=[{"ref": "IMV/COCIR", "title": "Medical imaging census", "url": "https://www.imvinfo.com/"},
+                           {"ref": "ECRI", "title": "Capital-equipment benchmarks", "url": "https://www.ecri.org/"}])
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # EXPERT 6: IN VITRO DIAGNOSTICS
 # TAM = Annual_tests × CLFS_reimbursement (NOT drug pricing × disease prevalence)
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1356,9 +1438,21 @@ def _derive_samd_formula(
     NOT drug pricing × patient prevalence.
     """
     idea_l = idea.lower()
-    is_enterprise = signals.get("is_enterprise_saas") or any(
-        x in idea_l for x in ["hospital", "health system", "ehr", "epic", "enterprise", "clinical workflow"]
-    )
+    # Consumer/per-patient SaMD (DTx, RPM, wearables, wellness) are priced per enrolled
+    # patient. All other clinical SaMD (imaging AI, CDS, triage, diagnostic AI) is sold to
+    # institutions as an enterprise license — DEFAULT to enterprise unless clearly consumer.
+    # (Previously this required the literal word "hospital", so a hospital imaging AI without
+    # that exact token wrongly fell to the per-patient model and mis-sized the market.)
+    _consumer = any(x in idea_l for x in [
+        "digital therapeutic", "dtx", "prescription digital", "cbt", "behavioral health app",
+        "wellness", "consumer", "direct-to-consumer", "patient app", "self-guided", "at-home",
+        "smartphone app", "remote patient monitoring", "remote monitoring", " rpm", "wearable"])
+    _institutional = any(x in idea_l for x in [
+        "imaging", "radiology", "pathology", "ct scan", "ct imaging", "mri", "x-ray", " ecg",
+        "echocard", "clinical decision support", " cds", "triage", "prioritization", " icu",
+        "hospital", "health system", " ehr", "epic", "cerner", "pacs", "stroke", "sepsis",
+        "enterprise", "clinical workflow", "detection", "diagnostic"])
+    is_enterprise = bool(signals.get("is_enterprise_saas")) or _institutional or not _consumer
 
     if is_enterprise:
         # Enterprise SaaS: sold to hospitals/health systems
@@ -1660,7 +1754,10 @@ def generate_market_sizing_derivation(
     if archetype == "combination":
         return _derive_combination_formula(idea, dn, therapeutic_area, us_patient_population, signals)
 
-    if archetype in ("medical_device_surgical", "medical_device_capital"):
+    if archetype == "medical_device_capital":
+        return _derive_device_capital_formula(idea, dn, therapeutic_area, us_patient_population, signals)
+
+    if archetype == "medical_device_surgical":
         return _derive_device_surgical_formula(idea, dn, therapeutic_area, us_patient_population, signals)
 
     if archetype == "in_vitro_diagnostic":
