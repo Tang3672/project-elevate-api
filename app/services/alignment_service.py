@@ -107,14 +107,14 @@ async def generate_pi_report(
     # keeps a diagnostic/device/SaMD from being written by the drug (antibiotic) expert.
     expert = router_result.sub_expert or router_result.expert
     # The classified modality is authoritative over the frontend's (unreliable)
-    # tier1_category default — the frontend hardcodes product_type='other' and defaults
-    # tier1 to drug_small_molecule, which is exactly what mislabelled Liz's AI diagnostic.
+    # tier1_category. ALWAYS map product_type from the classified modality — do NOT gate
+    # on `!= tier1_category`: when the user happened to pick the matching tier1 (e.g.
+    # "digital_health"), that gate skipped the override, left pt='other', and the market
+    # derivation keyword-guessed back to the DRUG model (the $8.45B-vs-$720M mismatch).
     eff_tier1 = router_result.modality or tier1_category
-    if eff_tier1 and eff_tier1 != tier1_category:
-        try:
-            pt = _PT_MAP.get(eff_tier1.lower(), pt)
-        except AttributeError:
-            pass
+    _mapped = _PT_MAP.get((eff_tier1 or "").lower())
+    if _mapped is not None:
+        pt = _mapped
     logger.info(
         f"MoE Router: disease_domain={router_result.domain_id} "
         f"sub_expert={router_result.sub_expert_id} modality={eff_tier1} "
