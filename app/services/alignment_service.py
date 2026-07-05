@@ -1321,6 +1321,10 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
     if deriv is not None:
         _enforce_market_consistency(report, deriv)
 
+    # Devices/SaMD have no drug Phase 1/2/3 — relabel the (already validation-appropriate)
+    # clinical stages so a domain expert doesn't see "Phase 1/2/3" on a SaMD.
+    _relabel_validation_stages(report, sub_expert_id)
+
     # Fix 2 — give the trust judge the facts the synthesis actually used. The
     # regulatory-precedent / competitive / funding / KOL / literature blocks are
     # real retrieved evidence but weren't on the report, so true sourced claims
@@ -2069,6 +2073,31 @@ def _build_hospital_matches(hospital_matches_raw: list) -> list:
             subreddit=getattr(n, "subreddit", None),
         ))
     return items
+
+
+def _relabel_validation_stages(report, sub_expert_id) -> None:
+    """For device/diagnostic/SaMD, rename clinical_trial_requirements 'Phase 1/2/3' labels
+    to validation-study stages. The endpoints are already validation-appropriate
+    (sensitivity/specificity, retrospective/prospective) — only the drug-phase LABEL leaks."""
+    sid = (sub_expert_id or "").lower()
+    if not sid.startswith(("device_", "diagnostic_", "digital_")):
+        return
+    _STAGE = {
+        "1": "Stage 1 — Retrospective Validation",
+        "2": "Stage 2 — Prospective Multi-Site Validation",
+        "3": "Stage 3 — Pivotal Validation Study (SSED)",
+    }
+    try:
+        rp = getattr(report, "regulatory_pathway", None)
+        for t in (getattr(rp, "clinical_trial_requirements", None) or []):
+            ph = (getattr(t, "phase", "") or "")
+            m = re.search(r"phase\s*([123])", ph, re.I) or re.search(r"\b([123])\b", ph)
+            if m:
+                t.phase = _STAGE[m.group(1)]
+            elif "phase" in ph.lower():
+                t.phase = "Validation Study"
+    except Exception as e:
+        logger.debug("validation-stage relabel skipped: %s", e)
 
 
 def _enforce_market_consistency(report, deriv) -> None:
