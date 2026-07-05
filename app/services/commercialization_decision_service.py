@@ -76,6 +76,20 @@ _MODALITY_PRIORS = {
 }
 _PRIOR_KEYS = ("patent", "license", "spinout", "acquire", "sbir", "reimburse")
 
+# Per-modality wording for the commercialization rationales: (readable label, IP noun,
+# is_device_class). Device-class (device/diagnostic/digital) uses FDA CLEARANCE framing and
+# non-"composition" IP language, so a SaMD/device assessment never reads like a drug.
+_MODALITY_TEXT = {
+    "small_molecule": ("small-molecule drug", "composition-of-matter and method-of-use claims", False),
+    "biologic":       ("biologic",            "formulation and manufacturing (BLA) claims",      False),
+    "gene_cell":      ("gene/cell therapy",   "vector, construct, and manufacturing claims",     False),
+    "vaccine":        ("vaccine",             "antigen and platform claims",                     False),
+    "device":         ("medical device",      "device design and method-of-use claims",          True),
+    "diagnostic":     ("diagnostic",          "assay, biomarker, and method claims",             True),
+    "digital":        ("AI/software (SaMD)",  "software, algorithm, and method claims",          True),
+    "other":          ("product",             "the applicable IP claims",                        False),
+}
+
 
 def _clamp(x: float) -> float:
     return round(max(0.0, min(1.0, x)), 2)
@@ -190,7 +204,8 @@ def _ws_word(w: float) -> str:
 
 def build_rationales(signals: dict, scores: dict, market: float, whitespace: float) -> dict:
     """Per-dimension {label, drivers:[{fact, source}]} — the evidence behind each score."""
-    modality = (signals.get("modality") or "other").replace("_", " ")
+    _mkey = signals.get("modality") or "other"
+    label, ip_noun, is_devclass = _MODALITY_TEXT.get(_mkey, _MODALITY_TEXT["other"])
     approval = signals.get("approval_prob")
     moat = signals.get("moat")
     trl = signals.get("trl")
@@ -209,7 +224,10 @@ def build_rationales(signals: dict, scores: dict, market: float, whitespace: flo
 
     reg = []
     if approval is not None:
-        reg.append(d(f"{approval*100:.0f}% historical probability of approval for a {modality} at this phase", "ptrs"))
+        if is_devclass:
+            reg.append(d(f"{approval*100:.0f}% FDA clearance likelihood (De Novo / 510(k)) for this {label} at this stage", "ptrs"))
+        else:
+            reg.append(d(f"{approval*100:.0f}% historical probability of approval for this {label} at this phase", "ptrs"))
     if designations:
         reg.append(d(f"Eligible expedited pathways: {', '.join(designations[:4])}", "ptrs"))
 
@@ -218,11 +236,12 @@ def build_rationales(signals: dict, scores: dict, market: float, whitespace: flo
         sbir.append(d(f"Meets the TRL bar for SBIR Phase I (TRL {trl})", "trl"))
     if sbir_awards:
         sbir.append(d(f"{sbir_awards} recent NIH SBIR/STTR award(s) funding comparable work", "sbir"))
-    sbir.append(d(f"{modality} has a {'strong' if scores['sbir_fit'] >= 0.6 else 'modest'} non-dilutive funding track record", "modality"))
+    sbir.append(d(f"{'Strong' if scores['sbir_fit'] >= 0.6 else 'Modest'} non-dilutive funding track record for a {label}", "modality"))
 
     ws = [d(f"IP/competitive landscape looks {_ws_word(whitespace)} based on recent filings", "patents")] if whitespace is not None else []
 
-    pat = list(ws) + [d(f"{modality} compositions are {'readily' if scores['patentability'] >= 0.6 else 'less reliably'} patentable", "modality")]
+    _ip = ip_noun[0].upper() + ip_noun[1:]
+    pat = list(ws) + [d(f"{_ip} are {'readily' if scores['patentability'] >= 0.6 else 'less reliably'} defensible", "modality")]
 
     inv = []
     if som:
@@ -241,7 +260,9 @@ def build_rationales(signals: dict, scores: dict, market: float, whitespace: flo
     reimb = []
     if payer:
         reimb.append(d(f"Key payer barrier: {payer}", "payer"))
-    reimb.append(d(f"{modality} reimbursement pathway base rate", "modality"))
+    reimb.append(d(
+        (f"{label} reimbursement is institutional/coverage-driven (hospital budget, CPT/coverage) — base rate"
+         if is_devclass else f"{label} reimbursement pathway base rate"), "modality"))
 
     return {
         "regulatory_feasibility":  dim("regulatory_feasibility", reg),
