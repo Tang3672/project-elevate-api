@@ -500,3 +500,134 @@ class TestNumericDeterminism:
             "Non-medical product (soil sensor) produced TAM=$375M — "
             "the market engine is returning a static template regardless of input (A.2 diagnostic)"
         )
+
+
+# ── C.1 / C.2: Product classifier + conditioned questions ────────────────────
+
+class TestProductClassifier:
+    """
+    Spec v3 C.1: Stage-1 product classifier must resolve domain + archetype
+    deterministically (no LLM for those fields) and return a valid Classification.
+
+    Spec v3 C.2: Every IntakeQuestion must have a non-empty binds_to field.
+    """
+
+    _HUBLINK_IDEA = (
+        "Hublink is a research data infrastructure platform for academic neuroscience labs. "
+        "It automates wireless data retrieval from wearable sensors (accelerometers, ECG) "
+        "using Bluetooth Low Energy, replacing manual SD-card extraction. "
+        "Sold to academic PIs and core facilities at research universities. "
+        "No patient care, no diagnostic claims. NIH-funded researchers."
+    )
+
+    _DRUG_IDEA = (
+        "DrugX is a novel small molecule antibiotic targeting CRE/NDM-1 producing organisms "
+        "in ICU patients with carbapenem-resistant infections. Phase 1 safety data confirmed. "
+        "Seeking QIDP designation. Buyer is hospital P&T committee."
+    )
+
+    def test_research_product_domain(self):
+        """C.1: Research product must resolve to LIFE_SCIENCES_RESEARCH domain."""
+        from app.services.product_classifier import _resolve_domain_and_archetype
+        domain, arch = _resolve_domain_and_archetype(self._HUBLINK_IDEA)
+        assert domain == "LIFE_SCIENCES_RESEARCH", (
+            f"Hublink resolved to domain={domain!r} — expected LIFE_SCIENCES_RESEARCH. "
+            "soft_router or pattern matching may have regressed."
+        )
+
+    def test_research_product_archetype(self):
+        """C.1: Research product must resolve to a research archetype string."""
+        from app.services.product_classifier import _resolve_domain_and_archetype
+        _, arch = _resolve_domain_and_archetype(self._HUBLINK_IDEA)
+        assert "research" in arch.lower(), (
+            f"Hublink resolved to archetype={arch!r} — expected a research archetype."
+        )
+
+    def test_drug_product_domain(self):
+        """C.1: Drug product must resolve to LIFE_SCIENCES_CLINICAL domain."""
+        from app.services.product_classifier import _resolve_domain_and_archetype
+        domain, arch = _resolve_domain_and_archetype(self._DRUG_IDEA)
+        assert domain == "LIFE_SCIENCES_CLINICAL", (
+            f"Drug product resolved to domain={domain!r} — expected LIFE_SCIENCES_CLINICAL."
+        )
+
+    def test_research_conditioned_questions_all_have_binds_to(self):
+        """C.2: Every question returned for a research product must have a binds_to field."""
+        from app.services.product_classifier import Classification, get_conditioned_questions, questions_to_legacy_format
+        cls = Classification(
+            product_name="Hublink",
+            one_line="Test.",
+            domain="LIFE_SCIENCES_RESEARCH",
+            archetype="research_infrastructure_saas",
+            trl=5,
+            confidence=0.8,
+            ambiguities=[],
+        )
+        questions = questions_to_legacy_format(get_conditioned_questions(cls))
+        for q in questions:
+            assert q.get("binds_to"), (
+                f"Question {q.get('field')!r} has no binds_to — violates spec C.2 hard rule. "
+                "Every IntakeQuestion must bind to a named model field."
+            )
+
+    def test_drug_conditioned_questions_all_have_binds_to(self):
+        """C.2: Every question returned for a drug product must have a binds_to field."""
+        from app.services.product_classifier import Classification, get_conditioned_questions, questions_to_legacy_format
+        cls = Classification(
+            product_name="DrugX",
+            one_line="Test.",
+            domain="LIFE_SCIENCES_CLINICAL",
+            archetype="therapeutic_small_molecule",
+            trl=4,
+            confidence=0.75,
+            ambiguities=[],
+        )
+        questions = questions_to_legacy_format(get_conditioned_questions(cls))
+        for q in questions:
+            assert q.get("binds_to"), (
+                f"Question {q.get('field')!r} has no binds_to — violates spec C.2 hard rule."
+            )
+
+    def test_research_questions_not_clinical_flavoured(self):
+        """C.2: Research product questions must not contain drug/clinical vocabulary."""
+        from app.services.product_classifier import Classification, get_conditioned_questions
+        cls = Classification(
+            product_name="Hublink",
+            one_line="Test.",
+            domain="LIFE_SCIENCES_RESEARCH",
+            archetype="research_infrastructure_saas",
+            trl=5,
+            confidence=0.8,
+            ambiguities=[],
+        )
+        clinical_vocab = {"formulary", "ntap", "cpt", "line of therapy", "payer", "p&t committee"}
+        for q in get_conditioned_questions(cls):
+            combined = (q.text + " " + (q.why_asked or "")).lower()
+            hits = [v for v in clinical_vocab if v in combined]
+            assert not hits, (
+                f"Research question {q.id!r} contains clinical vocab {hits} — "
+                "conditioned questions must not bleed clinical vocabulary into research archetype."
+            )
+
+    def test_product_name_extraction_heuristic(self):
+        """C.1 fallback: heuristic must pull 'Hublink' from 'Hublink is a ...' pattern."""
+        from app.services.product_classifier import _extract_product_name_heuristic
+        name = _extract_product_name_heuristic("Hublink is a research data infrastructure platform for academic labs.")
+        assert name == "Hublink", f"Heuristic returned {name!r} — expected 'Hublink'."
+
+    def test_classification_fields_are_complete(self):
+        """C.1: Classification object must have all required fields populated."""
+        from unittest.mock import patch
+        from app.services.product_classifier import classify_product
+        with patch("app.services.product_classifier._llm_extract", return_value={
+            "product_name": "Hublink",
+            "one_line": "Automates wireless sensor data retrieval for NIH-funded neuroscience PIs.",
+            "trl": 5,
+            "ambiguities": ["Price per lab?", "Number of target labs?"],
+        }):
+            cls = classify_product(self._HUBLINK_IDEA)
+        assert cls.product_name == "Hublink"
+        assert cls.domain == "LIFE_SCIENCES_RESEARCH"
+        assert cls.trl == 5
+        assert len(cls.ambiguities) == 2
+        assert 0.0 < cls.confidence <= 1.0

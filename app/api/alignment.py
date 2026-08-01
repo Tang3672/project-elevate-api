@@ -38,6 +38,12 @@ class PIReportRequest(BaseModel):
         description="auto | antibiotic_amr | oncology | cardiology | neurology_cns | metabolic_diabetes | mental_health")
     tier1_category: str = Field(default="drug_small_molecule",
         description="drug_small_molecule | biologic | gene_cell_therapy | medical_device | diagnostic | digital_health | vaccine_immunotherapy | other_platform")
+    product_name: Optional[str] = Field(default=None,
+        description="Short brand / working name (e.g. 'Hublink'). If omitted, derived from idea text.")
+    institution: Optional[str] = Field(default=None,
+        description="Originating institution (e.g. 'Washington University Neurotech Hub').")
+    domain: Optional[str] = Field(default=None,
+        description="LIFE_SCIENCES_CLINICAL | LIFE_SCIENCES_RESEARCH | ENGINEERING_HARDWARE | SOFTWARE_INFRASTRUCTURE | ENERGY_CLIMATE | OTHER_DEEP_TECH. Auto-detected if omitted.")
 
 
 @router.post("/check", response_model=AlignmentReport)
@@ -133,6 +139,8 @@ async def get_pi_report(payload: PIReportRequest, current_user = Depends(get_cur
         report = await generate_pi_report(
             _idea_from_payload(payload), payload.product_type, payload.disease_domain,
             payload.tier1_category, funding_pathway=payload.funding_pathway,
+            product_name=payload.product_name, institution=payload.institution,
+            domain=payload.domain,
         )
         await _increment_usage(current_user)
         return report
@@ -161,6 +169,8 @@ async def get_pi_report_async(payload: PIReportRequest, current_user = Depends(g
                 idea, payload.product_type, payload.disease_domain,
                 payload.tier1_category, funding_pathway=payload.funding_pathway,
                 user_id=(_user or {}).get("id"), skip_verification=True,
+                product_name=payload.product_name, institution=payload.institution,
+                domain=payload.domain,
             )
             rd = report.model_dump(mode="json")
             try:
@@ -863,6 +873,50 @@ async def competitive_sweep(
                         "competitive pipeline in the Opportunity section above."}
 
 
+@router.post("/classify")
+async def classify_product_endpoint(
+    body: dict,
+    current_user = Depends(get_current_user),
+):
+    """
+    Stage-1 product classifier (Spec v3 C.1).
+
+    Accepts: { "idea": str }
+    Returns: Classification fields + conditioned IntakeQuestion[]
+
+    Domain + archetype are resolved deterministically via soft_router +
+    product_archetype. The LLM (Haiku) is used only for display fields
+    (product_name, one_line, trl, ambiguities).
+    """
+    from app.services.product_classifier import classify_product, get_conditioned_questions, questions_to_legacy_format
+    from dataclasses import asdict
+
+    idea = (body.get("idea") or "").strip()
+    if not idea or len(idea) < 20:
+        raise HTTPException(status_code=400, detail="Idea too short for classification")
+
+    try:
+        cls = classify_product(idea)
+        conditioned_qs = get_conditioned_questions(cls)
+        legacy_qs = questions_to_legacy_format(conditioned_qs)
+
+        return {
+            "classification": {
+                "product_name": cls.product_name,
+                "one_line":     cls.one_line,
+                "domain":       cls.domain,
+                "archetype":    cls.archetype,
+                "trl":          cls.trl,
+                "confidence":   cls.confidence,
+                "ambiguities":  cls.ambiguities,
+            },
+            "questions": legacy_qs,
+        }
+    except Exception as exc:
+        logger.error("classify_product_endpoint failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @router.post("/clarify")
 async def generate_clarifying_questions(
     body: dict,
@@ -880,9 +934,34 @@ async def generate_clarifying_questions(
     pathway = body.get("pathway", "commercial")
     product_type = body.get("product_type", "")
     disease_hint = body.get("disease_name", "")
+    # Optional: if the caller already has a Classification object (from /classify),
+    # use the conditioned question bank instead of the LLM-generated questions.
+    # This guarantees every question has a binds_to field (spec C.2).
+    classification_hint = body.get("classification")  # dict or None
 
     if not idea or len(idea) < 20:
         raise HTTPException(status_code=400, detail="Idea too short")
+
+    # Fast path: conditioned questions from the deterministic bank
+    if classification_hint and isinstance(classification_hint, dict):
+        try:
+            from app.services.product_classifier import (
+                Classification, get_conditioned_questions, questions_to_legacy_format
+            )
+            cls = Classification(
+                product_name=classification_hint.get("product_name", ""),
+                one_line=classification_hint.get("one_line", ""),
+                domain=classification_hint.get("domain", "LIFE_SCIENCES_CLINICAL"),
+                archetype=classification_hint.get("archetype", "therapeutic_small_molecule"),
+                trl=int(classification_hint.get("trl", 3)),
+                confidence=float(classification_hint.get("confidence", 0.5)),
+                ambiguities=classification_hint.get("ambiguities", []),
+            )
+            conditioned_qs = get_conditioned_questions(cls)
+            legacy_qs = questions_to_legacy_format(conditioned_qs)
+            return {"questions": legacy_qs, "pathway": pathway, "conditioned": True}
+        except Exception as _cond_exc:
+            logger.warning("conditioned question fast-path failed: %s — falling through to LLM", _cond_exc)
 
     # Run live competitive sweep in parallel so the questions can reference real named competitors
     competitive_context = ""
@@ -1033,6 +1112,28 @@ Return ONLY a JSON array of 6 objects. No other text.
         match = re.search(r'\[.*\]', text, re.DOTALL)
         if match:
             questions = json.loads(match.group())
+            # Inject binds_to from the field key so every question has the C.2 contract field.
+            _FIELD_TO_BINDS: dict[str, str] = {
+                "eligible_subpopulation": "seg.gate.eligible_population",
+                "target_population": "seg.primary_use_case",
+                "line_of_therapy": "seg.gate.line_of_therapy",
+                "mechanism_novelty": "dev.mechanism_novelty",
+                "development_evidence": "dev.evidence_stage",
+                "validation_evidence": "dev.evidence_stage",
+                "clinical_differentiation": "dev.clinical_validation_done",
+                "buyer": "buyer.persona",
+                "economic_buyer": "buyer.persona",
+                "price_band": "price.observed_band",
+                "competitive_advantage": "comp.nearest_named_competitor",
+                "competitive_edge": "comp.nearest_named_competitor",
+                "status_quo": "comp.status_quo",
+                "target_sites": "seg.gate.facility_type",
+                "intended_use": "seg.primary_use_case",
+            }
+            for q in questions:
+                if "binds_to" not in q:
+                    fk = (q.get("field") or "").lower()
+                    q["binds_to"] = _FIELD_TO_BINDS.get(fk, f"intake.{fk}" if fk else "intake.misc")
             return {"questions": questions[:8], "pathway": pathway}
         return {"questions": [], "pathway": pathway}
     except Exception as e:
@@ -1204,3 +1305,120 @@ async def analyze_experimental_data(
     except Exception as e:
         logger.error("Dataset analysis failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Part E: Assumption Ledger endpoints ──────────────────────────────────────
+
+class AssumptionOverrideRequest(BaseModel):
+    value: float = Field(..., description="New numeric value for this assumption")
+    note:  Optional[str] = Field(default=None, description="Optional note explaining the override")
+
+
+@router.get("/pi-report/{job_id}/assumptions")
+async def get_assumption_ledger(job_id: str, current_user=Depends(get_current_user)):
+    """
+    Part E: Return the full assumption ledger for a completed report.
+    Includes all market sizing assumptions with provenance and sensitivity ranks.
+    """
+    from app.services.report_jobs import get_job
+    job = await get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.get("status") != "done":
+        raise HTTPException(status_code=409, detail="Report not yet complete")
+    report_data = job.get("report") or {}
+    ledger = report_data.get("assumption_ledger")
+    if not ledger:
+        raise HTTPException(status_code=404, detail="No assumption ledger for this report")
+    return ledger
+
+
+@router.get("/pi-report/{job_id}/assumptions/diff")
+async def get_assumption_diff(job_id: str, current_user=Depends(get_current_user)):
+    """
+    Part E.3/E.4: Return user-overridden assumptions with original vs. new values.
+    Includes TAM delta (absolute and % change in us_tam_usd) and version hash.
+    Empty diffs list if no overrides have been applied.
+    """
+    from app.services.report_jobs import get_job
+    from app.services.assumption_ledger_service import ledger_diff
+    from app.models.alignment import AssumptionLedger, AssumptionSource
+    job = await get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    report_data = job.get("report") or {}
+    ledger_raw = report_data.get("assumption_ledger")
+    if not ledger_raw:
+        return {"diffs": [], "override_count": 0, "tam_delta": None, "version_hash": None}
+    ledger = AssumptionLedger(**ledger_raw) if isinstance(ledger_raw, dict) else ledger_raw
+
+    # E.3: compute TAM delta — compare original us_tam_usd to current value
+    tam_delta = None
+    for a in ledger.assumptions:
+        if a.key == "us_tam_usd":
+            original_tam = a.override_value if a.source == AssumptionSource.USER_OVERRIDE else a.value
+            current_tam = a.value
+            if original_tam and original_tam != current_tam:
+                tam_delta = {
+                    "original_usd": original_tam,
+                    "current_usd":  current_tam,
+                    "delta_usd":    current_tam - original_tam,
+                    "delta_pct":    round((current_tam - original_tam) / original_tam * 100, 1)
+                                    if original_tam else 0,
+                }
+            break
+
+    return {
+        "diffs":          ledger_diff(ledger),
+        "override_count": ledger.override_count,
+        "tam_delta":      tam_delta,
+        "version_hash":   ledger.version_hash,
+        "last_modified":  ledger.last_modified,
+    }
+
+
+@router.patch("/pi-report/{job_id}/assumptions/{assumption_key}")
+async def override_assumption(
+    job_id: str,
+    assumption_key: str,
+    body: AssumptionOverrideRequest,
+    current_user=Depends(get_current_user),
+):
+    """
+    Part E: Override a single assumption value.
+    The original LLM-generated value is preserved in override_value for diff view.
+    """
+    from app.services.report_jobs import get_job, update_report
+    from app.services.assumption_ledger_service import apply_override
+    from app.models.alignment import AssumptionLedger
+
+    job = await get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.get("status") != "done":
+        raise HTTPException(status_code=409, detail="Report not yet complete")
+
+    report_data = job.get("report") or {}
+    ledger_raw = report_data.get("assumption_ledger")
+    if not ledger_raw:
+        raise HTTPException(status_code=404, detail="No assumption ledger for this report")
+
+    ledger = AssumptionLedger(**ledger_raw) if isinstance(ledger_raw, dict) else ledger_raw
+    updated_ledger, found = apply_override(ledger, assumption_key, body.value, body.note)
+    if not found:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Assumption key '{assumption_key}' not found in ledger",
+        )
+
+    report_data["assumption_ledger"] = updated_ledger.model_dump()
+    await update_report(job_id, report_data)
+    logger.info(
+        "Part E: assumption '%s' overridden to %.4g for job %s by user %s",
+        assumption_key, body.value, job_id, getattr(current_user, "id", "?"),
+    )
+    return {
+        "key": assumption_key,
+        "new_value": body.value,
+        "override_count": updated_ledger.override_count,
+    }
