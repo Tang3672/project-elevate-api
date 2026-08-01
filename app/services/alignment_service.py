@@ -57,6 +57,9 @@ async def generate_pi_report(
     funding_pathway: str = "commercial",
     user_id:        int = None,
     skip_verification: bool = False,
+    product_name:   Optional[str] = None,
+    institution:    Optional[str] = None,
+    domain:         Optional[str] = None,
 ) -> PIReport:
     """
     Full MoE pipeline: idea → Expert Router → Expert Context → Claude → PIReport.
@@ -122,10 +125,153 @@ async def generate_pi_report(
         f"confidence={router_result.confidence:.2f}"
     )
 
+    # C.2: resolve domain — explicit intake value wins; otherwise derive from sub_expert_id.
+    _RESEARCH_SUB_EXPERTS = frozenset({
+        "research_tool_non_clinical", "research_infrastructure_saas",
+    })
+    _CLINICAL_SUB_EXPERTS = frozenset({
+        "drug_amr", "drug_oncology", "drug_cns", "drug_cardiology", "drug_metabolic",
+        "drug_mental_health", "drug_rare_disease", "drug_infectious_non_amr",
+        "drug_immunology", "biologic_oncology", "biologic_immunology",
+        "biologic_hematology", "biologic_rare_disease", "biologic_cardiology",
+        "gene_therapy_rare", "gene_therapy_oncology", "gene_therapy_cns",
+        "gene_therapy_rna", "gene_therapy_hematology",
+        "device_cardiovascular", "device_metabolic", "device_neurology",
+        "diagnostic_molecular", "diagnostic_companion",
+        "digital_cds", "digital_therapeutic", "digital_rpm",
+        "vaccine_prophylactic", "vaccine_cancer_immuno",
+        "other_crispr", "other_microbiome", "other_delivery",
+    })
+    if domain:
+        _resolved_domain = domain.upper()
+    elif (router_result.sub_expert_id or "") in _RESEARCH_SUB_EXPERTS:
+        _resolved_domain = "LIFE_SCIENCES_RESEARCH"
+    elif (router_result.sub_expert_id or "") in _CLINICAL_SUB_EXPERTS:
+        _resolved_domain = "LIFE_SCIENCES_CLINICAL"
+    else:
+        _resolved_domain = "LIFE_SCIENCES_CLINICAL"   # safe fallback
+
+    # B-05: run manifest — stamped on every report for reproducibility auditing.
+    _run_manifest = {
+        "model_version":      CLAUDE_MODEL,
+        "temperature":        0,
+        "sub_expert_id":      router_result.sub_expert_id,
+        "routing_method":     router_result.routing_method,
+        "routing_confidence": round(router_result.confidence, 3),
+        "domain":             _resolved_domain,
+        "generated_at":       datetime.utcnow().isoformat() + "Z",
+    }
+
     #  Generate with Expert context
     report = await _generate_expert_report(
         idea, pt, expert, demand_results, hospital_matches_raw, total_signals,
-        pi_memory_context=pi_memory_context, funding_pathway=funding_pathway, user_id=user_id)
+        pi_memory_context=pi_memory_context, funding_pathway=funding_pathway, user_id=user_id,
+        product_name=product_name, institution=institution)
+
+    # H-01: Archetype render-time gate — validate vocabulary before any post-processing.
+    # If a generator emits clinical vocabulary (510k, NTAP, CPT) for a research tool,
+    # log and nullify inapplicable structural sections. Never silent.
+    try:
+        from app.services.product_archetype import (
+            get_manifest as _get_arch_manifest,
+            validate_report_dict as _arch_validate,
+            inapplicable_stub as _inapplicable_stub,
+        )
+        _archetype = router_result.archetype
+        _arch_manifest = _get_arch_manifest(_archetype)
+        _violations = _arch_validate(report.model_dump(mode="json"), _archetype)
+        if _violations:
+            logger.warning(
+                "ArchetypeViolation [%s]: %d banned-vocabulary hit(s) in generated report — "
+                "first 3: %s",
+                _archetype.value, len(_violations), _violations[:3],
+            )
+            # Replace structurally inapplicable sections with typed N/A stubs.
+            # Map archetype section IDs to PIReport field names.
+            _SECTION_TO_FIELD = {
+                "regulatory_pathway":            "regulatory_pathway",
+                "reimbursement_strategy":        "market_access",
+                "clinical_trial_requirements":   "regulatory_pathway",
+                "payer_access":                  "market_access",
+                "hospital_value_analysis":       "market_access",
+            }
+            for _sec in _arch_manifest.inapplicable_sections:
+                _field = _SECTION_TO_FIELD.get(_sec)
+                if _field and hasattr(report, _field):
+                    try:
+                        setattr(report, _field, None)
+                        logger.info("ArchetypeGate: nulled inapplicable field '%s' (%s)", _field, _sec)
+                    except Exception as _null_e:
+                        logger.debug("ArchetypeGate: could not null '%s': %s", _field, _null_e)
+            report.archetype_violations = _violations
+        else:
+            report.archetype_violations = []
+    except Exception as _av_e:
+        logger.warning("Archetype gate check failed (non-fatal): %s", _av_e)
+
+    # Part C: Domain-level section suppression.
+    # When domain = LIFE_SCIENCES_RESEARCH, proactively null out sections that
+    # are inapplicable to non-clinical products (disease burden, FDA pathway,
+    # CMS reimbursement). These are suppressed at the model level before render
+    # so the PDF renderer never receives clinical boilerplate for a research tool.
+    try:
+        if _resolved_domain == "LIFE_SCIENCES_RESEARCH":
+            _RESEARCH_SUPPRESS_FIELDS = {
+                "regulatory_pathway": None,
+                "market_access": None,
+            }
+            for _f, _null_val in _RESEARCH_SUPPRESS_FIELDS.items():
+                if hasattr(report, _f) and getattr(report, _f) is not None:
+                    setattr(report, _f, _null_val)
+                    logger.info(
+                        "Part C: nulled inapplicable section '%s' for LIFE_SCIENCES_RESEARCH domain",
+                        _f,
+                    )
+    except Exception as _partc_e:
+        logger.warning("Part C domain suppression failed (non-fatal): %s", _partc_e)
+
+    # B-08: Scrub unverified device K-numbers / PMA numbers from generated text fields.
+    # Any number that does not resolve against openFDA is replaced with
+    # '[device number not verified]' so the report never ships a hallucinated citation.
+    try:
+        from app.services.openfda_verifier import scrub_unverified_device_numbers as _scrub
+        _TEXT_FIELDS = (
+            "executive_summary",
+            "recommended_next_steps",
+        )
+        _all_scrubbed: list[str] = []
+        for _fname in _TEXT_FIELDS:
+            _val = getattr(report, _fname, None)
+            if isinstance(_val, str) and _val:
+                _cleaned, _removed = _scrub(_val)
+                if _removed:
+                    setattr(report, _fname, _cleaned)
+                    _all_scrubbed.extend(_removed)
+            elif isinstance(_val, list):
+                _new_list = []
+                for _item in _val:
+                    if isinstance(_item, str):
+                        _cleaned, _removed = _scrub(_item)
+                        _new_list.append(_cleaned)
+                        _all_scrubbed.extend(_removed)
+                    else:
+                        _new_list.append(_item)
+                if _all_scrubbed:
+                    setattr(report, _fname, _new_list)
+        # Also scrub the regulatory pathway notes field if present
+        _rp = getattr(report, "regulatory_pathway", None)
+        if _rp and hasattr(_rp, "notes"):
+            _rp_notes = getattr(_rp, "notes", None)
+            if isinstance(_rp_notes, str) and _rp_notes:
+                _cleaned, _removed = _scrub(_rp_notes)
+                if _removed:
+                    _rp.notes = _cleaned
+                    _all_scrubbed.extend(_removed)
+        if _all_scrubbed:
+            logger.warning("B-08: scrubbed %d unverified device number(s): %s",
+                           len(_all_scrubbed), _all_scrubbed)
+    except Exception as _b08_e:
+        logger.warning("B-08 device number scrub failed (non-fatal): %s", _b08_e)
 
     # Build sources from structured data
     try:
@@ -202,7 +348,14 @@ async def generate_pi_report(
     try:
         from app.services.strategy_database import format_strategies_for_report
         _sub_id = getattr(expert, "sub_expert_id", getattr(expert, "domain_id", "drug_amr"))
-        logger.info(f"Strategic playbook: sub_expert_id={_sub_id}")
+        # DOMAIN GATE (v3 spec §4 fix): if domain is LIFE_SCIENCES_RESEARCH, the router
+        # may have selected a clinical expert (e.g. digital_rpm). Force the playbook to
+        # the research archetype regardless of which expert was selected.
+        if _resolved_domain == "LIFE_SCIENCES_RESEARCH":
+            _sub_id = "research_infrastructure_saas"
+            logger.info("Strategic playbook: domain=LIFE_SCIENCES_RESEARCH → forced to research_infrastructure_saas")
+        else:
+            logger.info(f"Strategic playbook: sub_expert_id={_sub_id}")
         playbook = format_strategies_for_report(_sub_id)
         if not playbook:
             fallback_map = {
@@ -237,6 +390,9 @@ async def generate_pi_report(
                 "crispr": "other_crispr",
                 "microbiome": "other_microbiome",
                 "delivery": "other_delivery",
+                # Non-clinical research tools
+                "research_tool_non_clinical":   "research_tool_non_clinical",
+                "research_infrastructure_saas": "research_infrastructure_saas",
                 # Generic fallbacks
                 "drug_small_molecule": "drug_amr",
                 "drug_other": "drug_amr",
@@ -273,6 +429,8 @@ async def generate_pi_report(
     report.expert_icon     = expert.icon
     report.routing_method  = router_result.routing_method
     report.mismatch_warning = router_result.mismatch_warning
+    report.run_manifest    = _run_manifest
+    report.domain          = _resolved_domain
 
     if skip_verification:
         # Verification (validation + trust + self-correction) is run in the
@@ -299,6 +457,28 @@ async def attach_competitive_landscape(report) -> None:
     renders it from report data instead of a separate (flaky) client fetch."""
     import asyncio as _aio_cl
     try:
+        # Non-clinical research tools do not live in openFDA or ClinicalTrials.gov.
+        # Serving those corpora produces irrelevant results (dental devices, drug trials)
+        # because the databases index regulated clinical products, not lab equipment.
+        from app.services.competitive_intelligence_service import (
+            _RESEARCH_TOOL_ARCHETYPES,
+            _RESEARCH_TOOL_COMPARATORS,
+        )
+        _sub_id = getattr(report, "expert_domain", "") or ""
+        if _sub_id in _RESEARCH_TOOL_ARCHETYPES:
+            report.competitive_landscape = {
+                "available": True,
+                "competitors": _RESEARCH_TOOL_COMPARATORS,
+                "corpus": "research_tool_functional",
+                "note": (
+                    "Comparators are functional analogues in the academic research-tool market. "
+                    "FDA drugs@FDA and ClinicalTrials.gov are not the correct corpus for "
+                    "non-clinical research infrastructure — those databases index regulated "
+                    "clinical products and returned unrelated results."
+                ),
+            }
+            return
+
         from app.services.competitor_sweep_service import sweep_competitors, to_dict
         disease = (report.disease_intelligence.condition
                    if getattr(report, "disease_intelligence", None) else None) \
@@ -682,7 +862,7 @@ def _modality_directive(sub_expert_id: str, product_type) -> str:
     )
 
 
-async def _generate_expert_report(idea, product_type, expert, demand_results, hospital_matches_raw, total_signals, pi_memory_context="", funding_pathway="commercial", user_id=None):
+async def _generate_expert_report(idea, product_type, expert, demand_results, hospital_matches_raw, total_signals, pi_memory_context="", funding_pathway="commercial", user_id=None, product_name=None, institution=None):
     """
     Generates a PI report using the selected Expert's domain knowledge.
     Injects expert system_prompt + knowledge_base into the researcher context.
@@ -873,11 +1053,14 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
                 max_total_sec=12.0,
             ),
             # Expert panel: 3 parallel Haiku sub-analyses (different analytical lenses).
+            # H-09: archetype passed so inapplicable panels (clinical/regulatory for
+            # research tools) are skipped rather than scoring 0.0 on irrelevant rubrics.
             run_expert_panel(
                 disease_name=disease_name,
                 idea=idea,
                 sub_expert_id=sub_expert_id or "drug_amr",
                 product_type=product_type or "drug",
+                archetype=sub_expert_id or "",
             ),
             # Real-time funding intelligence: NIH SBIR awards, SEC 8-K, preprint velocity.
             get_funding_intelligence(disease_name),
@@ -1072,6 +1255,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
             disease_name=disease_name,
             therapeutic_area=ta_for_deriv,
             us_patient_population=us_pop,
+            sub_expert_id=sub_expert_id or "",   # H-07: research tools routed to buyer model
         )
         market_derivation_text = format_derivation_for_prompt(deriv)
         logger.info("Market sizing derivation generated: TAM=%s SAM=%s", deriv.tam_fmt, deriv.sam_fmt)
@@ -1155,6 +1339,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
 
     # KOL network — key opinion leaders by citation influence (Semantic Scholar, free API)
     kol_block = ""
+    kols: list = []   # H-06: initialise so it's always in scope for person verifier
     try:
         from app.ingestion.connectors.semantic_scholar import get_kol_network, get_disease_literature_signal
         kols = get_kol_network(disease_name, limit=6)
@@ -1166,7 +1351,8 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
                 f"({lit_signal.get('total_citations_top5', 0):,} citations in top 5 papers)",
             ]
             for k in kols[:5]:
-                kol_lines.append(f"  • {k['author']} — {k['paper_count']} papers, {k['citation_total']:,} citations")
+                # Semantic Scholar returns 'name' key; 'author' was a prior typo.
+                kol_lines.append(f"  • {k.get('name', k.get('author', '?'))} — {k['paper_count']} papers, {k['citation_total']:,} citations")
             kol_block = "\n".join(kol_lines)
             logger.info("KOL network: %d KOLs for '%s'", len(kols), disease_name)
     except Exception as _kol_e:
@@ -1230,9 +1416,20 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
         "If a claim is your own interpretation rather than a sourced fact, phrase it as such "
         "(e.g. 'this suggests…', 'a plausible path is…') rather than stating it as established fact. "
         "Prefer fewer, well-grounded claims over many unsupported ones. "
-        "(7) URLS: only use a source_url that appears verbatim in the provided context. NEVER "
-        "invent, guess, or construct a URL (no fabricated DOIs, PMIDs, or paths). If you do not "
-        "have a real URL for a source, set source_url to null and cite the source by name only. "
+        "(7) URLS AND SOURCE NAMES: only use a source_url that appears verbatim in the provided "
+        "context. NEVER invent, guess, or construct a URL (no fabricated DOIs, PMIDs, or paths). "
+        "If you do not have a real URL for a source, set source_url to null and cite the source "
+        "by name only. SOURCE NAMES: never use internal labels as citations — "
+        "'Expert Domain Knowledge', 'RPM Context', 'Medlevate Context', 'Project Elevate', "
+        "'Sub-Expert Context', or any similar internal-system phrase is NOT a valid source and "
+        "must not appear anywhere in the output. If a claim has no external citation, state it "
+        "as a model estimate: 'Estimated range based on expert reasoning…' "
+        "B-07 SOURCE TYPE GUARD: match source type to claim type. "
+        "Rock Health tracks VC funding into digital health — do NOT cite it for product market size, "
+        "revenue, or pricing claims. CMS MPFS Proposed Rule contains fee schedule rates, not market "
+        "growth rates — do NOT cite it for CAGR or market growth claims. "
+        "AUTM licensing data tracks deal counts, not market size — do NOT extrapolate licensing "
+        "revenue to TAM. Only cite a source for the type of fact it actually contains. "
         "(8) NEXT STEPS / ACTION PLAN: make recommended_next_steps specific and concrete — name "
         "the exact program, study, or filing (e.g. 'File a provisional patent on the core "
         "composition'; 'Apply to NIAID SBIR Phase I, ~$300K, next deadline'; 'Run a 28-day murine "
@@ -1242,29 +1439,80 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
         "and the TAM/SAM/SOM values using ONLY the bottom-up derivation provided above. Keep the "
         "formula field brief — the system renders the exact, verified arithmetic separately, so do "
         "not labor over precise multiplication in your text. "
+        "B-03 PRICE RULE: the price you use in market sizing MUST match the segment the product "
+        "actually sells into. For non-clinical research tools (academic PI buyer), use the "
+        "observed spend band from the derivation — never enterprise SaaS pricing. "
+        "For clinical products, use WAC or DRG-based pricing from the derivation. "
+        "Do NOT substitute a generic software price (e.g. $75k/yr) for a segment-specific one. "
         "(10) REGULATORY ACCURACY (verified): state FDA pathway names, exclusivity periods, and "
         "designation eligibility ONLY as given by the Regulatory Pathway Expert or the provided "
         "context. Do not invent specific exclusivity year-counts or eligibility criteria. Standard "
         "facts you may rely on: NCE small-molecule exclusivity 5 yrs; biologic 12 yrs; Orphan Drug "
         "7 yrs; QIDP adds 5 yrs. If unsure, cite the comparable approved drug rather than asserting a number. "
+        "(11) CROSS-REPORT ISOLATION (H-03 — strictly enforced): this report is ISOLATED. "
+        "Do NOT reference any prior report, prior Medlevate analysis, prior PI submission, or any "
+        "previous analysis of a different product. Never write phrases like 'the PI's prior report', "
+        "'a previous analysis estimated', 'as noted in the prior stroke diagnostic report', or any "
+        "similar cross-report reference. Every claim must come from data in THIS context only. "
         f"GUIDELINE NOTE: {clinical_guideline_warning[:200]}"
         + (
-            "\n\nEXPERT PANEL INTEGRATION RULES (CRITICAL): "
-            "An expert panel ran three independent sub-analyses before this synthesis. "
-            "You MUST: "
-            "(a) Reference the Clinical Validity Expert's mechanism score and risks in your scientific assessment. "
-            "(b) Use the Regulatory Pathway Expert's recommended pathway and approval probability as your baseline — "
-            "override only with cited precedent. "
-            "(c) Use the Commercial Viability Expert's pricing benchmark and payer barrier in your market access section. "
-            "If you disagree with any panel finding, state explicitly: "
-            "'The panel assessed [X]; however, based on [specific evidence], my assessment is [Y].' "
-            "Do NOT ignore the panel findings."
+            (
+                # B-01: research tools skip clinical/regulatory panels — only commercial ran.
+                # Explicitly ban mechanism score and approval probability authoring.
+                "\n\nEXPERT PANEL INTEGRATION RULES: "
+                "A Commercial Viability Expert sub-analysis ran before this synthesis. "
+                "CRITICAL — B-01 rule: this is a non-clinical research tool. "
+                "Do NOT write mechanism feasibility scores (e.g. '8.5/10'), "
+                "FDA approval probabilities, or clinical pathway recommendations — "
+                "those panels are not applicable and were not run. "
+                "You MUST reference the Commercial Viability Expert's pricing benchmark "
+                "and go-to-market findings in your commercial section. "
+                "If you disagree with any commercial finding, state the evidence explicitly."
+                if _resolved_domain == "LIFE_SCIENCES_RESEARCH"
+                else
+                "\n\nEXPERT PANEL INTEGRATION RULES (CRITICAL): "
+                "An expert panel ran three independent sub-analyses before this synthesis. "
+                "You MUST: "
+                "(a) Reference the Clinical Validity Expert's mechanism score and risks in your scientific assessment. "
+                "(b) Use the Regulatory Pathway Expert's recommended pathway and approval probability as your baseline — "
+                "override only with cited precedent. "
+                "(c) Use the Commercial Viability Expert's pricing benchmark and payer barrier in your market access section. "
+                "If you disagree with any panel finding, state explicitly: "
+                "'The panel assessed [X]; however, based on [specific evidence], my assessment is [Y].' "
+                "Do NOT ignore the panel findings."
+            )
             if panel_block else ""
         )
     )
 
     modality_directive = _modality_directive(sub_expert_id, product_type)
-    system = (expert.system_prompt + modality_directive + "\n\n"
+
+    # H-02: Derive regulatory status before synthesis — inject the typed directive
+    # so the LLM renders §3 from the correct template rather than fabricating a pathway.
+    _reg_directive = ""
+    try:
+        from app.services.regulatory_status import (
+            derive_regulatory_status as _derive_reg_status,
+            regulatory_directive as _reg_directive_fn,
+            format_regulatory_decision_tree as _reg_tree_fn,
+            RegulatoryStatus as _RegStatus,
+        )
+        _reg_status = _derive_reg_status(
+            archetype=sub_expert_id or "",
+            idea=idea,
+            sub_expert_id=sub_expert_id or "",
+        )
+        _reg_directive = "\n\n" + _reg_directive_fn(_reg_status, sub_expert_id or "")
+        logger.info(
+            "H-02: regulatory_status=%s for sub_expert_id='%s'",
+            _reg_status.value, sub_expert_id or "(none)",
+        )
+        # Log full decision tree for audit (not user-facing)
+        logger.debug("H-02 decision tree:\n%s", _reg_tree_fn(_reg_status, sub_expert_id or "", idea[:200]))
+    except Exception as _h02_e:
+        logger.warning("H-02 regulatory status derivation failed (non-fatal): %s", _h02_e)
+
+    system = (expert.system_prompt + modality_directive + _reg_directive + "\n\n"
               + EXPERT_JSON_SCHEMA + reporting_instructions)
 
     # ── Cost-aware specialist router (P3) — pick the synthesis model tier; the
@@ -1312,6 +1560,128 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
     if not _looks_complete(data):
         raise ValueError("Synthesis produced no usable report after retry")
 
+    # H-05: strip internal KB citations + null placeholder numerics before parsing
+    try:
+        from app.services.citation_validator import run_citation_audit
+        _cite_result = run_citation_audit(data)
+        if _cite_result.internal_stripped or _cite_result.placeholder_nulled:
+            logger.info(
+                "H-05 citation audit: %d internal KB stripped, %d placeholder numerics nulled",
+                _cite_result.internal_stripped, _cite_result.placeholder_nulled,
+            )
+    except Exception as _h05_e:
+        logger.warning("Citation audit failed (non-fatal): %s", _h05_e)
+
+    # H-06: replace unverified KOL names with Semantic Scholar-verified list
+    try:
+        from app.services.person_verifier import build_verified_kol_list, sanitize_kol_list
+        _verified_kols = build_verified_kol_list(kols, disease_name)
+        _ma_data = data.get("market_access") or {}
+        _llm_kol_strings = _ma_data.get("key_opinion_leaders") or []
+        if _llm_kol_strings or _verified_kols:
+            _kol_san = sanitize_kol_list(
+                _llm_kol_strings, _verified_kols,
+                disease_name=disease_name, sub_expert_id=sub_expert_id or "",
+            )
+            if _kol_san.used_fallback:
+                _ma_data["key_opinion_leaders"] = [_kol_san.criteria_block]
+                logger.info("H-06: KOL fallback criteria block inserted for '%s'", disease_name)
+            else:
+                _ma_data["key_opinion_leaders"] = _kol_san.formatted_list()
+                logger.info("H-06: %d verified KOL(s) retained for '%s'", len(_kol_san.verified), disease_name)
+            data["market_access"] = _ma_data
+    except Exception as _h06_e:
+        logger.warning("KOL verification failed (non-fatal): %s", _h06_e)
+
+    # B-04: Scan ALL remaining text fields for title-prefixed person names not in
+    # the verified KOL pool. Catches fabricated names in recommended_next_steps,
+    # executive_summary, strategic_playbook, etc. — fields H-06 does not touch.
+    try:
+        from app.services.person_verifier import (
+            build_verified_kol_list as _bvkl,
+            scrub_text_fields_for_persons as _scrub_persons,
+        )
+        _vkols_for_scan = _bvkl(kols, disease_name)
+        _b04_fields = {
+            k: data[k] for k in (
+                "executive_summary", "recommended_next_steps", "strategic_playbook",
+            ) if k in data
+        }
+        if _b04_fields:
+            _cleaned_fields, _b04_removed = _scrub_persons(_b04_fields, _vkols_for_scan)
+            data.update(_cleaned_fields)
+            if _b04_removed:
+                logger.warning(
+                    "B-04: removed %d unverified person reference(s) from text fields: %s",
+                    len(_b04_removed), _b04_removed[:5],
+                )
+    except Exception as _b04_e:
+        logger.warning("B-04 person scan failed (non-fatal): %s", _b04_e)
+
+    # R-04: Scrub past dates from recommended_next_steps.
+    # Replace any date reference (Month YYYY, Q1-4 YYYY, YYYY alone) that is
+    # strictly in the past relative to the report generation time with
+    # "[date removed — update to future milestone]".
+    try:
+        import re as _re_r04
+        _now_r04 = datetime.utcnow()
+        _MONTH_NAMES = {
+            "january":1,"february":2,"march":3,"april":4,"may":5,"june":6,
+            "july":7,"august":8,"september":9,"october":10,"november":11,"december":12,
+            "jan":1,"feb":2,"mar":3,"apr":4,"jun":6,"jul":7,"aug":8,
+            "sep":9,"oct":10,"nov":11,"dec":12,
+        }
+        _MONTH_NAME_RE = _re_r04.compile(
+            r"\b(January|February|March|April|May|June|July|August|September|"
+            r"October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Oct|Nov|Dec)"
+            r"[\s,]+(\d{4})\b", _re_r04.I,
+        )
+        _QUARTER_RE = _re_r04.compile(r"\bQ([1-4])\s+(\d{4})\b", _re_r04.I)
+        _YEAR_RE    = _re_r04.compile(r"\b(20\d{2})\b")
+
+        def _is_past_month(month: int, year: int) -> bool:
+            return (year, month) < (_now_r04.year, _now_r04.month)
+
+        def _is_past_year(year: int) -> bool:
+            return year < _now_r04.year
+
+        def _scrub_r04(text: str) -> str:
+            # Month YYYY
+            def _replace_month(m):
+                month = _MONTH_NAMES.get(m.group(1).lower(), 0)
+                year = int(m.group(2))
+                if month and _is_past_month(month, year):
+                    return "[date removed — update to future milestone]"
+                return m.group(0)
+            text = _MONTH_NAME_RE.sub(_replace_month, text)
+            # Q# YYYY
+            def _replace_quarter(m):
+                q = int(m.group(1))
+                year = int(m.group(2))
+                month = (q - 1) * 3 + 1
+                if _is_past_month(month, year):
+                    return "[date removed — update to future milestone]"
+                return m.group(0)
+            text = _QUARTER_RE.sub(_replace_quarter, text)
+            # Bare year (only if clearly a past year — avoid hitting dollar amounts)
+            def _replace_year(m):
+                year = int(m.group(1))
+                if _is_past_year(year):
+                    return "[date removed]"
+                return m.group(0)
+            text = _YEAR_RE.sub(_replace_year, text)
+            return text
+
+        _steps = data.get("recommended_next_steps") or []
+        if isinstance(_steps, list):
+            _new_steps = [_scrub_r04(s) if isinstance(s, str) else s for s in _steps]
+            _changed = sum(1 for a, b in zip(_steps, _new_steps) if a != b)
+            if _changed:
+                data["recommended_next_steps"] = _new_steps
+                logger.warning("R-04: scrubbed past date(s) from %d recommended_next_steps item(s)", _changed)
+    except Exception as _r04_e:
+        logger.warning("R-04 past-date scrub failed (non-fatal): %s", _r04_e)
+
     # Parse into PIReport
     report = _parse_expert_response(data, idea, product_type, expert, demand_results, hospital_matches_raw, total_signals)
 
@@ -1320,6 +1690,91 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
     # SAM/SOM from clean displayed percentages off the deterministic derivation.
     if deriv is not None:
         _enforce_market_consistency(report, deriv)
+
+    # H-08/B-02: market math post-processing
+    #   (a) Authored confidence phrases stripped from prose fields.
+    #   (b) SOM horizon consistency: the formula already says "Year-1"; strip any
+    #       "Years 1-5 SOM" prose that contradicts it (the formula is authoritative).
+    try:
+        import re as _re_h08
+        _CONFIDENCE_PHRASES = _re_h08.compile(
+            r"\b(with\s+(high|strong|great|substantial|considerable|full)\s+confidence"
+            r"|we\s+are\s+(confident|certain|highly\s+confident)"
+            r"|(?:approximately|~)\s*\d+[–-]\d+\s*%\s+confidence"
+            r"|\d{2,3}\s*%\s+confidence\s+(interval|level)?"
+            r"|with\s+certainty"
+            r"|it\s+is\s+(highly|very|extremely)\s+(likely|probable|certain)"
+            r")\b",
+            _re_h08.I | _re_h08.UNICODE,
+        )
+        _SOM_HORIZON_MISMATCH_RE = _re_h08.compile(
+            r"\b(years?\s+1[\s–-]+5|5[\s-]year\s+som|cumulative\s+som)\b",
+            _re_h08.I | _re_h08.UNICODE,
+        )
+
+        def _strip_confidence(text: str) -> str:
+            return _CONFIDENCE_PHRASES.sub("", text).strip()
+
+        def _fix_som_horizon(text: str) -> str:
+            return _SOM_HORIZON_MISMATCH_RE.sub("Year-1 SOM", text)
+
+        def _h08_clean(val):
+            if isinstance(val, str):
+                return _fix_som_horizon(_strip_confidence(val))
+            if isinstance(val, list):
+                return [_h08_clean(item) for item in val]
+            return val
+
+        _H08_FIELDS = ("executive_summary", "recommended_next_steps")
+        for _fname in _H08_FIELDS:
+            _raw = getattr(report, _fname, None)
+            if _raw is not None:
+                _cleaned = _h08_clean(_raw)
+                if _cleaned != _raw:
+                    setattr(report, _fname, _cleaned)
+                    logger.info("H-08/B-02: cleaned confidence/horizon language in '%s'", _fname)
+
+        # B-01: strip authored mechanism-score and approval-probability language
+        # from research tool reports (the clinical panel didn't run — any such score is fabricated).
+        # Patterns require the panel-score context (label + colon, or trailing parenthetical) so
+        # generic "8/10" or "out of 10" phrases in other contexts are not affected.
+        if _resolved_domain == "LIFE_SCIENCES_RESEARCH":
+            _B01_MECHANISM_RE = _re_h08.compile(
+                # "Mechanism Feasibility Score: 8.5/10" or "Clinical Validity: 7/10 (confidence: 85%)"
+                r"\b(?:mechanism\s+feasibility|clinical\s+validity|mechanism)\s*(?:score|rating)?"
+                r"\s*:?\s*\d+(?:\.\d+)?/10(?:\s*\(?\s*confidence\s*:\s*\d+%\s*\)?)?"
+                # OR: "8.5/10 (mechanism feasibility)" — score then parenthetical label
+                r"|\b\d+(?:\.\d+)?/10\s*\(\s*(?:mechanism\s+feasibility|clinical\s+validity|approval\s+probability)\s*\)",
+                _re_h08.I | _re_h08.UNICODE,
+            )
+            _B01_APPROVAL_RE = _re_h08.compile(
+                r"\b(?:FDA\s+)?approval\s+probability(?:\s+of)?\s*:?\s*\d+%(?=\s|[,;.]|$)",
+                _re_h08.I | _re_h08.UNICODE,
+            )
+            for _b01_fname in ("executive_summary", "recommended_next_steps"):
+                _b01_raw = getattr(report, _b01_fname, None)
+                if isinstance(_b01_raw, str):
+                    _b01_cleaned = _B01_APPROVAL_RE.sub("", _B01_MECHANISM_RE.sub("", _b01_raw)).strip()
+                    if _b01_cleaned != _b01_raw:
+                        setattr(report, _b01_fname, _b01_cleaned)
+                        logger.info("B-01: stripped authored panel scores from '%s' (research tool)", _b01_fname)
+        # Also scrub the formula string itself if it has horizon contradiction
+        _ms = getattr(report, "market_sizing", None)
+        if _ms and hasattr(_ms, "formula") and isinstance(_ms.formula, str):
+            _ms.formula = _fix_som_horizon(_ms.formula)
+    except Exception as _h08_e:
+        logger.warning("H-08/B-02 market math cleanup failed (non-fatal): %s", _h08_e)
+
+    # Part E: Stamp the assumption ledger on the report from the market derivation.
+    if deriv is not None:
+        try:
+            from app.services.assumption_ledger_service import build_ledger_from_derivation
+            _gen_at = (_run_manifest.get("generated_at") if _run_manifest else None)
+            report.assumption_ledger = build_ledger_from_derivation(deriv, _gen_at)
+            logger.info("Part E: assumption ledger built (%d entries)",
+                        len(report.assumption_ledger.assumptions))
+        except Exception as _part_e_err:
+            logger.warning("Part E assumption ledger build failed (non-fatal): %s", _part_e_err)
 
     # Devices/SaMD have no drug Phase 1/2/3 — relabel the (already validation-appropriate)
     # clinical stages so a domain expert doesn't see "Phase 1/2/3" on a SaMD.
@@ -1387,6 +1842,55 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
     except Exception as _ep_e:
         logger.debug("Expert panel attach failed (non-fatal): %s", _ep_e)
 
+    # ── Part D: Market segmentation tree (spec D.1–D.7) ─────────────────────────
+    # Only built for LIFE_SCIENCES_RESEARCH domain — the funnel template is
+    # specific to academic buyer models. Clinical/pharma products use the
+    # deterministic derivation model above (no segmentation tree needed).
+    if _resolved_domain == "LIFE_SCIENCES_RESEARCH":
+        try:
+            from app.services.market_segmentation import (
+                LIFE_SCIENCES_RESEARCH as _SEG_TEMPLATE,
+                build_segment_tree, triangulate, monte_carlo, sensitivity_analysis,
+            )
+            _seg_tree = await build_segment_tree(
+                template=_SEG_TEMPLATE,
+                idea=idea,
+                product_name=getattr(report, "product_name", "") or "",
+            )
+            # Triangulation (D.3): three independent methods + reconciliation
+            _triangulation = triangulate(_seg_tree)
+            # Monte Carlo (D.6): seed=42 for reproducibility (B-05 determinism)
+            _mc = monte_carlo(_seg_tree, n=5_000, seed=42)
+            # Sensitivity analysis (D.7): tornado-chart ranked parameters
+            _sensitivity = sensitivity_analysis(_seg_tree)
+
+            import dataclasses as _dc
+            report.segmentation_tree = {
+                "nodes": {nid: _dc.asdict(node) for nid, node in _seg_tree.nodes.items()},
+                "root_id": _seg_tree.root_id,
+                "template": _SEG_TEMPLATE,
+                "product_name": _seg_tree.product_name,
+                "nih_labs_retrieved": _seg_tree.nih_labs_retrieved,
+            }
+            report.triangulation = {
+                "bottom_up":   _triangulation.bottom_up,
+                "top_down":    _triangulation.top_down,
+                "value_based": _triangulation.value_based,
+                "reconciled":  _triangulation.reconciled,
+                "monte_carlo": _mc,
+            }
+            report.sensitivity = _sensitivity
+            logger.info(
+                "Part D: segmentation tree built (%d nodes), triangulated, "
+                "MC p10=$%.0f p90=$%.0f, %d sensitivity params",
+                len(_seg_tree.nodes),
+                _mc.get("p10", 0),
+                _mc.get("p90", 0),
+                len(_sensitivity),
+            )
+        except Exception as _seg_e:
+            logger.warning("Part D segmentation failed (non-fatal): %s", _seg_e)
+
     # ── Stable report id only. PRIVACY: no cross-user persistence. ──
     try:
         from app.services.world_model_graph import report_id_for
@@ -1396,6 +1900,21 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
 
     # Portfolio "internal disclosures" benchmark REMOVED for privacy.
     report.portfolio_benchmark = None
+
+    # ── S-06: Adversarial review — separate critic call with no access to synthesis reasoning ──
+    try:
+        from app.services.adversarial_review_service import (
+            run_adversarial_review, validate_adversarial_review,
+        )
+        _adv_items = await run_adversarial_review(
+            report_dict  = report.model_dump(mode="json"),
+            idea         = idea,
+            sub_expert_id = sub_expert_id or "",
+        )
+        report.adversarial_review = validate_adversarial_review(_adv_items)
+        logger.info("S-06: adversarial review: %d items", len(report.adversarial_review))
+    except Exception as _adv_e:
+        logger.warning("S-06 adversarial review failed (non-fatal): %s", _adv_e)
 
     # PRIVACY: the report is NOT persisted to any shared cross-user store. We no longer
     # ingest it into the shared world-model graph, nor update the disease-keyed research
@@ -1559,7 +2078,48 @@ If the exact guidance is not listed above, use the general FDA guidance search: 
   },
   "market_geography": {"description":"<under 200 chars>","top_states":["<state>"],"scope":"<national|regional|concentrated>"},
   "recommended_next_steps": ["<under 150 chars each, max 5>"],
-  "limitations": "<under 200 chars>"
+  "limitations": "<under 200 chars>",
+
+  "evidence_base": {
+    "primary_research_present": false,
+    "source_types_used": ["<e.g. NIH RePORTER grants, Semantic Scholar, ClinicalTrials.gov, primary user interviews>"],
+    "sample_composition": "<e.g. '10 academic PIs, 8 at R1 institutions, 2 at teaching hospitals — all with active NIH grants' or 'not applicable — no primary research'>",
+    "decision_authority_profile": "<who holds purchase authority — e.g. 'PI (90%), department chair (10%)' or 'unknown — not assessed'>",
+    "limitations": ["<specific limitation of this analysis, e.g. 'No primary user research — findings are hypotheses'>"],
+    "evidence_gap_block": "<if no primary research: honest gap message recommending 8-12 structured interviews with [buyer_persona]; otherwise empty string>"
+  },
+
+  "value_driver_ranking": [
+    {"value_driver":"<e.g. Reliability of data capture>","relative_importance":"<High|Medium|Low>","product_implication":"<specific product decision this implies, under 150 chars>"}
+  ],
+
+  "segment_fit_table": [
+    {"segment":"<segment name>","relative_fit":"<Strong|Moderate|Weak>","strategic_stance":"<Target|Selective|Explicit non-target>","rationale":"<under 150 chars>"}
+  ],
+
+  "feature_investment_posture": [
+    {"feature_area":"<feature or capability>","posture":"<Build and prioritize|Build|Selective|Exclude>","rationale":"<under 150 chars>"}
+  ],
+
+  "pricing_model_analysis": {
+    "model_comparison": [
+      {"pricing_model":"Pure usage / metered","user_appeal":"<High|Medium|Low>","business_sustainability":"<High|Medium|Low>","strategic_stance":"<Recommended|Consider|Avoid>"},
+      {"pricing_model":"Annual subscription (per site or per seat)","user_appeal":"<High|Medium|Low>","business_sustainability":"<High|Medium|Low>","strategic_stance":"<Recommended|Consider|Avoid>"},
+      {"pricing_model":"One-time perpetual license","user_appeal":"<High|Medium|Low>","business_sustainability":"<High|Medium|Low>","strategic_stance":"<Recommended|Consider|Avoid>"},
+      {"pricing_model":"Hybrid (subscription + metered overage)","user_appeal":"<High|Medium|Low>","business_sustainability":"<High|Medium|Low>","strategic_stance":"<Recommended|Consider|Avoid>"}
+    ],
+    "contextual_analysis": [
+      {"context":"<where/when this model is used>","why_this_model_works":"<under 150 chars>","structural_risk":"<specific failure mode, under 200 chars>"}
+    ]
+  },
+
+  "positioning_statement": "<one paragraph, must state what the product IS and what it is NOT — the 'not' clause is required>",
+
+  "strategic_risks": [
+    "<specific risk from scope creep, mispricing, or unclear constraints — 3 to 5 bullets>"
+  ],
+
+  "guiding_question": "<single decision test the team can apply to every future product choice, under 150 chars>"
 }"""
 
 
@@ -1613,6 +2173,54 @@ def _parse_expert_response(data, idea, product_type, expert, demand_results, hos
         logger.warning("market_geography parse failed (non-fatal): %s", _geo_e)
         _geo_obj = MarketGeography(description=str(geo_data.get("description", "")) if isinstance(geo_data, dict) else "")
 
+    # ── S-01…S-09: parse and validate new strategic sections ──────────────────
+
+    # S-01 Evidence Base
+    evidence_base = data.get("evidence_base") or {}
+
+    # S-02 Value Driver Ranking
+    vdr = [r for r in data.get("value_driver_ranking", []) if isinstance(r, dict)]
+
+    # S-03 Segment Fit Table — enforce ≥1 Explicit non-target
+    sft = [r for r in data.get("segment_fit_table", []) if isinstance(r, dict)]
+    if sft and not any(
+        "non-target" in (r.get("strategic_stance") or "").lower() for r in sft
+    ):
+        logger.warning("S-03: no Explicit non-target segment — appending enforcement stub")
+        sft.append({
+            "segment": "Segments outside primary buyer persona",
+            "relative_fit": "Weak",
+            "strategic_stance": "Explicit non-target",
+            "rationale": "Enforced: every report must name at least one non-target segment.",
+        })
+
+    # S-04 Feature Investment Posture — enforce ≥1 Exclude
+    fip = [r for r in data.get("feature_investment_posture", []) if isinstance(r, dict)]
+    if fip and not any(
+        (r.get("posture") or "").lower() == "exclude" for r in fip
+    ):
+        logger.warning("S-04: no Exclude posture — appending enforcement stub")
+        fip.append({
+            "feature_area": "Out-of-scope capabilities",
+            "posture": "Exclude",
+            "rationale": "Enforced: at least one Exclude required per scope-discipline rule.",
+        })
+
+    # S-05 Pricing Model Analysis
+    pricing = data.get("pricing_model_analysis") or {}
+
+    # S-07 Positioning Statement — check for "not" clause
+    pos_stmt = data.get("positioning_statement") or ""
+    if pos_stmt and " not " not in pos_stmt.lower() and "isn't" not in pos_stmt.lower():
+        logger.warning("S-07: positioning statement missing 'not' clause — appending note")
+        pos_stmt = pos_stmt.rstrip(".") + ". This product is not intended as [specify non-target use]."
+
+    # S-08 Strategic Risks (3-5 items)
+    risks = [r for r in data.get("strategic_risks", []) if isinstance(r, str) and r.strip()]
+
+    # S-09 Guiding Question
+    guiding_q = data.get("guiding_question") or ""
+
     return PIReport(
         product_type           = product_type,
         idea_submitted         = idea,
@@ -1631,6 +2239,17 @@ def _parse_expert_response(data, idea, product_type, expert, demand_results, hos
         signals_searched       = total_signals,
         hospital_needs_searched = len(hospital_matches_raw),
         model_version          = "3.0-MoE",
+        # P1 strategic sections
+        evidence_base          = evidence_base or None,
+        value_driver_ranking   = vdr,
+        segment_fit_table      = sft,
+        feature_investment_posture = fip,
+        pricing_model_analysis = pricing or None,
+        positioning_statement  = pos_stmt or None,
+        strategic_risks        = risks,
+        guiding_question       = guiding_q or None,
+        product_name           = product_name or None,
+        institution            = institution or None,
     )
 
 
@@ -1735,6 +2354,8 @@ async def _generate_antibiotic_report(
         signals_searched=total_signals,
         hospital_needs_searched=len(hospital_matches_raw),
         model_version="2.0",
+        product_name=product_name or None,
+        institution=institution or None,
     )
 
 
@@ -1868,6 +2489,8 @@ async def _generate_generic_pi_report(
         signals_searched=total_signals,
         hospital_needs_searched=len(hospital_matches_raw),
         model_version="2.0",
+        product_name=product_name or None,
+        institution=institution or None,
     )
 
 
@@ -1875,7 +2498,7 @@ async def _generate_generic_pi_report(
 # LEGACY ALIGNMENT (backward compat)
 # ══════════════════════════════════════════════════════════════════════════════
 
-LEGACY_SYSTEM_PROMPT = """You are the demand intelligence engine for Project Elevate.
+LEGACY_SYSTEM_PROMPT = """You are the demand intelligence engine for Medlevate.
 
 Given an inventor's idea and evidence from public health databases, generate a structured demand alignment report.
 
@@ -2161,10 +2784,11 @@ async def _call_claude(context: str, system_prompt: str, max_tokens: int = 2000,
                 "content-type": "application/json",
             },
             json={
-                "model": model or CLAUDE_MODEL,
-                "max_tokens": max_tokens,
-                "system": system_prompt,
-                "messages": [{"role": "user", "content": context}],
+                "model":       model or CLAUDE_MODEL,
+                "max_tokens":  max_tokens,
+                "temperature": 0,
+                "system":      system_prompt,
+                "messages":    [{"role": "user", "content": context}],
             }
         )
         r.raise_for_status()
