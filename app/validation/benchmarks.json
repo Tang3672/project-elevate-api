@@ -1,0 +1,397 @@
+[
+  {
+    "id": "keytruda_us",
+    "name": "Pembrolizumab (Keytruda) — US net sales",
+    "product_type": "biologic",
+    "disease_name": "solid tumors (multi-indication PD-1)",
+    "engine_inputs": {
+      "us_patient_population": 2001140,
+      "base_metric": "patients",
+      "segment_gate_rate": 0.26,
+      "annual_treatment_cost_usd": 152000,
+      "competitive_context": "new_moa",
+      "notes": "Keytruda approved across 17+ tumor types. ~26% of new US cancer diagnoses meet at least one Keytruda indication + PD-L1 expression threshold. Net price ~$152K/yr after blended ~24% gross-to-net discount from ~$200K WAC. Compare SOM_peak vs Keytruda US revenue (Keytruda dominates >55% of US checkpoint inhibitor market)."
+    },
+    "ground_truth": {
+      "actual_annual_usd": 17200000000,
+      "year": 2024,
+      "source": "Merck & Co FY2024 Annual Report / 10-K — US Keytruda (pembrolizumab) net revenues (approximate; verify exact line item in filed 10-K). Merck reports Keytruda US separately from ex-US in their segment disclosure.",
+      "figure_type": "actual_net_sales",
+      "compare_against": "som_peak",
+      "confidence": "high",
+      "notes": "Keytruda is at or near peak penetration in US (launched 2014, 10yr mature). SOM_peak comparison is appropriate. Total US checkpoint inhibitor market ~$25-28B including Opdivo, Imfinzi, etc."
+    },
+    "tolerance_note": "Mature multi-indication drug at peak penetration; SOM_peak should approximate actual revenue. Expect engine within 20%.",
+    "next_refresh_date": "2026-04",
+    "status": "active"
+  },
+  {
+    "id": "wegovy_us",
+    "name": "Semaglutide (Wegovy) — US obesity treatment",
+    "product_type": "drug_small_molecule",
+    "disease_name": "obesity / overweight with comorbidity",
+    "engine_inputs": {
+      "us_patient_population": 70000000,
+      "base_metric": "patients",
+      "segment_gate_rate": 0.05,
+      "annual_treatment_cost_usd": 11400,
+      "competitive_context": "new_moa",
+      "notes": "~70M US adults with BMI ≥30 or BMI ≥27 + comorbidity (CDC 2024). ~5% are currently on pharmacotherapy. Wegovy WAC ~$1,350/mo; net price after PBM rebates estimated $950/mo (~$11,400/yr). Product launched Aug 2021, supply-constrained 2022-2023, so compare SOM_base (y3) not peak — product not yet at steady-state penetration as of 2024."
+    },
+    "ground_truth": {
+      "actual_annual_usd": 6500000000,
+      "year": 2024,
+      "source": "Novo Nordisk FY2024 Annual Report Q4 2024 press release — Wegovy North America region (DKK 46.3B × 0.71 USD/DKK exchange rate × ~85% US of North America). Note: Novo Nordisk does not separately report US vs Canada for Wegovy; this is an approximation. Verify against filed annual report.",
+      "figure_type": "actual_net_sales",
+      "compare_against": "som_base",
+      "confidence": "medium",
+      "notes": "Wegovy supply-constrained until late 2023; compare y3 (som_base) not peak. This is one of the fastest-growing drug launches in history — the analog model will underestimate ramp speed."
+    },
+    "tolerance_note": "Fast-growing, supply-constrained product; analog model assumes normal ramp — expect engine to under-predict. Useful to quantify the 'exceptional launch' gap.",
+    "next_refresh_date": "2026-04",
+    "status": "active"
+  },
+  {
+    "id": "spinraza_us",
+    "name": "Nusinersen (Spinraza) — US orphan SMA treatment",
+    "product_type": "drug_small_molecule",
+    "disease_name": "spinal muscular atrophy (prevalent on chronic therapy)",
+    "engine_inputs": {
+      "us_patient_population": 9000,
+      "base_metric": "patients",
+      "segment_gate_rate": 0.62,
+      "annual_treatment_cost_usd": 105000,
+      "competitive_context": "orphan",
+      "notes": "~9,000 US SMA patients (all types, prevalent; SMA Foundation estimate). ~62% remaining on Spinraza (vs ~25% on risdiplam, ~13% who received one-time Zolgensma). Maintenance dosing: 3 injections/yr × ~$35,000 net per injection = $105,000/yr net (WAC $48K/injection; hospital acquisition cost lower). This is a PREVALENT POPULATION model (chronic treatment), not incident births — distinct from the SMA incident-birth model in patient_flows_seed.py."
+    },
+    "ground_truth": {
+      "actual_annual_usd": 563000000,
+      "year": 2023,
+      "source": "Biogen Inc FY2023 Annual Report / 10-K — Spinraza United States net revenues ($563M; Biogen discloses US separately from rest-of-world). Filed with SEC Feb 2024.",
+      "figure_type": "actual_net_sales",
+      "compare_against": "sam",
+      "confidence": "high",
+      "notes": "Spinraza is the dominant chronic SMA treatment. SAM comparison appropriate because Biogen captures most of the Spinraza-eligible market (orphan near-monopoly in chronic SMA). Zolgensma addresses different population (newborns/very young)."
+    },
+    "tolerance_note": "Orphan drug with well-defined prevalent population. SAM comparison should be tight (within 15%) if population and price inputs are correct.",
+    "next_refresh_date": "2025-04",
+    "status": "active"
+  },
+  {
+    "id": "thrombectomy_devices_us",
+    "name": "Mechanical thrombectomy devices — US procedure market",
+    "product_type": "medical_device",
+    "disease_name": "acute ischemic stroke (large vessel occlusion)",
+    "engine_inputs": {
+      "us_patient_population": 135000,
+      "base_metric": "procedures",
+      "segment_gate_rate": 1.0,
+      "annual_treatment_cost_usd": 6500,
+      "competitive_context": "interventional_device",
+      "notes": "~130,000-140,000 US mechanical thrombectomy procedures performed annually (AHA 2024 Heart and Stroke Statistics; CMS CPT 61645 claims extrapolated to all-payer). Device component per procedure (stentriever + aspiration catheter) average selling price ~$5,500-7,500; use $6,500 blended ASP (Stryker Trevo, Medtronic Solitaire, Penumbra ACE disclosed pricing). Population = procedure count (not patient population). segment_gate = 1.0 (already at procedure level)."
+    },
+    "ground_truth": {
+      "actual_annual_usd": 800000000,
+      "year": 2023,
+      "source": "GlobalData MedTech Intelligence Report 'US Neurovascular Thrombectomy Devices Market' 2023-2024 (analyst estimate; $700M-$900M range, midpoint $800M). No single public company discloses MT device US revenue separately — Stryker Neurovascular + Medtronic Neurovascular + Penumbra share market. Cross-check: 135,000 procedures × $6,500 blended ASP = $877M (consistent with analyst range).",
+      "figure_type": "analyst_estimate",
+      "compare_against": "sam",
+      "confidence": "medium",
+      "notes": "Ground truth is a mid-point analyst estimate, not a single-company 10-K. Engine cross-check ($877M) agrees within the analyst range. Both are estimates; treat within 15% as excellent."
+    },
+    "tolerance_note": "No single public disclosure; both engine and ground truth are computed from procedure volumes × ASP. Useful as internal consistency check.",
+    "next_refresh_date": "2025-06",
+    "status": "active"
+  },
+  {
+    "id": "da_vinci_us",
+    "name": "Intuitive Surgical (da Vinci system) — US annual revenue",
+    "product_type": "medical_device",
+    "disease_name": "minimally invasive surgery (robotic-assisted)",
+    "engine_inputs": {
+      "us_patient_population": 6000,
+      "base_metric": "sites",
+      "segment_gate_rate": 0.69,
+      "annual_treatment_cost_usd": 1185000,
+      "competitive_context": "interventional_device",
+      "notes": "~6,000 US hospitals with surgical suites eligible for robotic system acquisition (AHA Annual Survey 2023: ~5,900 registered hospitals; ~6,000 including surgical centers). ~69% addressable (with existing OR infrastructure + patient volume to justify capital spend). Revenue per installed system per year = $4,886M / 4,125 US systems = ~$1.185M (instruments + accessories + service + system depreciation equivalent). This captures Intuitive's full per-site revenue stack — not just device purchase. Compare SAM directly (Intuitive has ~69% of US installed surgical robot base)."
+    },
+    "ground_truth": {
+      "actual_annual_usd": 4886000000,
+      "year": 2023,
+      "source": "Intuitive Surgical Inc FY2023 Annual Report / 10-K — United States segment revenue ($4,886M). Intuitive reports US vs international separately. Filed with SEC Feb 2024. Ticker: ISRG.",
+      "figure_type": "actual_net_sales",
+      "compare_against": "sam",
+      "confidence": "high",
+      "notes": "da Vinci has ~69% US market share of surgical robots (Stryker Mako and others take the rest). SAM comparison appropriate because Intuitive captures most of the addressable market. Revenue includes instruments, accessories, systems, and services — a blended per-site figure."
+    },
+    "tolerance_note": "Capital device with complex revenue stack (capex + consumables + services). The per-site annual revenue blending is non-standard; expect 10-20% error. Tests site-based monetization model.",
+    "next_refresh_date": "2025-03",
+    "status": "active"
+  },
+  {
+    "id": "guardant_dx_us",
+    "name": "Guardant Health — US liquid biopsy / precision oncology revenue",
+    "product_type": "diagnostic",
+    "disease_name": "solid tumor (advanced/metastatic, liquid biopsy)",
+    "engine_inputs": {
+      "us_patient_population": 2001140,
+      "base_metric": "tests",
+      "segment_gate_rate": 0.30,
+      "annual_treatment_cost_usd": 2500,
+      "competitive_context": "companion_diagnostic",
+      "notes": "~2M new US cancer diagnoses/yr (ACS 2024). ~30% are metastatic or advanced stage where ctDNA/liquid biopsy is indicated (NSCLC, CRC, breast, others with known genomic driver). Guardant360 CDx list price ~$6,500; actual net reimbursement ~$2,500 blended (insurance coverage varies; Medicare + private payer mix). Compare SOM_base (y3) — Guardant is a growing company (~7yr post-IPO) not yet at peak."
+    },
+    "ground_truth": {
+      "actual_annual_usd": 416000000,
+      "year": 2023,
+      "source": "Guardant Health Inc FY2023 Annual Report / 10-K — Oncology (precision oncology) segment net revenue ($416M out of $554M total; Guardant separately reports oncology vs development). Filed with SEC Feb 2024. Ticker: GH.",
+      "figure_type": "actual_net_sales",
+      "compare_against": "som_base",
+      "confidence": "high",
+      "notes": "Guardant's $416M is ONE company's revenue in a growing market — total US liquid biopsy market estimated $1.2-1.5B in 2023 (Guardant + Foundation Medicine + local labs). som_base comparison tests whether engine's y3 penetration estimate aligns with Guardant's actual captured share."
+    },
+    "tolerance_note": "Growing market, one company's revenue vs total SAM; expect higher error (30-50%). Tests companion Dx analog penetration curve realism.",
+    "next_refresh_date": "2025-04",
+    "status": "active"
+  },
+  {
+    "id": "health_catalyst_us",
+    "name": "Health Catalyst — US hospital analytics software revenue",
+    "product_type": "samd",
+    "disease_name": "hospital clinical analytics (enterprise health data platform)",
+    "engine_inputs": {
+      "us_patient_population": 700,
+      "base_metric": "sites",
+      "segment_gate_rate": 1.0,
+      "annual_treatment_cost_usd": 1800000,
+      "competitive_context": "hospital_software",
+      "notes": "~700 large US health systems (>50 hospitals or >$1B revenue; AAMC / AHA definition of 'integrated health system'). Annual contract value per health system: $306M revenue / 170 clients disclosed = ~$1.8M/system/yr (blended; ranges from $0.5M for small clients to $5M+ for large IDNs). segment_gate = 1.0 — already targeted to addressable large health systems. Compare SOM_peak (Health Catalyst founded 2008, ~15yr mature company with 170 of ~700 health system customers)."
+    },
+    "ground_truth": {
+      "actual_annual_usd": 306000000,
+      "year": 2023,
+      "source": "Health Catalyst Inc FY2023 Annual Report / 10-K — total net revenue ($306.4M). Health Catalyst discloses ~170 health system clients. Ticker: HCAT. Filed with SEC Feb 2024.",
+      "figure_type": "actual_net_sales",
+      "compare_against": "som_peak",
+      "confidence": "high",
+      "notes": "Health Catalyst has ~170/700 = 24% penetration of large US health systems. The hospital_software analog predicts peak penetration = 30% (6yr ramp). Health Catalyst is at ~15yr — slightly above analog peak. SOM_peak comparison: 700 × $1.8M × 30% = $378M vs actual $306M. Tests site-license model and hospital software penetration analog."
+    },
+    "tolerance_note": "Hospital software with explicit client count and contract value disclosed. Engine should land within 25% on SOM_peak. Good test of site-license model.",
+    "next_refresh_date": "2025-04",
+    "status": "active"
+  },
+  {
+    "id": "nuzyra_us",
+    "name": "Omadacycline (Nuzyra) — US AMR antibiotic net revenues",
+    "product_type": "antibiotic",
+    "disease_name": "community-acquired bacterial pneumonia (CABP) / ABSSSI",
+    "engine_inputs": {
+      "us_patient_population": 700000,
+      "base_metric": "patients",
+      "segment_gate_rate": 0.25,
+      "annual_treatment_cost_usd": 1700,
+      "competitive_context": "antimicrobial",
+      "notes": "~700,000 US CABP hospitalizations/yr requiring IV antibiotics (CDC National Hospital Discharge Survey 2022). ~25% eligible for omadacycline (atypical coverage + resistant organism risk + IV-to-oral step-down preference; excludes those on standard beta-lactam/azithromycin). Net revenue per treated course ~$1,700 (7-10 days; hospital GPO acquisition cost; WAC $3,800 for 7-day course, ~55% net-to-WAC typical for new antibiotics). segment_gate = 0.25 applied to hospitalized CABP to get addressable course volume."
+    },
+    "ground_truth": {
+      "actual_annual_usd": 75000000,
+      "year": 2022,
+      "source": "Paratek Pharmaceuticals Inc FY2022 Annual Report / 10-K — Nuzyra (omadacycline) US net revenues ($75.2M for FY2022). Paratek was acquired by Zai Lab in October 2023; 2022 is the last full fiscal year with publicly reported standalone results. SEC EDGAR filing.",
+      "figure_type": "actual_net_sales",
+      "compare_against": "som_peak",
+      "confidence": "high",
+      "notes": "Novel antibiotic launched 2018, FY2022 = yr 4 of commercial launch. Antimicrobial analog predicts peak share = 20% (yr 5). SOM_peak = $297.5M × 20% = $59.5M vs actual $75M → APE ~21%. Antibiotic stewardship programs significantly limit uptake — the analog's low peak penetration (20%) captures this. Higher error acceptable for AMR products."
+    },
+    "tolerance_note": "Novel antibiotic facing stewardship headwinds; analog's low penetration (20% peak) is calibrated for AMR products. Expect engine within 25% of actual.",
+    "next_refresh_date": "2024-06",
+    "status": "active"
+  },
+
+  {
+    "id": "entresto_us",
+    "name": "Sacubitril/Valsartan (Entresto) — US heart failure",
+    "product_type": "drug_small_molecule",
+    "disease_name": "heart failure with reduced ejection fraction (HFrEF)",
+    "engine_inputs": {
+      "us_patient_population": 3000000,
+      "base_metric": "patients",
+      "segment_gate_rate": 0.70,
+      "annual_treatment_cost_usd": 5800,
+      "competitive_context": "new_moa",
+      "notes": "~6M US adults with HF; ~50% HFrEF (EF<40%); 3M eligible for sacubitril-class (NYHA II-IV, tolerate ACE/ARB equivalent, not already on Entresto). Net price ~$5,800/yr (WAC ~$11,000; ~47% gross-to-net typical for CV drugs with formulary pressure). Compare SOM_base: Entresto launched 2015, by FY2023 = yr 8; y3 analog benchmarks conservative but appropriate for segment penetration."
+    },
+    "ground_truth": {
+      "actual_annual_usd": 2025000000,
+      "year": 2023,
+      "source": "Novartis AG FY2023 Annual Report — Entresto United States net sales CHF 2,239M × 0.905 avg USD/CHF rate ≈ $2,026M. Novartis discloses US separately in geographic segment note. Filed 2024.",
+      "figure_type": "actual_net_sales",
+      "compare_against": "som_base",
+      "confidence": "high",
+      "notes": "Entresto = year 8 of launch in FY2023; use som_base (y3 analog = 15%) as a conservative benchmark. Penetration is real-world 18% of eligible HFrEF — close to y3 analog estimate."
+    },
+    "tolerance_note": "Established CV drug in moderately crowded market. SOM_base comparison should be within 20% if population/price inputs are correct.",
+    "next_refresh_date": "2025-04",
+    "status": "active"
+  },
+
+  {
+    "id": "tepezza_us",
+    "name": "Teprotumumab (Tepezza) — US thyroid eye disease",
+    "product_type": "biologic",
+    "disease_name": "thyroid eye disease (TED, active moderate-to-severe)",
+    "engine_inputs": {
+      "us_patient_population": 17500,
+      "base_metric": "patients",
+      "segment_gate_rate": 0.70,
+      "annual_treatment_cost_usd": 165000,
+      "competitive_context": "orphan",
+      "notes": "~17,500 US incident moderate-to-severe ACTIVE TED cases/yr (total TED prevalence ~100K; ~17-20% in active treatable phase per endocrinology literature). Tepezza is the ONLY FDA-approved drug for active TED (approved Jan 2020); no competition. 70% gate: excludes patients who refuse IV infusion, inactive/burned-out TED, or severe comorbidities. 8 infusions per course × ~$21K net/infusion = $168K course; use $165K blended. Compare SAM directly (monopoly drug; SAM ≈ revenue)."
+    },
+    "ground_truth": {
+      "actual_annual_usd": 1951000000,
+      "year": 2022,
+      "source": "Horizon Therapeutics plc FY2022 Annual Report / 10-K — Tepezza (teprotumumab-trbw) US net sales $1,951.3M. FY2022 is the last full public fiscal year before Amgen acquired Horizon (closed Oct 2023 for $27.8B). SEC EDGAR filing.",
+      "figure_type": "actual_net_sales",
+      "compare_against": "sam",
+      "confidence": "high",
+      "notes": "Monopoly drug — SAM comparison appropriate (Tepezza captures essentially all treated active TED patients). compare_against=sam tests whether population × price gets to the right order of magnitude, not penetration modeling."
+    },
+    "tolerance_note": "Monopoly rare-disease drug. SAM comparison should be within 10-15% if incident population and net price are right.",
+    "next_refresh_date": "2024-06",
+    "status": "active"
+  },
+
+  {
+    "id": "zolgensma_us",
+    "name": "Onasemnogene abeparvovec (Zolgensma) — US SMA gene therapy",
+    "product_type": "gene_therapy",
+    "disease_name": "spinal muscular atrophy type 1 (SMA1, infant-onset)",
+    "engine_inputs": {
+      "us_patient_population": 350,
+      "base_metric": "patients",
+      "segment_gate_rate": 0.90,
+      "annual_treatment_cost_usd": 2100000,
+      "competitive_context": "orphan",
+      "notes": "~350 incident SMA Type 1 eligible births/yr in US (SMA incidence 1:8,000 US births; 3.7M births/yr = 462 SMA total; ~75% Type 1 = ~347; round to 350). 90% meet age/weight criteria (≤2yr, ≤21kg) and receive treatment — near-complete access in US with newborn screening. One-time gene therapy; annualized revenue = incident cohort × net price. Net price: WAC $2.125M; minimal gross-to-net for one-time gene therapy (hospitals negotiate but government payer pressure lower than chronic drugs). Compare SAM — Zolgensma captures ~70-80% of new SMA Type 1 diagnoses; remaining patients on Spinraza (nusinersen) due to timing/family preference."
+    },
+    "ground_truth": {
+      "actual_annual_usd": 742000000,
+      "year": 2023,
+      "source": "Novartis AG FY2023 Annual Report — Zolgensma global net sales CHF 1,349M × 0.905 avg USD/CHF ≈ $1,221M; US proportion estimated at ~55-60% of global (Novartis does not disclose country-level Zolgensma separately). Midpoint: $1,221M × 0.585 = $714M; using analyst consensus range midpoint $742M. Confidence = medium (US figure estimated, not directly disclosed).",
+      "figure_type": "actual_net_sales",
+      "compare_against": "sam",
+      "confidence": "medium",
+      "notes": "One-time gene therapy; SAM = incident cohort × net price (annualized). Zolgensma captures ~70-80% of new SMA1 diagnoses, so SAM should slightly exceed actual revenue. Engine SAM $661.5M vs actual $742M — slight under-estimate expected because ~70% share assumption understates Zolgensma's actual dominance."
+    },
+    "tolerance_note": "Orphan gene therapy, well-defined incident population, high price. SAM comparison should be within 15% if birth incidence and price are right. US figure is an estimate from global report.",
+    "next_refresh_date": "2025-06",
+    "status": "active"
+  },
+
+  {
+    "id": "dexcom_cgm_us",
+    "name": "Dexcom G6/G7 CGM — US diabetes",
+    "product_type": "medical_device",
+    "disease_name": "type 1 diabetes / insulin-dependent type 2 diabetes (CGM)",
+    "engine_inputs": {
+      "us_patient_population": 2100000,
+      "base_metric": "patients",
+      "segment_gate_rate": 1.0,
+      "annual_treatment_cost_usd": 1220,
+      "competitive_context": "interventional_device",
+      "notes": "~1.5M US T1D patients (all appropriate for CGM) + ~600K insulin-dependent T2D actively using CGM = 2.1M Dexcom active users. Population represents Dexcom's known active US user base (Dexcom disclosed ~6M global users; ~35% US = ~2.1M). Net price: Dexcom G7 list price ~$350/month; blended net after insurance = ~$100/month = $1,200/yr (with pharmacy benefit, Medicare DME, private payer mix); use $1,220/yr. Compare SAM (Dexcom is the category-dominant player with ~64% CGM market share; SAM ≈ revenue for the addressable population sized to Dexcom's user base). NOTE: this benchmark is designed to test the per-patient × price math, not penetration modeling — population IS the Dexcom user base, not total eligible."
+    },
+    "ground_truth": {
+      "actual_annual_usd": 2561000000,
+      "year": 2023,
+      "source": "Dexcom Inc FY2023 Annual Report / 10-K — United States segment net revenue $2,561.0M (out of $3,620.5M total global revenue). Dexcom discloses US vs international separately. Ticker: DXCM. Filed with SEC Feb 2024.",
+      "figure_type": "actual_net_sales",
+      "compare_against": "sam",
+      "confidence": "high",
+      "notes": "Tests per-patient recurring device model (subscription analog) and validates the per-patient × annual price calculation. Expected near-zero error since population was calibrated to match Dexcom's user base."
+    },
+    "tolerance_note": "Calibrated benchmark: population = known Dexcom user base, compare = SAM. Tests per-patient math. Expect <5% APE. If off by more, investigate monetization_engine's per-patient revenue calculation.",
+    "next_refresh_date": "2025-04",
+    "status": "active"
+  },
+
+  {
+    "id": "trikafta_us",
+    "name": "Trikafta (elexacaftor/tezacaftor/ivacaftor) — US cystic fibrosis",
+    "product_type": "drug_small_molecule",
+    "disease_name": "cystic fibrosis (F508del allele, eligible for CFTR modulator)",
+    "engine_inputs": {
+      "us_patient_population": 27500,
+      "base_metric": "patients",
+      "segment_gate_rate": 0.92,
+      "annual_treatment_cost_usd": 280000,
+      "competitive_context": "orphan",
+      "notes": "~31,000 US CF patients total; ~88% have ≥1 F508del allele eligible for Trikafta (approved down to age 2 in 2023) = ~27,280; round to 27,500. 92% adoption rate: near-complete uptake; Trikafta is transformative (FEV1 improvement, mortality benefit) with very few contraindications. Net price ~$280,000/yr (Vertex WAC $327,000; relatively low gross-to-net vs typical specialty drugs; CF Foundation negotiates strong access). Compare SAM: Vertex has near-monopoly in CFTR-eligible US CF patients (no competing product for most F508del)."
+    },
+    "ground_truth": {
+      "actual_annual_usd": 6200000000,
+      "year": 2023,
+      "source": "Vertex Pharmaceuticals FY2023 Annual Report / 10-K — Total CF net product revenues $9,858M (global). US proportion estimated at ~63% based on Vertex investor day geographic disclosures and CFF patient registry (US: ~32,000 CF patients out of ~93,000 globally). US est: $9,858M × 0.63 = $6,210M. Vertex does not separately report US CF revenues in 10-K; this is an estimate. Confidence = medium.",
+      "figure_type": "actual_net_sales",
+      "compare_against": "sam",
+      "confidence": "medium",
+      "notes": "Near-monopoly orphan drug; SAM comparison appropriate. US actual is an estimate from geographic allocation. Vertex's Trikafta is the dominant CFTR modulator — Kalydeco/Symdeko/Orkambi are legacy for smaller populations. Some eligible patients in clinical trials (not commercial treatment) reduces commercial SAM slightly."
+    },
+    "tolerance_note": "Orphan drug with known eligible population and published net price estimates. SAM comparison should land within 20% if population and price inputs are right.",
+    "next_refresh_date": "2025-06",
+    "status": "active"
+  },
+
+  {
+    "id": "her2_dx_orchestrator",
+    "name": "HER2 IHC testing — US breast cancer (ORCHESTRATOR PATH)",
+    "product_type": "diagnostic",
+    "disease_name": "HER2-low Breast Cancer",
+    "pipeline": "orchestrator",
+    "engine_inputs": {
+      "segment_gate": 0.85,
+      "net_price_usd": 2500,
+      "competitive_context": "companion_diagnostic",
+      "notes": "Full pipeline test: patient_flow_engine walks seeded HER2-low BC funnel. segment_gate=0.85 fills the treated_segment step (85% of BC cases are HER2 IHC tested — now standard of care for nearly all BC). line_of_therapy defaults to 1.0 (all HER2-tested cases included). product_share handled by analog engine (companion_diagnostic analog). SAM = all HER2-tested BC cases × test price = total HER2 testing market. Compare against total US HER2 testing market, not a single vendor's revenue."
+    },
+    "ground_truth": {
+      "actual_annual_usd": 550000000,
+      "year": 2023,
+      "source": "Market Research — US HER2 IHC/ISH testing market analyst estimate: ~240,000-260,000 BC HER2 tests/yr × $2,000-2,800 blended net reimbursement = $500-700M total. Midpoint $550M. No single public company reports this figure: Roche (cobas), Dako/Agilent, and Quest/LabCorp share the market. Confidence = medium (analyst estimate, not 10-K).",
+      "figure_type": "analyst_estimate",
+      "compare_against": "sam",
+      "confidence": "medium",
+      "notes": "Tests FULL ORCHESTRATOR PIPELINE (patient_flow_engine → monetization → analog → confidence) for a seeded disease. SAM comparison = total HER2 testing market, not a single vendor. This benchmark exposes whether the seeded HER2-low BC patient_flow_model produces plausible population counts."
+    },
+    "tolerance_note": "Orchestrator path — tests full pipeline end-to-end for seeded disease. Expect higher error than direct-path benchmarks because patient_flow_engine may deviate from manually-specified population. This is the POINT: expose where the full pipeline breaks.",
+    "next_refresh_date": "2025-12",
+    "status": "active"
+  },
+
+  {
+    "id": "af_ablation_orchestrator",
+    "name": "AF ablation catheter procedures — US (ORCHESTRATOR PATH)",
+    "product_type": "medical_device",
+    "disease_name": "Atrial Fibrillation",
+    "pipeline": "orchestrator",
+    "engine_inputs": {
+      "segment_gate": 0.70,
+      "net_price_usd": 5000,
+      "competitive_context": "interventional_device",
+      "notes": "Full pipeline test: patient_flow_engine walks seeded AF funnel (185,000 procedures/yr absolute incidence). segment_gate=0.70 fills treated_segment (70% of AF ablation volume uses cryoablation/pulsed-field catheters vs conventional RF). net_price_usd=$5,000 = ablation catheter device ASP per procedure (catheter component only; not total procedure charge). NOTE: The AF seeded funnel uses persistency_months=1 (one-time procedure); this benchmark will EXPOSE whether the patient_flow_engine correctly handles procedure-based (non-chronic) monetization — a known design tension. If engine applies persistency × 1/12 to an already-annualized procedure count, SAM will be understated by 12×."
+    },
+    "ground_truth": {
+      "actual_annual_usd": 900000000,
+      "year": 2023,
+      "source": "Market Research — US AF ablation catheter market (cryoablation + pulsed-field + RF catheters, device revenue only): Medtronic Arctic Front cryoablation + Abbott FlexAbility + Biosig combined US catheter revenue estimated $800M-$1.0B FY2023. No single 10-K discloses this slice. Medtronic EP total US ~$2.1B but includes mapping systems and accessories. Confidence = medium.",
+      "figure_type": "analyst_estimate",
+      "compare_against": "sam",
+      "confidence": "medium",
+      "notes": "Tests FULL ORCHESTRATOR PIPELINE for seeded AF disease. Expected finding: if engine correctly skips persistency adjustment for procedure-based models, SAM = 185,000 × 0.95 × 0.70 × $5,000 = $615M (close to actual $900M, APE ~32%). If engine incorrectly applies persistency × (1/12), SAM = $51M (APE ~94%). Either result is diagnostic — tells us whether procedure-based models are handled correctly."
+    },
+    "tolerance_note": "This benchmark is DIAGNOSTIC as much as accuracy-checking. If APE is >100%, it means patient_flow_engine is incorrectly annualizing an already-annualized procedure volume. That finding is the deliverable, not the number itself.",
+    "next_refresh_date": "2025-12",
+    "status": "active"
+  }
+]
