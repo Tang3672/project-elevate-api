@@ -38,7 +38,7 @@ class TestLoadWorldModelScoping:
         import asyncio
         from app.services.research_world_model import load_world_model
         # Call with no user_id — must short-circuit to "" without DB access
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             load_world_model("ischemic stroke")  # no user_id
         )
         assert result == "", (

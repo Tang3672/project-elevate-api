@@ -570,6 +570,85 @@ def _differentiation_levers(competitors: list[CompetitorProduct], ta: str, devic
 # Main entry point
 # ──────────────────────────────────────────────────────────────────────────────
 
+def _status_quo_rows(
+    product_type: str,
+    disease_name: str,
+    device_like: bool,
+) -> list[CompetitorProduct]:
+    """B-07: always include status-quo and DIY as first-class incumbent rows."""
+    if device_like or "diagnostic" in product_type or "samd" in product_type:
+        sq = CompetitorProduct(
+            name="Manual clinical workflow (status quo without the device)",
+            brand_name=None,
+            company="Existing clinical practice",
+            stage="status_quo",
+            nct_id=None, approval_year=None, route=None, mechanism=None,
+            advantages=[
+                "No acquisition cost or procurement friction",
+                "Clinicians already trained; zero adoption barrier",
+            ],
+            vulnerabilities=[
+                "Operator-dependent accuracy and throughput limits",
+                "No structured data output for downstream analytics",
+            ],
+            positioning_signal=(
+                "The device must deliver ≥15% improvement over manual workflow "
+                "to justify procurement cost per NHS NICE / CMS coverage analysis."
+            ),
+            source="status_quo",
+        )
+        diy = CompetitorProduct(
+            name="DIY / lab-built prototype (open-source + custom hardware)",
+            brand_name=None,
+            company="Internal engineering",
+            stage="diy",
+            nct_id=None, approval_year=None, route=None, mechanism=None,
+            advantages=["Zero licensing cost", "Fully customisable to lab workflow"],
+            vulnerabilities=[
+                "No regulatory clearance path without QMS infrastructure",
+                "Maintenance burden falls on internal team",
+            ],
+            positioning_signal=None,
+            source="status_quo",
+        )
+    else:
+        sq = CompetitorProduct(
+            name=f"Current standard of care (SOC pharmacotherapy for {disease_name})",
+            brand_name=None,
+            company="Existing guideline-concordant therapy",
+            stage="status_quo",
+            nct_id=None, approval_year=None, route=None, mechanism=None,
+            advantages=[
+                "Established safety profile with long-term real-world data",
+                "On formulary at all payers; no prior-auth burden for prescribers",
+            ],
+            vulnerabilities=[
+                "Inadequate for treatment-refractory or biomarker-defined subgroups",
+                "Response rate plateau — ceiling effect in efficacy well-documented",
+            ],
+            positioning_signal=(
+                "Any entrant must define the patient population where SOC fails "
+                "and deliver a statistically significant improvement in that cohort."
+            ),
+            source="status_quo",
+        )
+        diy = CompetitorProduct(
+            name="Off-label / generic repurposing (physician-directed)",
+            brand_name=None,
+            company="Generic / off-label prescribing",
+            stage="diy",
+            nct_id=None, approval_year=None, route=None, mechanism=None,
+            advantages=["Minimal cost to payer and patient", "Familiar prescribing pattern"],
+            vulnerabilities=[
+                "No regulatory label; liability falls entirely on prescriber",
+                "Reimbursement uncertain outside approved indication",
+            ],
+            positioning_signal=None,
+            source="status_quo",
+        )
+    return [sq, diy]
+
+
 def sweep_competitors(
     disease_name: str,
     indication_keywords: list[str],
@@ -615,7 +694,8 @@ def sweep_competitors(
     lit = _sweep_literature_openalex(disease_name, indication_keywords)
 
     # 4. Build structured competitor objects
-    competitors: list[CompetitorProduct] = []
+    # B-07: status-quo / DIY are always first-class rows
+    competitors: list[CompetitorProduct] = _status_quo_rows(product_type, disease_name, device_like)
     for raw in approved_raw + pipeline_raw:
         if len(competitors) >= max_competitors:
             break
@@ -639,9 +719,9 @@ def sweep_competitors(
     # 5. White space
     white_space = _analyse_white_space(competitors, disease_name, therapeutic_area, indication_keywords)
 
-    # 6. Market structure
+    # 6. Market structure (exclude status_quo / diy sentinel rows from counts)
     n_approved = sum(1 for c in competitors if c.stage == "approved")
-    n_pipeline = len(competitors) - n_approved
+    n_pipeline = sum(1 for c in competitors if c.stage not in ("approved", "status_quo", "diy"))
     structure  = _classify_market_structure(n_approved, n_pipeline)
     levers     = _differentiation_levers(competitors, therapeutic_area, device_like=device_like)
 

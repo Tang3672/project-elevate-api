@@ -178,7 +178,7 @@ class TestResearchToolComparators:
 class TestGatherResearchToolIntel:
 
     def _run(self, coro):
-        return asyncio.get_event_loop().run_until_complete(coro)
+        return asyncio.run(coro)
 
     def test_returns_research_tool_comparators(self):
         result = self._run(_gather_research_tool_intel("neurotech", "research_tool_non_clinical"))
@@ -574,3 +574,63 @@ class TestKolSelectionCriteriaBlock:
     def test_block_includes_pubmed_search_tip(self):
         block = kol_selection_criteria_block("drug_amr", "MRSA")
         assert "PubMed" in block or "pubmed" in block.lower()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# B-07: status-quo / DIY as first-class competitor rows
+# ─────────────────────────────────────────────────────────────────────────────
+
+from app.services.competitor_sweep_service import _status_quo_rows, to_dict
+
+
+class TestB07StatusQuoRows:
+    """
+    B-07: the competitive section must always include status-quo and DIY
+    as first-class rows, not buried in prose or omitted.
+    """
+
+    def _names(self, rows):
+        return [r.name.lower() for r in rows]
+
+    def test_drug_archetype_always_has_two_rows(self):
+        rows = _status_quo_rows("drug_small_molecule", "MRSA infection", device_like=False)
+        assert len(rows) == 2
+
+    def test_drug_status_quo_row_is_first(self):
+        rows = _status_quo_rows("drug_small_molecule", "MRSA infection", device_like=False)
+        assert rows[0].stage == "status_quo"
+
+    def test_drug_diy_row_is_second(self):
+        rows = _status_quo_rows("drug_small_molecule", "MRSA infection", device_like=False)
+        assert rows[1].stage == "diy"
+
+    def test_drug_status_quo_names_disease(self):
+        rows = _status_quo_rows("drug_small_molecule", "MRSA infection", device_like=False)
+        assert "MRSA" in rows[0].name or "mrsa" in rows[0].name.lower()
+
+    def test_device_status_quo_mentions_manual_workflow(self):
+        rows = _status_quo_rows("medical_device", "atrial fibrillation", device_like=True)
+        assert "manual" in rows[0].name.lower() or "workflow" in rows[0].name.lower()
+
+    def test_device_diy_mentions_prototype_or_custom(self):
+        rows = _status_quo_rows("medical_device", "atrial fibrillation", device_like=True)
+        assert "diy" in rows[1].name.lower() or "prototype" in rows[1].name.lower() or "custom" in rows[1].name.lower()
+
+    def test_rows_have_advantages_and_vulnerabilities(self):
+        for product_type, disease, device_like in [
+            ("drug_small_molecule", "MRSA", False),
+            ("medical_device", "AF", True),
+        ]:
+            rows = _status_quo_rows(product_type, disease, device_like)
+            for row in rows:
+                assert len(row.advantages) >= 1, f"No advantages on {row.name}"
+                assert len(row.vulnerabilities) >= 1, f"No vulnerabilities on {row.name}"
+
+    def test_status_quo_rows_serialize_cleanly(self):
+        from dataclasses import asdict
+        rows = _status_quo_rows("drug_small_molecule", "cancer", device_like=False)
+        for row in rows:
+            d = asdict(row)
+            assert "name" in d
+            assert "stage" in d
+            assert d["source"] == "status_quo"

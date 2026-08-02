@@ -232,7 +232,7 @@ class TestFixture1Hublink:
     def test_competitive_intel_returns_comparators_for_research_tool(self):
         import asyncio
         from app.services.competitive_intelligence_service import _gather_research_tool_intel
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             _gather_research_tool_intel("neuroscience", _HUB_SUB_EXPERT_ID)
         )
         comparators = result.get("research_tool_comparators", [])
@@ -246,7 +246,7 @@ class TestFixture1Hublink:
     def test_world_model_returns_empty_without_user_id(self):
         import asyncio
         from app.services.research_world_model import load_world_model
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             load_world_model("neurotech hub wearable")  # no user_id
         )
         assert result == "", (
