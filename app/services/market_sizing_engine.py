@@ -893,3 +893,260 @@ def _fmt(usd: float) -> str:
     if usd >= 1e9:  return f"${usd / 1e9:.1f}B"
     if usd >= 1e6:  return f"${usd / 1e6:.0f}M"
     return f"${usd / 1e3:.0f}K"
+
+
+# ── Initial-vs-eventual indication resolver (Build Spec v3, Part 2) ───────────
+
+_DISEASE_INITIAL_FRACTIONS: dict[str, dict] = {
+    # disease keyword → {fraction, expansion_years, rationale}
+    "acute ischemic stroke": {
+        "fraction": 0.20, "expansion_years": 4,
+        "rationale": "IV-tPA and thrombectomy-eligible patients are ~20% of total stroke incidence at launch (time-window + hospital-access constraints). Label expands as evidence grows.",
+        "basis": "disease_specific",
+        "source": "AHA/ASA stroke guidelines; Albers et al. NEJM 2018 thrombectomy trial enrollment criteria",
+    },
+    "ischemic stroke": {
+        "fraction": 0.22, "expansion_years": 4,
+        "rationale": "Initial indication typically restricted to LVO or tPA-eligible subset.",
+        "basis": "disease_specific",
+        "source": "AHA/ASA 2019 guidelines; NovaSys stroke market model",
+    },
+    "alzheimer": {
+        "fraction": 0.10, "expansion_years": 6,
+        "rationale": "MCI/early-AD diagnostic criteria restrict initial label; biomarker confirmation required (amyloid PET or CSF). Broad population unlocks over multiple label expansions.",
+        "basis": "disease_specific",
+        "source": "FDA Lecanemab approval 2023; Aducanumab label history",
+    },
+    "nsclc": {
+        "fraction": 0.15, "expansion_years": 3,
+        "rationale": "First approval typically in 2L+ or biomarker-defined subset; 1L frontline follows.",
+        "basis": "disease_specific",
+        "source": "FDA approval history for PD-L1 checkpoint inhibitors",
+    },
+    "breast cancer": {
+        "fraction": 0.12, "expansion_years": 3,
+        "rationale": "HER2+ or BRCA-defined subpopulation at launch; broader HER2-low expansion follows.",
+        "basis": "disease_specific",
+        "source": "DESTINY-Breast04; FDA T-DXd label 2022",
+    },
+    "multiple sclerosis": {
+        "fraction": 0.18, "expansion_years": 4,
+        "rationale": "RRMS (relapsing) typically first; PPMS/SPMS label expansions follow.",
+        "basis": "disease_specific",
+        "source": "Ocrelizumab PPMS label expansion 2017; MSIF epidemiology",
+    },
+    "rheumatoid arthritis": {
+        "fraction": 0.25, "expansion_years": 3,
+        "rationale": "MTX-inadequate responders (2L) often first; 1L biologic naive follows.",
+        "basis": "disease_specific",
+        "source": "ACR 2021 RA guidelines; Rinvoq label history",
+    },
+    "atrial fibrillation": {
+        "fraction": 0.30, "expansion_years": 3,
+        "rationale": "Non-valvular AF is the standard initial label; valvular and device-related AF follows.",
+        "basis": "disease_specific",
+        "source": "ESC 2020 AF guidelines; CMS NVAF claims data",
+    },
+    "heart failure": {
+        "fraction": 0.35, "expansion_years": 3,
+        "rationale": "HFrEF (reduced ejection fraction) typically approved first; HFpEF expansion follows.",
+        "basis": "disease_specific",
+        "source": "ACC/AHA 2022 HF guidelines; EMPEROR-Preserved trial",
+    },
+    "type 2 diabetes": {
+        "fraction": 0.40, "expansion_years": 2,
+        "rationale": "Add-on to metformin or standalone after metformin failure is the initial label; obesity co-indication broadens market.",
+        "basis": "disease_specific",
+        "source": "ADA 2023 standards; Ozempic/Wegovy label chronology",
+    },
+    "crohn": {
+        "fraction": 0.30, "expansion_years": 3,
+        "rationale": "Moderate-severe CD with inadequate response to conventional therapy.",
+        "basis": "disease_specific",
+        "source": "ACG 2021 CD guidelines; GEMINI trial populations",
+    },
+}
+
+_TA_DEFAULT_FRACTIONS: dict[str, float] = {
+    "oncology":       0.15,   # FDA oncology: median initial approval is ~15% of total indication
+    "immunology":     0.25,
+    "cardiovascular": 0.30,
+    "metabolic":      0.35,
+    "cns":            0.15,
+    "rare_disease":   0.50,   # orphan indications often capture most of the population at once
+    "gene_therapy":   0.45,
+    "neurology_cns":  0.15,
+    "amr_infectious": 0.30,
+    "infectious":     0.30,
+}
+
+_TA_SPECIALIST_MAP: dict[str, str] = {
+    "oncology":       "Medical oncologist / tumor board",
+    "immunology":     "Rheumatologist / dermatologist / gastroenterologist",
+    "cardiovascular": "Cardiologist / electrophysiologist",
+    "metabolic":      "Endocrinologist / primary care physician",
+    "cns":            "Neurologist / psychiatrist",
+    "neurology_cns":  "Neurologist (stroke / MS / dementia specialist)",
+    "rare_disease":   "Metabolic disease specialist / geneticist",
+    "gene_therapy":   "Gene therapy centre / haematologist",
+    "amr_infectious": "Infectious disease specialist / hospital pharmacist",
+    "infectious":     "Infectious disease specialist",
+    "ibd":            "Gastroenterologist",
+    "hematology":     "Haematologist / BMT specialist",
+    "respiratory":    "Pulmonologist / allergist",
+    "digital_health": "Chief Medical Information Officer / department head",
+}
+
+
+def specialist_for_ta(ta: str) -> str:
+    """Return the prescribing specialist type for a therapeutic area."""
+    ta_low = ta.lower()
+    for key, specialist in _TA_SPECIALIST_MAP.items():
+        if key in ta_low or ta_low in key:
+            return specialist
+    return "Relevant clinical specialist (consult KOL list)"
+
+
+def resolve_initial_indication(disease_name: str, therapeutic_area: str) -> dict:
+    """
+    Return the initial-vs-eventual fraction for a disease at first launch.
+
+    A therapy rarely captures its full addressable market on day one — it launches
+    in a narrow sub-indication (a biomarker-defined subgroup, a disease severity tier,
+    or a specific treatment line) and expands over subsequent label amendments.
+
+    Returns a dict with keys: fraction, rationale, expansion_years, source, basis
+      basis: "disease_specific" | "ta_default" | "global_default"
+    """
+    name_low = disease_name.lower()
+
+    # Disease-specific lookup
+    for disease_key, entry in _DISEASE_INITIAL_FRACTIONS.items():
+        if disease_key in name_low or name_low in disease_key:
+            return {
+                "fraction":        entry["fraction"],
+                "rationale":       entry["rationale"],
+                "expansion_years": entry["expansion_years"],
+                "source":          entry["source"],
+                "basis":           entry["basis"],
+            }
+
+    # TA-level default
+    ta_low = therapeutic_area.lower()
+    for ta_key, fraction in _TA_DEFAULT_FRACTIONS.items():
+        if ta_key in ta_low or ta_low.startswith(ta_key[:4]):
+            return {
+                "fraction":        fraction,
+                "rationale":       (
+                    f"TA default for {therapeutic_area}: first approval typically covers "
+                    f"{fraction:.0%} of the eventual addressable indication. "
+                    "Disease-specific label criteria narrow the initial patient count; "
+                    "label expansions unlock the remaining population over time."
+                ),
+                "expansion_years": 3,
+                "source":          f"FDA median initial approval fraction for {therapeutic_area} (internal calibration)",
+                "basis":           "ta_default",
+            }
+
+    # Global fallback
+    return {
+        "fraction":        0.30,
+        "rationale":       (
+            "No disease- or TA-specific initial indication fraction found. "
+            "Global default of 30% applied — this is conservative and should be "
+            "validated with a KOL familiar with the indication's approval landscape."
+        ),
+        "expansion_years": 3,
+        "source":          "Global default — REVIEW with clinical KOL before citing",
+        "basis":           "global_default",
+    }
+
+
+def segment_initial_indication(segment: dict, approved_population: int) -> dict | None:
+    """
+    Compute a product-specific launch fraction from a segment funnel definition.
+
+    Uses the first 'absolute' gate in the segment funnel as the base population,
+    then expresses approved_population as a fraction of that base.
+
+    Returns None if no absolute gate exists or approved_population <= 0.
+    """
+    if not approved_population or approved_population <= 0:
+        return None
+
+    funnel = segment.get("funnel", [])
+    base_pop = None
+    for gate in funnel:
+        if gate.get("type") == "absolute":
+            base_pop = gate.get("value")
+            break
+
+    if not base_pop or base_pop <= 0:
+        return None
+
+    fraction = approved_population / base_pop
+    return {
+        "fraction":    round(fraction, 4),
+        "basis":       "product_segment",
+        "base_pop":    base_pop,
+        "approved_pop": approved_population,
+        "segment_name": segment.get("segment_name", ""),
+        "rationale":   (
+            f"Product-specific launch population ({approved_population:,}) as fraction of "
+            f"disease base ({base_pop:,}) from segment funnel '{segment.get('segment_name', '')}'. "
+            "This is more precise than a disease-level constant."
+        ),
+        "source": "Segment funnel derivation",
+    }
+
+
+def apply_model_launch_indication(ive: dict, model_output: dict | None) -> dict:
+    """
+    Patch an initial-vs-eventual (IVE) dict with the model's own launch indication.
+
+    When the LLM identifies a specific launch population fraction (e.g., 2L+ KRAS-G12C
+    NSCLC = 5% of all NSCLC), this overrides the disease-prior and becomes the driver.
+
+    Cross-checks: if the model fraction diverges > 50% from the prior, sets
+    prior_divergence_flag = True so the report flags the discrepancy for review.
+
+    Returns ive unchanged if applicable=False or model_output is invalid.
+    """
+    if not ive.get("applicable", True):
+        return ive
+
+    if not model_output or not isinstance(model_output, dict):
+        return ive
+
+    raw = model_output.get("fraction_of_disease")
+    try:
+        frac = float(raw)
+    except (TypeError, ValueError):
+        return ive
+
+    if not (0 < frac < 1.0):
+        return ive
+
+    eventual_tam = ive.get("eventual_market", {}).get("tam_usd", 0)
+    prior_fraction = ive.get("initial_market", {}).get("fraction_of_eventual", None)
+
+    ive = dict(ive)
+    ive["initial_market"] = dict(ive.get("initial_market", {}))
+    ive["initial_market"]["fraction_of_eventual"] = frac
+    ive["initial_market"]["basis"] = "model"
+    ive["initial_market"]["tam_usd"] = round(eventual_tam * frac)
+    if model_output.get("population"):
+        ive["initial_market"]["population"] = model_output["population"]
+    ive["driver"] = "model"
+
+    if model_output.get("verify_with"):
+        ive["verify_with"] = model_output["verify_with"]
+
+    # Cross-check against prior
+    if prior_fraction and prior_fraction > 0:
+        divergence = abs(frac - prior_fraction) / prior_fraction
+        ive["prior_cross_check"] = {"fraction": prior_fraction, "divergence": round(divergence, 3)}
+        if divergence > 0.50:
+            ive["prior_divergence_flag"] = True
+
+    return ive
