@@ -422,7 +422,7 @@ class TestPanelGate:
 
     def _run(self, coro):
         import asyncio
-        return asyncio.get_event_loop().run_until_complete(coro)
+        return asyncio.run(coro)
 
     def test_research_tool_clinical_panel_is_none(self):
         from app.services.expert_panel import run_expert_panel
