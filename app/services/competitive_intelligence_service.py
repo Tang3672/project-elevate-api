@@ -40,7 +40,7 @@ _RESEARCH_TOOL_COMPARATORS: list[dict] = [
     {
         "name":         "ActiGraph (Actigraph LLC)",
         "category":     "Commercial research wearable logger",
-        "description":  "Industry-standard actigraphy and movement data logger used in NIH-funded trials. "
+        "description":  "Industry-standard wearable motion sensing and movement data logger used in NIH-funded trials. "
                         "GT9X Link and CentrePoint platform. Dominant in clinical research; weak at custom firmware.",
         "url":          "https://actigraphcorp.com",
         "incumbent":    True,
@@ -143,7 +143,7 @@ DOMAIN_SEARCH_TERMS = {
     "other_delivery":        {"condition": "drug delivery", "terms": ["nanoparticle", "drug delivery", "lipid nanoparticle"]},
     # Non-clinical research tools — ClinicalTrials.gov is not the right corpus,
     # but include terms so callers can still perform keyword searches if needed.
-    "research_tool_non_clinical":   {"condition": "research data logging wearable", "terms": ["actigraphy", "ambulatory monitoring", "wearable sensor", "data logger", "research platform"]},
+    "research_tool_non_clinical":   {"condition": "research data logging wearable", "terms": ["ambulatory monitoring", "wearable sensor", "data logger", "research platform", "wearable monitoring"]},
     "research_infrastructure_saas": {"condition": "research software platform", "terms": ["lab informatics", "research data management", "device telemetry", "IoT platform"]},
 }
 

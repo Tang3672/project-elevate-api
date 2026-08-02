@@ -1617,7 +1617,7 @@ def _derive_research_tool_formula(
     us_prev: int, signals: dict,
 ) -> "MarketSizingDerivation":
     """
-    Bottom-up TAM for non-clinical research tools (Hublink class).
+    Bottom-up TAM for non-clinical research tools.
 
     Economics derive from the BUYER MODEL, not patient counts:
       TAM = eligible_labs × annualised_spend_per_lab
@@ -1647,7 +1647,7 @@ def _derive_research_tool_formula(
         sam  = tam * 0.30
         som  = sam * 0.15
         pop_src = "NIH RePORTER — estimate pending verification"
-        sp_src  = "Primary research (Gaidica 2026, n=10 PIs)"
+        sp_src  = "Assumed — operator should supply observed spend from primary research ⚠"
 
     steps = [
         DerivationStep(

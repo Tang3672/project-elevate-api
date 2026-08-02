@@ -39,9 +39,9 @@ class PIReportRequest(BaseModel):
     tier1_category: str = Field(default="drug_small_molecule",
         description="drug_small_molecule | biologic | gene_cell_therapy | medical_device | diagnostic | digital_health | vaccine_immunotherapy | other_platform")
     product_name: Optional[str] = Field(default=None,
-        description="Short brand / working name (e.g. 'Hublink'). If omitted, derived from idea text.")
+        description="Short brand / working name (e.g. 'NeuroSense'). If omitted, derived from idea text.")
     institution: Optional[str] = Field(default=None,
-        description="Originating institution (e.g. 'Washington University Neurotech Hub').")
+        description="Originating institution (e.g. 'University of Michigan', 'NIH NIBIB').")
     domain: Optional[str] = Field(default=None,
         description="LIFE_SCIENCES_CLINICAL | LIFE_SCIENCES_RESEARCH | ENGINEERING_HARDWARE | SOFTWARE_INFRASTRUCTURE | ENERGY_CLIMATE | OTHER_DEEP_TECH. Auto-detected if omitted.")
 

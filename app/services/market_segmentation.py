@@ -1,7 +1,7 @@
 """
 Part D: Market Sizing Segmentation Engine
 ==========================================
-Three-method TAM triangulation for life-sciences research (Hublink-type) products.
+Three-method TAM triangulation for life-sciences research products.
 
 Replaces flat sites × price multiplication with a transparent funnel model
 where every number carries a source citation or is explicitly flagged as an
@@ -12,13 +12,13 @@ Segmentation axes — LIFE_SCIENCES_RESEARCH template (spec D.2):
   ├─ Carnegie R1/R2/AMC/national_lab    (retrieved: Carnegie 2021 ≈ 4,100)
   ├─ total labs (HERD survey rate)       (derived: × 8.4 labs/institution)
   ├─ NIH/NSF funding in scope field      (retrieved: NIH RePORTER API)
-  ├─ long-duration instrumented expts    (assumed: 22% ⚠)
-  ├─ low-bandwidth data modality         (assumed: 81% ⚠)
-  ├─ not already custom-solved           (assumed: 63% ⚠)
-  └─ budget authority + cadence-adj.     (derived: 47%)
-     ├─ academic_labs      → $7,000/yr   (Gaidica observed spend)
-     ├─ core_facility      → $20,000/yr
-     └─ site_license       → $45,000/yr
+  ├─ long-duration instrumented expts    (assumed: ⚠ operator must supply)
+  ├─ low-bandwidth data modality         (assumed: ⚠ operator must supply)
+  ├─ not already custom-solved           (assumed: ⚠ operator must supply)
+  └─ budget authority + cadence-adj.     (derived: operator-supplied or assumed)
+     ├─ academic_labs      → price_tier_1  (operator-supplied or assumed ⚠)
+     ├─ core_facility      → price_tier_2
+     └─ site_license       → price_tier_3
 
 Triangulation methods (spec D.3):
   1. Bottom-up:    funnel count × price by tier
@@ -30,7 +30,7 @@ References:
   NSF HERD Survey 2022 — https://www.nsf.gov/statistics/herd/
   NIH RePORTER API v2 — https://api.reporter.nih.gov/v2/projects/search
   NIH Instrumentation budget — ~$2.1B/yr (equipment category, 2022)
-  Gaidica observed lab-software spend — internal 2023 cohort data
+  Price and gate fractions: operator-supplied primary research or assumed defaults ⚠
 """
 
 from __future__ import annotations
@@ -72,7 +72,9 @@ DATA_LOGGING_PLATFORM_FRACTION: float = 0.03   # → ~$63M adjacent TAM
 TOP_DOWN_SHARE_LOW: float  = 0.15
 TOP_DOWN_SHARE_HIGH: float = 0.25
 
-# Gaidica observed spend — NOT enterprise SaaS comparables
+# Default price tiers — assumed ⚠; operator must supply observed spend from primary research.
+# These are order-of-magnitude placeholders calibrated to academic lab budgets.
+# Override via assumption set: method="user_primary_research", source="<your cohort data>"
 PRICE_ACADEMIC_USD:       float = 7_000.0
 PRICE_CORE_FACILITY_USD:  float = 20_000.0
 PRICE_SITE_LICENSE_USD:   float = 45_000.0
@@ -86,7 +88,7 @@ FRAC_BUDGET_AUTH:   float = 0.47  # labs with purchasing authority (cadence-adju
 # Fallback NIH-funded fraction if RePORTER API is unavailable
 FRAC_NIH_FUNDED_FALLBACK: float = 0.62
 
-# Price-tier mix among addressable labs (Gaidica customer cohort data)
+# Price-tier mix among addressable labs — assumed ⚠; operator should supply from their pipeline.
 MIX_ACADEMIC:      float = 0.80
 MIX_CORE_FACILITY: float = 0.15
 MIX_SITE_LICENSE:  float = 0.05
@@ -515,11 +517,11 @@ async def build_life_sciences_research_tree(
     product_name: str = "",
 ) -> SegmentTree:
     """
-    Build the LIFE_SCIENCES_RESEARCH segmentation tree for Hublink-type products.
+    Build the LIFE_SCIENCES_RESEARCH segmentation tree for research-tool products.
 
     Queries NIH RePORTER to count labs with active grants in the relevant domain,
     then applies the D.2 funnel fractions to arrive at addressable labs split by
-    Gaidica price tier.
+    operator-supplied or assumed price tiers.
 
     All assumed fractions are flagged ⚠ and stored on the node with (low, high)
     bounds for Monte Carlo sampling.
@@ -661,9 +663,9 @@ async def build_life_sciences_research_tree(
             method="derived",
             formula=(
                 f"not_custom_solved × {FRAC_BUDGET_AUTH:.0%} "
-                "(PI budget authority rate × annual procurement-cycle overlap, Gaidica data)"
+                "(PI budget authority rate × annual procurement-cycle overlap — assumed ⚠)"
             ),
-            source="Gaidica lab-software sales data — internal estimate 2023",
+            source="Assumed — operator should supply from pipeline or primary research ⚠",
             low=not_custom_labs * 0.35,
             high=not_custom_labs * 0.62,
             confidence=0.55,
@@ -678,9 +680,9 @@ async def build_life_sciences_research_tree(
             method="derived",
             formula=(
                 f"budget_authority_labs × {MIX_ACADEMIC:.0%} "
-                "(tier mix from Gaidica customer cohort)"
+                "(tier mix — assumed ⚠; operator should supply from pipeline data)"
             ),
-            source="Gaidica observed customer spend 2023",
+            source="Assumed — operator should supply observed price-tier mix ⚠",
             low=addressable_labs * 0.65,
             high=addressable_labs * 0.90,
             confidence=0.60,
@@ -696,9 +698,9 @@ async def build_life_sciences_research_tree(
             method="derived",
             formula=(
                 f"budget_authority_labs × {MIX_CORE_FACILITY:.0%} "
-                "(tier mix from Gaidica customer cohort)"
+                "(tier mix — assumed ⚠; operator should supply from pipeline data)"
             ),
-            source="Gaidica observed customer spend 2023",
+            source="Assumed — operator should supply observed price-tier mix ⚠",
             low=addressable_labs * 0.08,
             high=addressable_labs * 0.22,
             confidence=0.55,
@@ -714,9 +716,9 @@ async def build_life_sciences_research_tree(
             method="derived",
             formula=(
                 f"budget_authority_labs × {MIX_SITE_LICENSE:.0%} "
-                "(tier mix from Gaidica customer cohort)"
+                "(tier mix — assumed ⚠; operator should supply from pipeline data)"
             ),
-            source="Gaidica observed customer spend 2023",
+            source="Assumed — operator should supply observed price-tier mix ⚠",
             low=addressable_labs * 0.02,
             high=addressable_labs * 0.10,
             confidence=0.50,
@@ -801,7 +803,7 @@ def triangulate(tree: SegmentTree) -> TriangulationResult:
         "description": (
             "Funnel: Carnegie institutions → HERD labs → NIH-funded → "
             "long-duration → low-bandwidth → not custom-solved → "
-            "budget authority; split by Gaidica price tiers."
+            "budget authority; split by operator-supplied or assumed price tiers."
         ),
     }
 

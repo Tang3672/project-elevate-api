@@ -326,7 +326,7 @@ def kol_selection_criteria_block(sub_expert_id: str = "", disease_name: str = ""
         ]
         start_tip = (
             f"Start with: PubMed search for ({disease_name or 'target area'}[MeSH] AND "
-            "(wearable OR actigraphy OR ambulatory monitoring OR data logging)[Title/Abstract]) "
+            "(wearable OR ambulatory monitoring OR data logging OR passive sensing)[Title/Abstract]) "
             "filtered to last 5 years."
         )
     else:
