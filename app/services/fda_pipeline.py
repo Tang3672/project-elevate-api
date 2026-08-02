@@ -392,7 +392,7 @@ def _summarize_competitive_intelligence(pipeline: dict, fda: list, completed: li
 def format_competitive_intelligence_for_report(ci: Dict) -> str:
     """
     Format competitive intelligence for injection into the Researcher's context.
-    This is what makes Project Elevate's reports fundamentally different from ChatGPT.
+    This is what makes Medlevate's reports fundamentally different from ChatGPT.
     """
     pipeline  = ci.get("trial_pipeline", {})
     trials    = pipeline.get("active_trials", [])

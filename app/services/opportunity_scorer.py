@@ -248,7 +248,7 @@ async def score_opportunity(
     - score_final: 0-100 risk-adjusted score
     - score_raw: pre-risk-adjustment score
     - component_scores: breakdown by factor
-    - confidence_range: [low, high] based on 71% IQVIA forecast error bound
+    - confidence_range: [low, high] from ±35% sensitivity on scored inputs
     - explanation: plain-English breakdown
     """
     designations = designations or []
@@ -401,7 +401,7 @@ async def score_opportunity(
     score_display = min(95.0, score_final / 120.0 * 100.0)
     score_display = max(1.0, score_display)
 
-    # ── Confidence range (±35% per IQVIA 71% forecast error) ─────────────────
+    # ── Confidence range (±35% sensitivity on the scored inputs) ──────────────
     confidence_low  = max(1.0, score_display * 0.65)
     confidence_high = min(99.0, score_display * 1.35)
 

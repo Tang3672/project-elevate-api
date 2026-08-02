@@ -44,7 +44,7 @@ AMR_EXPERT = ExpertProfile(
         "absssi", "habp", "vabp", "ciai", "cuti",
         "qidp", "gain act", "lpad", "carb-x", "barda", "pasteur",
     ],
-    system_prompt = """You are the Antibiotic and Antimicrobial Resistance (AMR) Expert for Project Elevate.
+    system_prompt = """You are the Antibiotic and Antimicrobial Resistance (AMR) Expert for Medlevate.
 
 You have deep expertise in:
 - Resistance mechanisms: KPC, NDM, OXA-48, VIM carbapenemases; MRSA PBP2a; VRE VanA/VanB; ESBL CTX-M
@@ -147,7 +147,7 @@ ONCOLOGY_EXPERT = ExpertProfile(
         "tumor microenvironment", "tme", "solid tumor", "liquid biopsy",
         "nct", "clinical oncology", "nci", "seer",
     ],
-    system_prompt = """You are the Oncology Expert for Project Elevate.
+    system_prompt = """You are the Oncology Expert for Medlevate.
 
 You have deep expertise in:
 - Cancer biology: solid tumors, hematologic malignancies, tumor microenvironment, resistance mechanisms
@@ -249,7 +249,7 @@ CARDIOLOGY_EXPERT = ExpertProfile(
         "cardiac monitoring", "remote patient monitoring",
         "echocardiogram", "echo", "cardiac imaging",
     ],
-    system_prompt = """You are the Cardiology Expert for Project Elevate.
+    system_prompt = """You are the Cardiology Expert for Medlevate.
 
 You have deep expertise in:
 - Heart failure: HFrEF (EF<40%), HFmrEF (40-50%), HFpEF (>50%) — distinct market segments with different treatment approaches
@@ -351,7 +351,7 @@ NEURO_EXPERT = ExpertProfile(
         "gene therapy", "rnai", "antisense oligonucleotide", "aso",
         "blood brain barrier", "bbb",
     ],
-    system_prompt = """You are the Neurology and CNS Expert for Project Elevate.
+    system_prompt = """You are the Neurology and CNS Expert for Medlevate.
 
 You have deep expertise in:
 - CNS drug development challenges: blood-brain barrier penetration, biomarker development, long trial durations, placebo effect management
@@ -451,7 +451,7 @@ METABOLIC_EXPERT = ExpertProfile(
         "endocrine", "endocrinology", "hormone",
         "rural", "access", "underserved", "telehealth diabetes",
     ],
-    system_prompt = """You are the Metabolic and Diabetes Expert for Project Elevate.
+    system_prompt = """You are the Metabolic and Diabetes Expert for Medlevate.
 
 You have deep expertise in:
 - T2D drug classes: GLP-1 RAs (semaglutide, liraglutide, tirzepatide GIP/GLP-1 dual), SGLT2i, DPP-4i, sulfonylureas, insulin analogs, metformin
@@ -551,7 +551,7 @@ MENTAL_HEALTH_EXPERT = ExpertProfile(
         "telepsychiatry", "telemental health",
         "shortage", "rural mental health", "access",
     ],
-    system_prompt = """You are the Mental Health Expert for Project Elevate.
+    system_prompt = """You are the Mental Health Expert for Medlevate.
 
 You have deep expertise in:
 - Major depressive disorder (MDD): SSRIs, SNRIs, TCAs, MAOIs, bupropion, mirtazapine, esketamine/Spravato (first IV antidepressant — intranasal, REMS required), gepirone (most recent 2023 approval)

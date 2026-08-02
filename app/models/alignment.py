@@ -26,6 +26,21 @@ class ProductType(str, Enum):
     OTHER          = "other"
 
 
+class ReportDomain(str, Enum):
+    """Top-level domain gate. Controls which section libraries are active.
+    Only LIFE_SCIENCES_CLINICAL unlocks disease burden, FDA pathway, payer sections.
+    Everything else uses the general commercialization spine.
+    """
+    LIFE_SCIENCES_CLINICAL  = "LIFE_SCIENCES_CLINICAL"   # therapeutics, devices, diagnostics
+    LIFE_SCIENCES_RESEARCH  = "LIFE_SCIENCES_RESEARCH"   # research tools, reagents, lab infra
+    ENGINEERING_HARDWARE    = "ENGINEERING_HARDWARE"
+    SOFTWARE_INFRASTRUCTURE = "SOFTWARE_INFRASTRUCTURE"
+    MATERIALS_CHEMICAL      = "MATERIALS_CHEMICAL"
+    ENERGY_CLIMATE          = "ENERGY_CLIMATE"
+    AGRICULTURE_FOOD        = "AGRICULTURE_FOOD"
+    OTHER_DEEP_TECH         = "OTHER_DEEP_TECH"
+
+
 # ── Market Sizing ─────────────────────────────────────────────────────────────
 
 class MarketSizingStep(BaseModel):
@@ -35,6 +50,39 @@ class MarketSizingStep(BaseModel):
     source:      str
     source_url:  Optional[str] = None
     notes:       Optional[str] = None
+
+
+# ── Part E: Assumption Ledger ─────────────────────────────────────────────────
+
+class AssumptionSource(str, Enum):
+    LLM_GENERATED   = "llm_generated"    # Claude produced it from training data
+    RETRIEVED        = "retrieved"        # came from a live API / retrieval call
+    USER_OVERRIDE    = "user_override"    # PI explicitly provided or overrode it
+    FALLBACK_DEFAULT = "fallback_default" # safe default used when no data available
+
+
+class Assumption(BaseModel):
+    """A single quantified market assumption with its provenance."""
+    key:           str                          # e.g. "us_pi_count", "annual_price_usd"
+    label:         str                          # human-readable name
+    value:         float                        # numeric value (unit in `unit` field)
+    unit:          str                          # e.g. "USD", "labs", "% market share"
+    source:        AssumptionSource
+    source_detail: Optional[str] = None        # "NIH RePORTER 2024" or URL
+    confidence:    Optional[str] = None        # "low" | "medium" | "high"
+    note:          Optional[str] = None        # any relevant caveat
+    sensitivity_rank: Optional[int] = None     # 1 = highest sensitivity driver
+    override_value: Optional[float] = None     # if user_override, original LLM value
+    overridden_at: Optional[str] = None        # ISO timestamp of override
+
+
+class AssumptionLedger(BaseModel):
+    """Complete set of quantified assumptions underlying the market sizing."""
+    assumptions:    List[Assumption] = Field(default_factory=list)
+    generated_at:   Optional[str] = None       # ISO timestamp
+    last_modified:  Optional[str] = None       # ISO timestamp of last user override
+    override_count: int = 0                    # how many user overrides applied
+    version_hash:   Optional[str] = None       # E.4: SHA-256 of ledger state at last save
 
 
 class MarketSizingCalculation(BaseModel):
@@ -196,6 +244,9 @@ class PIReport(BaseModel):
     commercialization_scores: Optional[dict] = None # probabilistic decision engine block (P5)
     expert_panel:           Optional[dict] = None   # structured 3-panel MoE outputs, for UI visibility
     report_id:              Optional[str]  = None    # stable id for feedback/outcome linkage (P11)
+    product_name:           Optional[str]  = None    # F-01: dedicated intake field, not taxonomy
+    institution:            Optional[str]  = None    # F-01: "Washington University Neurotech Hub"
+    domain:                 Optional[str]  = None    # C.2: LIFE_SCIENCES_CLINICAL | LIFE_SCIENCES_RESEARCH | …
     portfolio_benchmark:    Optional[dict] = None    # institution-level percentile + comparables (P7)
     routing_plan:           Optional[dict] = None     # cost-aware specialist routing plan (P3)
     grounded_context:       Optional[list] = None      # retrieved facts used by synthesis, for trust judging
@@ -206,6 +257,22 @@ class PIReport(BaseModel):
     routing_method:         Optional[str]  = None
     mismatch_warning:       Optional[str]  = None
     sources:                List[dict]     = Field(default_factory=list)   # all cited sources with URLs
+    # ── P1 strategic sections (S-01 … S-09) ──────────────────────────────────
+    evidence_base:          Optional[dict] = None   # S-01 evidence quality + gap block
+    value_driver_ranking:   List[dict]    = Field(default_factory=list)   # S-02
+    segment_fit_table:      List[dict]    = Field(default_factory=list)   # S-03 (≥1 Explicit non-target)
+    feature_investment_posture: List[dict] = Field(default_factory=list) # S-04 (≥1 Exclude)
+    pricing_model_analysis: Optional[dict] = None   # S-05 two-table trade-off
+    adversarial_review:     List[dict]    = Field(default_factory=list)   # S-06 critic pass
+    positioning_statement:  Optional[str] = None    # S-07 (must include "not" clause)
+    strategic_risks:        List[str]     = Field(default_factory=list)   # S-08
+    guiding_question:       Optional[str] = None    # S-09
+    archetype_violations:   Optional[list] = None   # H-01 banned-vocab hits
+    run_manifest:           Optional[dict] = None   # B-05: model/temp/routing metadata for reproducibility
+    assumption_ledger:      Optional["AssumptionLedger"] = None  # Part E: quantified market assumptions
+    segmentation_tree:      Optional[dict] = None   # D.1: full SegmentNode tree as dict
+    triangulation:          Optional[dict] = None   # D.3: three methods + reconciliation
+    sensitivity:            Optional[list] = None   # D.7: ranked sensitivity parameters
 
 
 # ── Legacy AlignmentReport (kept for backward compat) ─────────────────────────

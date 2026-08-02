@@ -26,6 +26,7 @@ from app.services.expert_profiles import (
     ExpertProfile, EXPERT_REGISTRY, get_all_keywords, get_expert
 )
 from app.services.expert_profiles_v2 import get_sub_expert, SubExpertProfile
+from app.services.product_archetype import ProductArchetype, resolve_archetype
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +50,7 @@ class RouterResult:
     sub_expert:        Optional[SubExpertProfile] = None
     sub_expert_id:     Optional[str] = None   # e.g. "digital_cds", "device_neurology"
     modality:          Optional[str] = None   # tier1_category, e.g. "digital_health"
+    archetype:         ProductArchetype = ProductArchetype.UNKNOWN
 
 
 ROUTER_SYSTEM = """You are a precision medical domain classifier for a Mixture-of-Experts system. Given a healthcare innovation, classify it into exactly ONE subcategory from the list below. Be specific — choose the most granular match, not the broadest.
@@ -112,6 +114,14 @@ PLATFORMS:
 - other_microbiome: live biotherapeutic products (LBPs), microbiome modulation, FMT
 - other_delivery: novel drug delivery platforms (LNPs, nanoparticles, antibody conjugates excluding ADCs)
 
+RESEARCH TOOLS & NON-CLINICAL INFRASTRUCTURE:
+- research_tool_non_clinical: data logging hardware/software, sync platforms, experimental recording systems, lab wearables, or hardware sold ONLY to academic PIs/labs for research — NOT clinical care. No clinical indication. Buyers are PIs, core facilities, TTOs. Examples: Hublink, Open Ephys, ActiGraph (research tier), Movisens, LabArchives. If the buyer is an academic PI and there is no clinical claim, classify here even if it involves sensors or remote data collection.
+- research_infrastructure_saas: LIMS, ELN, scheduling software, data management platforms, TTOmanagement tools sold to academic institutions or research departments. No clinical indication.
+
+CRITICAL DISAMBIGUATION — digital_rpm vs research_tool_non_clinical:
+- digital_rpm: sold to HOSPITALS or CLINICIANS for patient monitoring with a reimbursement pathway (CPT 99453-99458). Clinical indication required.
+- research_tool_non_clinical: sold to academic LABS or PIs for research data collection. No clinical pathway. If in doubt and the buyer is a PI or research group, choose research_tool_non_clinical.
+
 Respond ONLY with valid JSON (no explanation outside JSON):
 {"domain": "<domain_id>", "confidence": <0.0-1.0>, "reasoning": "<one sentence explaining key classification signals>"}
 
@@ -136,10 +146,11 @@ async def classify_with_claude(idea: str) -> tuple[str, str, float, str]:
                     "content-type":      "application/json",
                 },
                 json={
-                    "model":      ROUTER_MODEL,
-                    "max_tokens": 150,
-                    "system":     ROUTER_SYSTEM,
-                    "messages":   [{"role": "user", "content": f"Classify this healthcare innovation:\n\n{idea[:1000]}"}],
+                    "model":       ROUTER_MODEL,
+                    "max_tokens":  150,
+                    "temperature": 0,
+                    "system":      ROUTER_SYSTEM,
+                    "messages":    [{"role": "user", "content": f"Classify this healthcare innovation:\n\n{idea[:1000]}"}],
                 }
             )
             r.raise_for_status()
@@ -210,6 +221,20 @@ _ROUTER_KEYWORD_MAP: dict[str, list[str]] = {
     "other_crispr":           ["crispr","cas9","base editor","prime editor","crispr tool","gene editing platform","beam therapeutics","prime medicine"],
     "other_microbiome":       ["microbiome","live biotherapeutic","lbp","fmt","fecal transplant","gut bacteria","microbiota","seres","ferring rebiotix"],
     "other_delivery":         ["lnp platform","lipid nanoparticle","nanoparticle delivery","drug delivery platform","targeted delivery","antibody conjugate non-adc"],
+    "research_tool_non_clinical": [
+        "data logger","data logging","sync platform","research platform","lab infrastructure",
+        "open ephys","recording system","experimental hardware","actiwatch","actigraph research",
+        "movisens","empatica research","hublink","neurotech hub","academic pi buyer",
+        "per-lab license","nih grant funded","long-duration recording","unattended recording",
+        "field research hardware","iot research","pi market","research data platform",
+        "lab software","research wearable","ecophysiology","animal research sensor",
+        "research tool","not clinical","non-clinical","lab management software",
+    ],
+    "research_infrastructure_saas": [
+        "lims","laboratory information management","eln","electronic lab notebook",
+        "research scheduling","tto software","tech transfer software","lab notebook",
+        "sample tracking","research data management","rdm platform","institutional repository",
+    ],
 }
 
 # Mapping from router domain IDs to sub_expert_id in expert_profiles_v2
@@ -257,6 +282,8 @@ _ROUTER_TO_EXPERT: dict[str, str] = {
     "other_crispr":                "other_crispr",
     "other_microbiome":            "other_microbiome",
     "other_delivery":              "other_delivery",
+    "research_tool_non_clinical":  "research_tool_non_clinical",
+    "research_infrastructure_saas": "research_infrastructure_saas",
 }
 
 
@@ -330,6 +357,28 @@ async def route(
     sub_expert_id, claude_domain, confidence, reasoning = await classify_with_claude(idea)
     logger.info(f"Claude classified: sub_expert={sub_expert_id} top_level={claude_domain} (confidence={confidence:.2f})")
 
+    # H-01 lightweight guard: Haiku occasionally misclassifies research data platforms
+    # as digital_rpm (both involve "wearable sensors" and "remote"). Check for
+    # non-clinical research signals that rule out a clinical RPM product.
+    if sub_expert_id in ("digital_rpm", "digital_cds", "digital_therapeutic"):
+        _CLINICAL_SIGNALS = ("patient", "clinical", "hospital", "physician", "clinician",
+                             "reimburs", "cpt ", "medicare", "medicaid", "ehr", "emr",
+                             "payer", "insurance", "billing", "inpatient", "outpatient",
+                             "diagnosis", "treatment", "therapy", "drug", "dose")
+        _research_kws = _ROUTER_KEYWORD_MAP.get("research_tool_non_clinical", [])
+        idea_l = idea.lower()
+        _has_research = any(k in idea_l for k in _research_kws)
+        _has_clinical = any(k in idea_l for k in _CLINICAL_SIGNALS)
+        if _has_research and not _has_clinical:
+            logger.info(
+                "H-01: %s overridden → research_tool_non_clinical "
+                "(research signals present, no clinical signals in idea text)", sub_expert_id
+            )
+            sub_expert_id = "research_tool_non_clinical"
+            claude_domain = _coerce_to_registry(sub_expert_id)
+            confidence    = min(confidence, 0.75)
+            reasoning     = f"Corrected from {sub_expert_id}: non-clinical research-tool signals, no patient/clinical signals."
+
     # Routing logic — reconciles the PI-selected top-level disease domain with Claude.
     if pi_domain == "auto":
         # Pure Claude classification
@@ -367,6 +416,9 @@ async def route(
         logger.warning(f"No v2 sub-expert for '{sub_expert_id}' — using v1 expert '{final_domain}'")
     modality = getattr(sub_expert, "tier1_category", None)
 
+    archetype = resolve_archetype(sub_expert_id or "")
+    logger.info("ProductArchetype resolved: %s (sub_expert=%s)", archetype.value, sub_expert_id)
+
     return RouterResult(
         domain_id         = final_domain,
         expert            = expert,
@@ -378,4 +430,5 @@ async def route(
         sub_expert        = sub_expert,
         sub_expert_id     = sub_expert_id,
         modality          = modality,
+        archetype         = archetype,
     )

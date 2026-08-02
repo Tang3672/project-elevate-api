@@ -11,15 +11,99 @@ Runs in parallel with main report generation.
 """
 
 import asyncio
+import json
 import logging
+import os
 from typing import Dict, List, Optional
 import httpx
 
 logger = logging.getLogger(__name__)
 
-CLINICAL_TRIALS_URL = "https://clinicaltrials.gov/api/v2/studies"
-FDA_DRUGS_URL       = "https://api.fda.gov/drug/drugsfda.json"
-TIMEOUT             = 15.0
+CLINICAL_TRIALS_URL  = "https://clinicaltrials.gov/api/v2/studies"
+FDA_DRUGS_URL        = "https://api.fda.gov/drug/drugsfda.json"
+TIMEOUT              = 15.0
+
+# H-04: relevance gate constants
+_HAIKU_MODEL         = "claude-haiku-4-5-20251001"
+_ANTHROPIC_API_URL   = "https://api.anthropic.com/v1/messages"
+_RELEVANCE_THRESHOLD = 6   # 0-10 Haiku judge score; comparators below this are dropped
+_MIN_COMPARATORS     = 3   # fewer than this and we emit the honest empty-state
+
+_RESEARCH_TOOL_ARCHETYPES: frozenset[str] = frozenset({
+    "research_tool_non_clinical",
+    "research_infrastructure_saas",
+})
+
+# For non-clinical research tools, ClinicalTrials.gov and FDA drugs@FDA are the
+# wrong corpora.  Return a canned list of genuine functional comparators instead.
+_RESEARCH_TOOL_COMPARATORS: list[dict] = [
+    {
+        "name":         "ActiGraph (Actigraph LLC)",
+        "category":     "Commercial research wearable logger",
+        "description":  "Industry-standard actigraphy and movement data logger used in NIH-funded trials. "
+                        "GT9X Link and CentrePoint platform. Dominant in clinical research; weak at custom firmware.",
+        "url":          "https://actigraphcorp.com",
+        "incumbent":    True,
+    },
+    {
+        "name":         "Empatica EmbracePlus (research tier)",
+        "category":     "Research wearable + cloud data pipeline",
+        "description":  "FDA-cleared as medical but also sold to academic researchers under a research-tier license. "
+                        "Strong in CNS/epilepsy research. REST API for data export.",
+        "url":          "https://www.empatica.com/embraceplus/",
+        "incumbent":    False,
+    },
+    {
+        "name":         "Movisens Move4 / EcgMove4",
+        "category":     "Research sensor + movisensXS software",
+        "description":  "German research-grade wearable sensor platform for ambulatory monitoring. "
+                        "Strong in European academic research networks. Per-device one-time license.",
+        "url":          "https://www.movisens.com",
+        "incumbent":    False,
+    },
+    {
+        "name":         "Golioth IoT platform",
+        "category":     "Cloud infrastructure for embedded device fleets",
+        "description":  "Firmware OTA + device telemetry platform for custom embedded devices. "
+                        "Competes on device-fleet management for labs that build their own hardware.",
+        "url":          "https://golioth.io",
+        "incumbent":    False,
+    },
+    {
+        "name":         "Blues Wireless (Notecard)",
+        "category":     "Low-power cellular data logging module",
+        "description":  "Cellular IoT module with pre-paid global data for sensor telemetry. "
+                        "Competes when the lab needs offline → cloud data transport without WiFi.",
+        "url":          "https://blues.com",
+        "incumbent":    False,
+    },
+    {
+        "name":         "Memfault",
+        "category":     "Embedded device monitoring & crash analytics",
+        "description":  "Device observability platform: crash reporting, OTA, and metrics for embedded devices. "
+                        "Competes on lab-built device fleets that need telemetry without a data scientist.",
+        "url":          "https://memfault.com",
+        "incumbent":    False,
+    },
+    {
+        "name":         "DIY / Status quo (SD-card + lab scripts)",
+        "category":     "Status quo — no commercial product",
+        "description":  "Most academic neurotech labs write custom Python/MATLAB scripts and store data on SD cards "
+                        "or lab-managed servers. Zero direct cost; high researcher time cost. The dominant incumbent.",
+        "url":          "",
+        "incumbent":    True,
+    },
+]
+
+# Honest empty-state text by archetype — emitted when the wrong corpus is queried
+_HONEST_EMPTY_STATE: dict[str, str] = {
+    "research_tool_non_clinical": (
+        "No functional comparators were identified through ClinicalTrials.gov or FDA drugs@FDA "
+        "(these databases index clinical-use regulated products and are not the correct corpus "
+        "for a non-clinical research data-logging platform). "
+        "Genuine functional comparators are commercial research tools (see above), not FDA-regulated devices."
+    ),
+}
 
 
 # ── DOMAIN → SEARCH TERMS MAPPING ────────────────────────────────────────────
@@ -57,6 +141,10 @@ DOMAIN_SEARCH_TERMS = {
     "other_microbiome":      {"condition": "microbiome disorder", "terms": ["microbiome", "FMT", "probiotic therapeutic"]},
     "other_crispr":          {"condition": "genetic disease", "terms": ["CRISPR", "gene editing", "base editing"]},
     "other_delivery":        {"condition": "drug delivery", "terms": ["nanoparticle", "drug delivery", "lipid nanoparticle"]},
+    # Non-clinical research tools — ClinicalTrials.gov is not the right corpus,
+    # but include terms so callers can still perform keyword searches if needed.
+    "research_tool_non_clinical":   {"condition": "research data logging wearable", "terms": ["actigraphy", "ambulatory monitoring", "wearable sensor", "data logger", "research platform"]},
+    "research_infrastructure_saas": {"condition": "research software platform", "terms": ["lab informatics", "research data management", "device telemetry", "IoT platform"]},
 }
 
 # ── SPECIAL STRATEGIES BY DOMAIN ─────────────────────────────────────────────
@@ -326,49 +414,214 @@ async def get_fda_precedents(disease_name: str, sub_expert_id: str) -> Dict:
     return results
 
 
+# ── H-04: RELEVANCE GATE ─────────────────────────────────────────────────────
+
+async def _score_comparator_relevance(
+    product_desc: str,
+    comparator_name: str,
+    comparator_desc: str,
+    archetype: str = "",
+) -> int:
+    """
+    Call Haiku to score functional substitutability between the focal product
+    and a comparator on a 0–10 scale. Returns -1 on failure (caller treats as unknown).
+    """
+    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        return -1
+    system = (
+        "You are a biomedical competitive intelligence analyst. "
+        "Score the degree to which a comparator is a functional substitute or direct competitor "
+        "for the focal product on a scale of 0–10. "
+        "0 = completely unrelated, 10 = near-identical substitutes. "
+        "Respond with ONLY valid JSON: {\"score\": N, \"reason\": \"one sentence\"}. "
+        "No other text."
+    )
+    user = (
+        f"Focal product: {product_desc[:300]}\n"
+        f"Archetype: {archetype}\n"
+        f"Comparator: {comparator_name} — {comparator_desc[:300]}\n"
+        "What is the functional substitutability score (0-10)?"
+    )
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            r = await client.post(
+                _ANTHROPIC_API_URL,
+                headers={
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json={
+                    "model": _HAIKU_MODEL,
+                    "max_tokens": 80,
+                    "system": system,
+                    "messages": [{"role": "user", "content": user}],
+                },
+            )
+            r.raise_for_status()
+            text = r.json()["content"][0]["text"]
+            parsed = json.loads(text)
+            score = int(parsed.get("score", -1))
+            return max(0, min(10, score))
+    except Exception as _e:
+        logger.debug("Relevance judge failed for '%s': %s", comparator_name[:40], _e)
+        return -1
+
+
+async def _filter_trials_by_relevance(
+    trials: list,
+    product_desc: str,
+    archetype: str = "",
+) -> tuple[list, list]:
+    """
+    Score each trial for relevance to the focal product.
+    Returns (passed, dropped) where passed are those scoring ≥ _RELEVANCE_THRESHOLD.
+    Trials whose score is -1 (judge call failed) are kept (fail open).
+    """
+    if not trials or not product_desc:
+        return trials, []
+
+    tasks = [
+        _score_comparator_relevance(
+            product_desc,
+            t.get("title", "")[:120],
+            f"Phase {t.get('phase','')} trial for {t.get('condition','')} by {t.get('sponsor','')}",
+            archetype,
+        )
+        for t in trials
+    ]
+    scores = await asyncio.gather(*tasks, return_exceptions=True)
+
+    passed, dropped = [], []
+    for trial, score in zip(trials, scores):
+        s = score if isinstance(score, int) else -1
+        if s < 0 or s >= _RELEVANCE_THRESHOLD:   # -1 = unknown → keep (fail open)
+            passed.append(trial)
+        else:
+            dropped.append(trial)
+            logger.debug(
+                "H-04 relevance gate: dropped trial '%s' (score=%d < %d)",
+                trial.get("title", "")[:60], s, _RELEVANCE_THRESHOLD,
+            )
+    return passed, dropped
+
+
+async def _gather_research_tool_intel(disease_name: str, sub_expert_id: str) -> Dict:
+    """
+    For non-clinical research tool archetypes: skip ClinicalTrials.gov and FDA
+    (wrong corpora), return the static comparator list with an honest explanation.
+    """
+    archetype_note = _HONEST_EMPTY_STATE.get("research_tool_non_clinical", "")
+    return {
+        "competitor_trials":    {"trials": [], "total_found": 0, "corpus_note": archetype_note},
+        "fda_precedents":       {"approvals": [], "corpus_note": archetype_note},
+        "research_tool_comparators": _RESEARCH_TOOL_COMPARATORS,
+        "strategic_playbook":   _DEFAULT_STRATEGIES,
+        "honest_empty_state":   archetype_note,
+    }
+
+
 # ── MAIN INTELLIGENCE GATHERER ────────────────────────────────────────────────
 
 async def gather_competitive_intelligence(
     disease_name: str,
     sub_expert_id: str,
+    product_desc: str = "",   # H-04: used by relevance judge; defaults to disease_name
 ) -> Dict:
     """
     Run all intelligence gathering in parallel.
     Returns combined dict with trials, FDA precedents, and strategies.
+
+    H-04: research_tool archetypes skip ClinicalTrials.gov/FDA (wrong corpora)
+    and get a static comparator list instead. Other archetypes apply a Haiku
+    relevance gate (score ≥ 6/10) with an honest empty state if <3 pass.
     """
+    # H-04: short-circuit for non-clinical research tools
+    _arch = (sub_expert_id or "").lower()
+    if any(_arch == rt or _arch.startswith(rt) for rt in _RESEARCH_TOOL_ARCHETYPES):
+        logger.info("H-04: research tool archetype '%s' — skipping CT.gov/FDA, returning research tool comparators", _arch)
+        return await _gather_research_tool_intel(disease_name, sub_expert_id)
+
+    # Standard path: query ClinicalTrials.gov + FDA in parallel
     trials_task = get_competitor_trials(disease_name, sub_expert_id)
     fda_task    = get_fda_precedents(disease_name, sub_expert_id)
-    
+
     trials_data, fda_data = await asyncio.gather(
         trials_task, fda_task,
         return_exceptions=True
     )
-    
+
     if isinstance(trials_data, Exception):
-        logger.warning(f"Trials fetch failed: {trials_data}")
+        logger.warning("Trials fetch failed: %s", trials_data)
         trials_data = {"trials": [], "total_found": 0}
-    
+
     if isinstance(fda_data, Exception):
-        logger.warning(f"FDA fetch failed: {fda_data}")
+        logger.warning("FDA fetch failed: %s", fda_data)
         fda_data = {"approvals": []}
-    
+
+    # H-04: apply relevance gate to trials
+    _desc = product_desc or disease_name
+    _trials_raw = trials_data.get("trials", [])
+    _honest_empty = ""
+    if _trials_raw and _desc:
+        try:
+            _passed, _dropped = await _filter_trials_by_relevance(_trials_raw, _desc, _arch)
+            if len(_passed) < _MIN_COMPARATORS and _dropped:
+                logger.info(
+                    "H-04 relevance gate: %d/%d trials passed for '%s' (threshold %d/10)",
+                    len(_passed), len(_trials_raw), disease_name, _RELEVANCE_THRESHOLD,
+                )
+                if len(_passed) < _MIN_COMPARATORS:
+                    _honest_empty = (
+                        f"Automated retrieval from ClinicalTrials.gov returned {len(_trials_raw)} result(s) "
+                        f"but only {len(_passed)} scored ≥{_RELEVANCE_THRESHOLD}/10 on functional substitutability. "
+                        "No functional comparators were identified through automated retrieval. "
+                        "Manual competitive landscape research recommended."
+                    )
+            trials_data = {"trials": _passed, "total_found": len(_passed), "dropped_count": len(_dropped)}
+        except Exception as _rg_e:
+            logger.warning("H-04 relevance gate failed (non-fatal): %s", _rg_e)
+
     strategies = DOMAIN_STRATEGIES.get(sub_expert_id, _DEFAULT_STRATEGIES)
-    
-    return {
-        "competitor_trials": trials_data,
-        "fda_precedents":    fda_data,
+
+    result = {
+        "competitor_trials":  trials_data,
+        "fda_precedents":     fda_data,
         "strategic_playbook": strategies,
     }
+    if _honest_empty:
+        result["honest_empty_state"] = _honest_empty
+    return result
 
 
 def format_intelligence_for_expert(intel: Dict, disease_name: str) -> str:
     """Format competitive intelligence as expert context."""
     lines = [f"\n=== LIVE COMPETITIVE INTELLIGENCE: {disease_name.upper()} ===\n"]
-    
-    # Competitor trials
+
+    # H-04: honest empty state (emitted before comparators so context is clear)
+    honest_empty = intel.get("honest_empty_state", "")
+    if honest_empty:
+        lines.append(f"NOTE: {honest_empty}\n")
+
+    # H-04: research tool comparators (replaces CT.gov trials for non-clinical tools)
+    rt_comparators = intel.get("research_tool_comparators", [])
+    if rt_comparators:
+        lines.append("FUNCTIONAL COMPARATORS — COMMERCIAL RESEARCH TOOL LANDSCAPE:")
+        lines.append("These are genuine functional substitutes, not FDA-regulated clinical devices.\n")
+        for c in rt_comparators:
+            tag = " [INCUMBENT]" if c.get("incumbent") else ""
+            lines.append(f"  {c['name']}{tag} | {c['category']}")
+            lines.append(f"  {c['description']}")
+            if c.get("url"):
+                lines.append(f"  URL: {c['url']}")
+            lines.append("")
+
+    # Competitor trials (standard path — clinical archetypes only)
     trials = intel.get("competitor_trials", {}).get("trials", [])
+    corpus_note = intel.get("competitor_trials", {}).get("corpus_note", "")
     if trials:
-        lines.append(f"ACTIVE COMPETITOR TRIALS ({intel['competitor_trials'].get('total_found', len(trials))} total on ClinicalTrials.gov):")
+        lines.append(f"ACTIVE COMPETITOR TRIALS ({intel['competitor_trials'].get('total_found', len(trials))} passed relevance gate on ClinicalTrials.gov):")
         lines.append("Use these to identify gaps in current development landscape and position your differentiation.\n")
         for t in trials[:6]:
             lines.append(f"  {t['nct_id']} | {t['phase']} | {t['sponsor']}")
@@ -377,15 +630,20 @@ def format_intelligence_for_expert(intel: Dict, disease_name: str) -> str:
             if t.get('primary_outcome'):
                 lines.append(f"  Primary endpoint: {t['primary_outcome']}")
             lines.append(f"  URL: {t['url']}\n")
-    
+    elif corpus_note:
+        lines.append(f"COMPETITOR TRIALS: [corpus not applicable — {corpus_note[:120]}]\n")
+
     # FDA precedents
     approvals = intel.get("fda_precedents", {}).get("approvals", [])
+    fda_note = intel.get("fda_precedents", {}).get("corpus_note", "")
     if approvals:
         lines.append("FDA APPROVAL PRECEDENTS (cite these for regulatory pathway justification):")
         for a in approvals[:4]:
             lines.append(f"  {a['brand_name']} | {a['application_number']} | {a['sponsor']} | Approved: {a['approval_date']}")
             lines.append(f"  URL: {a['url']}\n")
-    
+    elif fda_note:
+        lines.append(f"FDA PRECEDENTS: [corpus not applicable — {fda_note[:120]}]\n")
+
     # Strategic playbook
     strategies = intel.get("strategic_playbook", [])
     if strategies:
@@ -397,7 +655,10 @@ def format_intelligence_for_expert(intel: Dict, disease_name: str) -> str:
             lines.append(f"  What they did: {s['what_they_did']}")
             lines.append(f"  Source: {s['source_url']}")
             lines.append(f"  Apply to your product: {s['applicability']}\n")
-    
-    lines.append("[CRITICAL: Cite specific NCT IDs and FDA application numbers in your report. Use the strategic playbook to generate a Strategic Playbook section with named examples.]")
-    
+
+    if trials:
+        lines.append("[CRITICAL: Cite specific NCT IDs and FDA application numbers in your report. Use the strategic playbook to generate a Strategic Playbook section with named examples.]")
+    else:
+        lines.append("[NOTE: No regulatory trial comparators available for this archetype. Use the functional comparator list above for competitive positioning.]")
+
     return "\n".join(lines)

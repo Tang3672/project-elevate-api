@@ -433,9 +433,12 @@ async def build_full_expert_context(
 
 {live_knowledge}
 
-CRITICAL INSTRUCTION: Every statistic and claim in your report MUST be tagged with 
-[SOURCE: source_name | url] immediately after the fact.
-Use the URLs from the knowledge retrieved above. Only cite real, authoritative sources."""
+CITATION RULES (H-10 — strictly enforced):
+- Tag numerical claims and named findings with [SOURCE: publisher | url] only when a real URL appears in the retrieved knowledge above.
+- If no URL exists for a claim, write [SOURCE: publisher] (name only, no URL) and set source_url to null in JSON.
+- NEVER invent a source name. Do NOT use phrases like "Expert Domain Knowledge", "RPM Context", "Medlevate Context", "Project Elevate", or any other internal label as a source — these are not real publications and will be rejected.
+- Claims from your own expert reasoning (not from the retrieved data) must be phrased as estimates or interpretations ("a typical range is…", "this suggests…"), not as cited facts.
+- Only cite sources that appear verbatim in the retrieved knowledge or demand signals above."""
 
     critic_context = f"""{sub_expert_critic}
 
