@@ -1134,6 +1134,24 @@ Return ONLY a JSON array of 6 objects. No other text.
                 if "binds_to" not in q:
                     fk = (q.get("field") or "").lower()
                     q["binds_to"] = _FIELD_TO_BINDS.get(fk, f"intake.{fk}" if fk else "intake.misc")
+            # For device-like products (SaMD / digital health), the revenue model is
+            # ambiguous (site license vs per-patient vs enterprise SaaS). Prepend a
+            # monetization_unit question so the report picks the right pricing model.
+            if _is_devicelike:
+                _mono_q = {
+                    "question": "How is this product sold — and what is the unit of payment?",
+                    "field": "monetization_unit",
+                    "options": [
+                        "hospital site license (annual, all patients included)",
+                        "enrolled patient / per-case fee (usage-based)",
+                        "enterprise SaaS — health-system-wide contract",
+                        "procedure-bundled payment (CPT / DRG add-on)",
+                    ],
+                    "hint": "This determines whether your revenue model is volume-driven or seat-driven",
+                    "binds_to": "price.deal_structure",
+                    "inferred_model": "SiteLicenseModel",
+                }
+                questions = [_mono_q] + questions
             return {"questions": questions[:8], "pathway": pathway}
         return {"questions": [], "pathway": pathway}
     except Exception as e:
@@ -1422,3 +1440,294 @@ async def override_assumption(
         "new_value": body.value,
         "override_count": updated_ledger.override_count,
     }
+
+
+# ── Part F: Market-sizing recompute + assumption persistence ──────────────────
+#
+# POST /market-sizing/recompute   — run funnel math with user overrides
+# GET  /market-sizing/override    — load saved override for a segment/report
+# GET  /market-sizing/overrides/{report_id} — list all overrides for a report
+# DELETE /market-sizing/override  — revert (delete) a saved override
+
+
+def _slugify(label: str) -> str:
+    import re
+    return re.sub(r"[^a-z0-9]+", "_", label.lower()).strip("_")
+
+
+def _run_funnel(gates: list[dict], net_price_usd: float, som_pct: float) -> dict:
+    """
+    Pure math: walk a funnel list and return TAM/SAM/SOM + step details.
+    Gates format: [{gate, label, type: absolute|rate, value?, rate?, source?}]
+    First gate must be absolute; all others are multiplied in sequence.
+    """
+    if not gates or gates[0].get("type") != "absolute":
+        raise ValueError("Funnel must start with an absolute gate")
+
+    running = float(gates[0].get("value", 0))
+    steps = [{
+        "gate":          gates[0]["gate"],
+        "label":         gates[0].get("label", gates[0]["gate"]),
+        "running_value": running,
+        "type":          "absolute",
+        "source":        gates[0].get("source", ""),
+        "applied":       None,
+    }]
+
+    for g in gates[1:]:
+        if g.get("type") == "absolute":
+            running = float(g.get("value", running))
+            applied = None
+        else:
+            rate = float(g.get("rate", 1.0))
+            running = running * rate
+            applied = rate
+        steps.append({
+            "gate":          g["gate"],
+            "label":         g.get("label", g["gate"]),
+            "running_value": round(running),
+            "type":          g.get("type", "rate"),
+            "source":        g.get("source", "analyst estimate — REVIEW"),
+            "applied":       applied,
+        })
+
+    sam_pop  = round(running)
+    sam_usd  = round(sam_pop * net_price_usd)
+    tam_usd  = round(steps[0]["running_value"] * net_price_usd)
+    som_pop  = round(sam_pop * som_pct)
+    som_usd  = round(som_pop * net_price_usd)
+
+    weakest = [s["label"] for s in steps if "REVIEW" in (s.get("source") or "") or not s.get("source")]
+    return {
+        "tam_usd":           tam_usd,
+        "sam_population":    sam_pop,
+        "sam_usd":           sam_usd,
+        "som_population":    som_pop,
+        "som_usd":           som_usd,
+        "funnel_steps":      steps,
+        "weakest_assumptions": weakest,
+        "segments_used":     [],   # filled in by caller for multi-segment
+    }
+
+
+class _AddedGate(BaseModel):
+    label:  str
+    type:   str = Field(default="rate", pattern="^(absolute|rate)$")
+    rate:   Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    value:  Optional[float] = Field(default=None, gt=0)
+    source: Optional[str]   = None
+    after:  Optional[str]   = None
+
+    def as_gate_dict(self, slug: str) -> dict:
+        return {
+            "gate":   slug,
+            "label":  self.label,
+            "type":   self.type,
+            "rate":   self.rate,
+            "value":  self.value,
+            "source": self.source or "analyst estimate — REVIEW",
+        }
+
+
+class _GateOverride(BaseModel):
+    rate:  Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    value: Optional[float] = Field(default=None, gt=0)
+
+
+class RecomputeRequest(BaseModel):
+    segment_id:        int
+    net_price_usd:     float = Field(..., gt=0)
+    report_id:         Optional[str] = None
+    persist:           bool = True
+    label:             Optional[str] = None
+    overrides:         dict[str, _GateOverride] = Field(default_factory=dict)
+    added_gates:       list[_AddedGate]         = Field(default_factory=list)
+    removed_gates:     list[str]                = Field(default_factory=list)
+    extra_segment_ids: list[int]                = Field(default_factory=list)
+
+
+@router.post("/market-sizing/recompute")
+async def market_sizing_recompute(body: RecomputeRequest):
+    """
+    Recompute TAM/SAM/SOM for a segment with user-authored overrides.
+    Optionally persists the override set so it can be reloaded with the report.
+    No auth required — the segment and report IDs are the access control.
+    """
+    import app.db.market_segment_repository as _seg_repo
+    import app.db.market_sizing_override_repository as _ovr_repo
+
+    # ── Load base segment ──────────────────────────────────────────────────────
+    seg = await _seg_repo.get_segment_by_id(body.segment_id)
+    if not seg:
+        raise HTTPException(status_code=404, detail=f"Segment {body.segment_id} not found")
+
+    som_pct = float(seg.get("som_penetration_pct", 0.35))
+    base_gates: list[dict] = [dict(g) for g in (seg.get("funnel") or [])]
+
+    # ── Validate overrides reference real gates ────────────────────────────────
+    gate_slugs = {g["gate"] for g in base_gates}
+    for k in body.overrides:
+        if k not in gate_slugs:
+            raise HTTPException(status_code=400, detail=f"unknown gate '{k}' in overrides")
+
+    # ── Validate removed_gates ─────────────────────────────────────────────────
+    for r in body.removed_gates:
+        if r not in gate_slugs:
+            raise HTTPException(status_code=400, detail=f"unknown gate '{r}' in removed_gates")
+
+    # ── Validate added_gates: absolute needs value, rate needs rate ────────────
+    for ag in body.added_gates:
+        if ag.type == "absolute" and ag.value is None:
+            raise HTTPException(status_code=422, detail=f"absolute gate '{ag.label}' requires value")
+        if ag.type == "rate" and ag.rate is None:
+            raise HTTPException(status_code=422, detail=f"rate gate '{ag.label}' requires rate")
+        if ag.after and ag.after not in gate_slugs:
+            raise HTTPException(status_code=400, detail=f"after gate '{ag.after}' not in funnel")
+
+    # ── Build working funnel ───────────────────────────────────────────────────
+    # 1. Remove gates
+    working = [g for g in base_gates if g["gate"] not in body.removed_gates]
+
+    # 2. Apply overrides (only non-null fields)
+    applied_overrides: dict = {}
+    for gate_slug, ov in body.overrides.items():
+        if ov.rate is None and ov.value is None:
+            continue    # empty override — skip
+        for g in working:
+            if g["gate"] == gate_slug:
+                if ov.rate is not None:
+                    g["rate"] = ov.rate
+                    applied_overrides[gate_slug] = {"rate": ov.rate}
+                elif ov.value is not None:
+                    g["value"] = ov.value
+                    applied_overrides[gate_slug] = {"value": ov.value}
+
+    # 3. Insert added gates (slugify label, disambiguate duplicates)
+    used_slugs: set[str] = {g["gate"] for g in working}
+    new_gate_dicts: list[dict] = []
+    for ag in body.added_gates:
+        slug = _slugify(ag.label)
+        if slug in used_slugs:
+            n = 2
+            while f"{slug}_{n}" in used_slugs:
+                n += 1
+            slug = f"{slug}_{n}"
+        used_slugs.add(slug)
+        new_gate_dicts.append((ag.after, ag.as_gate_dict(slug)))
+
+    # Insert after the specified gate (or append if no after)
+    for after_gate, gd in new_gate_dicts:
+        if after_gate:
+            pos = next((i for i, g in enumerate(working) if g["gate"] == after_gate), None)
+            if pos is not None:
+                working.insert(pos + 1, gd)
+            else:
+                working.append(gd)
+        else:
+            working.append(gd)
+
+    # 4. Guard: first gate must still be absolute
+    if not working or working[0].get("type") != "absolute":
+        raise HTTPException(status_code=400,
+            detail="funnel must start with an absolute gate; cannot remove the base population gate")
+
+    # ── Run math for primary segment ───────────────────────────────────────────
+    result = _run_funnel(working, body.net_price_usd, som_pct)
+    result["segments_used"] = [{"id": body.segment_id, "name": seg.get("segment_name", "")}]
+
+    # ── Combine extra segments (additive SAM) ─────────────────────────────────
+    for extra_id in body.extra_segment_ids:
+        extra_seg = await _seg_repo.get_segment_by_id(extra_id)
+        if not extra_seg:
+            continue
+        extra_result = _run_funnel(
+            [dict(g) for g in (extra_seg.get("funnel") or [])],
+            body.net_price_usd,
+            float(extra_seg.get("som_penetration_pct", 0.35)),
+        )
+        result["sam_population"] += extra_result["sam_population"]
+        result["sam_usd"]        += extra_result["sam_usd"]
+        result["som_population"] += extra_result["som_population"]
+        result["som_usd"]        += extra_result["som_usd"]
+        result["tam_usd"]        = max(result["tam_usd"], extra_result["tam_usd"])
+        result["segments_used"].append({"id": extra_id, "name": extra_seg.get("segment_name", "")})
+
+    # ── Persist if report_id and persist=True ─────────────────────────────────
+    saved = False
+    saved_id = None
+    if body.report_id and body.persist:
+        saved_id = await _ovr_repo.save_override(
+            report_id=body.report_id,
+            segment_id=body.segment_id,
+            user_id=None,
+            net_price_usd=body.net_price_usd,
+            overrides=applied_overrides,
+            added_gates=[ag.model_dump() for ag in body.added_gates],
+            removed_gates=body.removed_gates,
+            extra_segment_ids=body.extra_segment_ids,
+            tam_usd=result["tam_usd"],
+            sam_usd=result["sam_usd"],
+            som_usd=result["som_usd"],
+            label=body.label,
+        )
+        saved = True
+
+    return {
+        "market_sizing":    result,
+        "applied_overrides": applied_overrides,
+        "saved":             saved,
+        "saved_override_id": saved_id,
+    }
+
+
+@router.get("/market-sizing/override")
+async def get_market_sizing_override(report_id: str, segment_id: int):
+    """Load a previously saved override for a report+segment and recompute."""
+    import app.db.market_segment_repository as _seg_repo
+    import app.db.market_sizing_override_repository as _ovr_repo
+
+    saved = await _ovr_repo.get_override(report_id, segment_id)
+    if not saved:
+        raise HTTPException(status_code=404, detail="No saved override for this report/segment")
+
+    seg = await _seg_repo.get_segment_by_id(segment_id)
+    if not seg:
+        raise HTTPException(status_code=404, detail=f"Segment {segment_id} not found")
+
+    # Reconstruct as a RecomputeRequest and replay
+    ov_dict = saved.get("overrides") or {}
+    added   = [_AddedGate(**ag) for ag in (saved.get("added_gates") or [])]
+    removed = saved.get("removed_gates") or []
+
+    # Build a fake body and re-run through the same logic
+    fake = RecomputeRequest(
+        segment_id=segment_id,
+        net_price_usd=float(saved.get("net_price_usd", 25000)),
+        overrides={k: _GateOverride(**v) for k, v in ov_dict.items()},
+        added_gates=added,
+        removed_gates=removed,
+        extra_segment_ids=saved.get("extra_segment_ids") or [],
+        persist=False,
+    )
+    resp = await market_sizing_recompute(fake)
+    resp["applied_overrides"] = ov_dict
+    resp["label"] = saved.get("label")
+    return resp
+
+
+@router.get("/market-sizing/overrides/{report_id}")
+async def list_market_sizing_overrides(report_id: str):
+    """List all saved overrides for a report (one per segment)."""
+    import app.db.market_sizing_override_repository as _ovr_repo
+    rows = await _ovr_repo.list_overrides_for_report(report_id)
+    return {"report_id": report_id, "count": len(rows), "overrides": rows}
+
+
+@router.delete("/market-sizing/override")
+async def delete_market_sizing_override(report_id: str, segment_id: int):
+    """Revert all custom assumptions for a segment (delete the saved override)."""
+    import app.db.market_sizing_override_repository as _ovr_repo
+    deleted = await _ovr_repo.delete_override(report_id, segment_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="No saved override to revert")
+    return {"reverted": True}

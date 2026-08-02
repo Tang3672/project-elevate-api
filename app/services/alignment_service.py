@@ -2885,3 +2885,106 @@ def _clean_json(raw: str) -> dict:
 
     logger.error("JSON parse failed: %s", clean[:300])
     raise ValueError(f"Could not parse JSON response. First 200 chars: {clean[:200]}")
+
+
+# ── overlay_saved_assumptions (Part F.3) ─────────────────────────────────────
+
+async def overlay_saved_assumptions(report, segment: dict | None, *, user_id=None) -> bool:
+    """
+    If the PI saved custom market-sizing assumptions for this report+segment,
+    recompute the funnel with those overrides and patch `report` in place.
+
+    Returns True if an overlay was applied, False if nothing was saved.
+    Called by generate_pi_report after the base market sizing is built,
+    before the report is persisted.
+    """
+    from app.db import market_sizing_override_repository as _ovr_repo
+
+    report_id = getattr(report, "report_id", None)
+    if not report_id or not segment:
+        return False
+
+    segment_id = segment.get("id")
+    if not segment_id:
+        return False
+
+    saved = await _ovr_repo.get_override(report_id, segment_id, user_id)
+    if not saved:
+        return False
+
+    # ── Reconstruct the funnel with saved overrides ───────────────────────────
+    net_price  = float(saved.get("net_price_usd", 25000))
+    overrides  = saved.get("overrides") or {}
+    added_raw  = saved.get("added_gates") or []
+    removed    = set(saved.get("removed_gates") or [])
+    label      = saved.get("label")
+
+    base_gates = [dict(g) for g in (segment.get("funnel") or [])]
+    som_pct    = float(segment.get("som_penetration_pct", 0.35))
+
+    # Apply removals
+    working = [g for g in base_gates if g["gate"] not in removed]
+
+    # Apply overrides
+    for slug, ov in overrides.items():
+        for g in working:
+            if g["gate"] == slug:
+                if "rate" in ov and ov["rate"] is not None:
+                    g["rate"] = float(ov["rate"])
+                elif "value" in ov and ov["value"] is not None:
+                    g["value"] = float(ov["value"])
+
+    # Append added gates
+    for ag in added_raw:
+        import re as _re_slug
+        slug = _re_slug.sub(r"[^a-z0-9]+", "_", ag.get("label", "gate").lower()).strip("_")
+        working.append({
+            "gate":   slug,
+            "label":  ag.get("label", slug),
+            "type":   ag.get("type", "rate"),
+            "rate":   ag.get("rate"),
+            "value":  ag.get("value"),
+            "source": ag.get("source", "analyst estimate — REVIEW"),
+        })
+
+    # Guard
+    if not working or working[0].get("type") != "absolute":
+        logger.warning("overlay_saved_assumptions: funnel has no absolute base gate — skipping")
+        return False
+
+    # ── Run funnel math ───────────────────────────────────────────────────────
+    running = float(working[0].get("value", 0))
+    for g in working[1:]:
+        if g.get("type") == "absolute":
+            running = float(g.get("value", running))
+        else:
+            running *= float(g.get("rate", 1.0))
+
+    sam_pop = round(running)
+    sam_usd = round(sam_pop * net_price)
+    tam_usd = round(float(working[0].get("value", 0)) * net_price)
+    som_pop = round(sam_pop * som_pct)
+    som_usd = round(som_pop * net_price)
+
+    # ── Patch report ─────────────────────────────────────────────────────────
+    report.market_sizing_funnel = {
+        "tam_usd":    tam_usd,
+        "sam_usd":    sam_usd,
+        "som_usd":    som_usd,
+        "sam_population": sam_pop,
+        "som_population": som_pop,
+        "funnel":     working,
+    }
+    seg_copy = dict(segment)
+    seg_copy["funnel"]        = working
+    seg_copy["user_adjusted"] = True
+    if label:
+        seg_copy["adjustment_label"] = label
+    report.segment_used = seg_copy
+
+    logger.info(
+        "overlay_saved_assumptions: applied saved overrides for report=%s segment=%s "
+        "(label=%r) → SAM=$%.0f SOM=$%.0f",
+        report_id, segment_id, label, sam_usd, som_usd,
+    )
+    return True
