@@ -158,7 +158,8 @@ async def get_pi_report_async(payload: PIReportRequest, current_user = Depends(g
     await _enforce_quota(current_user)   # synchronous gate — 402 returns instantly
     import asyncio
     from app.services.report_jobs import create_job, set_done, set_error, update_report
-    job_id = await create_job()
+    _owner_id = str((current_user or {}).get("id", "")) or None
+    job_id = await create_job(owner_id=_owner_id)
     idea = _idea_from_payload(payload)
     _user = current_user
 
@@ -213,12 +214,19 @@ async def get_pi_report_async(payload: PIReportRequest, current_user = Depends(g
 
 
 @router.get("/pi-report/status/{job_id}")
-async def get_pi_report_status(job_id: str):
-    """Poll an async report job. Returns {status: running|done|error, report?, error?}."""
+async def get_pi_report_status(job_id: str, current_user = Depends(get_current_user)):
+    """Poll an async report job. Returns {status: running|done|error, report?, error?}.
+    Requires the caller to be the job owner (or unauthenticated jobs are readable by anyone)."""
     from app.services.report_jobs import get_job
     job = await get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found or expired")
+    # Ownership check: if the job has an owner, only that user may read it.
+    owner_id = job.get("owner_id")
+    if owner_id:
+        caller_id = str((current_user or {}).get("id", "")) or None
+        if caller_id != owner_id:
+            raise HTTPException(status_code=403, detail="Not authorised to view this report")
     return {"status": job["status"], "report": job["report"], "error": job["error"]}
 
 
@@ -1108,8 +1116,8 @@ Return ONLY a JSON array of 6 objects. No other text.
     try:
         client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
         msg = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=2000,
+            model="claude-haiku-4-5-20251001",  # cheap + fast — questions don't need Sonnet
+            max_tokens=1500,
             messages=[{"role": "user", "content": prompt}],
         )
         text = msg.content[0].text if msg.content else "[]"
