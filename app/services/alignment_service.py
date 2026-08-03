@@ -1856,6 +1856,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
                 template=_SEG_TEMPLATE,
                 idea=idea,
                 product_name=getattr(report, "product_name", "") or "",
+                ta=ta_for_deriv,
             )
             # Triangulation (D.3): three independent methods + reconciliation
             _triangulation = triangulate(_seg_tree)

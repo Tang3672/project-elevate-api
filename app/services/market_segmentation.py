@@ -389,7 +389,44 @@ def _compute_tam_from_node_vals(
 
 # ── NIH RePORTER API ──────────────────────────────────────────────────────────
 
-async def query_nih_reporter(keyword: str) -> Dict[str, Any]:
+# Maps therapeutic-area keys (same vocabulary as market_calibration_service.py)
+# to NIH Institute/Center codes accepted by the RePORTER v2 `agency_codes` filter.
+# An empty list means "no IC filter — search all NIH" (used for research tools
+# and for product types whose TA cannot be mapped).
+# Rule 3 (Addendum): IC codes MUST be derived from intake (TA/product type),
+# never hardcoded at a call site.
+_TA_TO_NIH_IC_CODES: dict[str, list[str]] = {
+    "oncology":       ["NCI"],
+    "hematology":     ["NCI", "NHLBI"],
+    "gene_therapy":   ["NCI", "NHGRI", "NHLBI"],
+    "immunology":     ["NIAID", "NIAMS"],
+    "cardiovascular": ["NHLBI"],
+    "metabolic":      ["NIDDK"],
+    "ibd":            ["NIDDK", "NIAID"],
+    "nash_mash":      ["NIDDK"],
+    "cns":            ["NINDS", "NIMH", "NIA"],
+    "rare_disease":   ["NCATS", "ORDR"],
+    # "other" and research-tool TAs intentionally absent → empty list → all NIH
+}
+
+
+def nih_ic_codes_for_ta(ta: str) -> list[str]:
+    """Return NIH Institute/Center codes for a therapeutic area.
+
+    Returns an empty list for unknown or non-clinical TAs (e.g. 'other',
+    'research_tool'), meaning the RePORTER query is not IC-filtered and spans
+    all active NIH grants.  This is the correct default for research tools
+    whose customers cut across all disease areas.
+
+    Args:
+        ta: Therapeutic area key (e.g. 'cns', 'oncology'). Must come from
+            intake (product type / disease domain) — never hardcoded at the
+            call site (Rule 3).
+    """
+    return list(_TA_TO_NIH_IC_CODES.get(ta.lower().strip() if ta else "", []))
+
+
+async def query_nih_reporter(keyword: str, agency_codes: tuple[str, ...] | list[str] = ()) -> Dict[str, Any]:
     """
     Query NIH RePORTER v2 for active grants matching the keyword.
 
@@ -402,7 +439,11 @@ async def query_nih_reporter(keyword: str) -> Dict[str, Any]:
     Falls back to a static estimate if the API fails or times out.
 
     Args:
-        keyword: Search term derived from idea text or product name.
+        keyword:      Search term derived from idea text or product name.
+        agency_codes: Optional NIH IC codes to filter the query.
+                      Must be derived from intake via nih_ic_codes_for_ta() —
+                      never hardcoded at a call site (Rule 3).
+                      Empty sequence (default) = no IC filter = all NIH.
 
     Returns:
         dict with:
@@ -428,14 +469,19 @@ async def query_nih_reporter(keyword: str) -> Dict[str, Any]:
         "fallback_used": True,
     }
 
-    payload: dict = {
-        "criteria": {
-            "advanced_text_search": {
-                "search_field": "all",
-                "search_text":  keyword,
-            },
-            "project_status": ["Active"],
+    criteria: dict = {
+        "advanced_text_search": {
+            "search_field": "all",
+            "search_text":  keyword,
         },
+        "project_status": ["Active"],
+    }
+    if agency_codes:
+        # IC filter derived from intake TA — never hardcoded at call site (Rule 3)
+        criteria["agency_codes"] = list(agency_codes)
+
+    payload: dict = {
+        "criteria": criteria,
         "limit":  500,
         "offset": 0,
         "fields": ["principal_investigators"],
@@ -492,12 +538,13 @@ async def query_nih_reporter(keyword: str) -> Dict[str, Any]:
 
         await asyncio.sleep(0)  # yield to event loop; keeps function non-blocking
 
+        ic_note = f", agency_codes={list(agency_codes)}" if agency_codes else ""
         return {
             "lab_count":      lab_count,
             "total_projects": total_projects,
             "distinct_pis":   distinct_in_sample,
             "source": (
-                f"NIH RePORTER API v2 — keyword='{keyword}', "
+                f"NIH RePORTER API v2 — keyword='{keyword}'{ic_note}, "
                 f"total_projects={total_projects:,}, "
                 f"distinct_PIs_in_sample={distinct_in_sample} "
                 f"(https://api.reporter.nih.gov/v2/projects/search)"
@@ -515,6 +562,7 @@ async def query_nih_reporter(keyword: str) -> Dict[str, Any]:
 async def build_life_sciences_research_tree(
     idea: str,
     product_name: str = "",
+    ta: str = "",
 ) -> SegmentTree:
     """
     Build the LIFE_SCIENCES_RESEARCH segmentation tree for research-tool products.
@@ -529,12 +577,17 @@ async def build_life_sciences_research_tree(
     Args:
         idea:         Full idea / product description text (drives NIH keyword search).
         product_name: Short product name used as the NIH search keyword when provided.
+        ta:           Therapeutic area key from intake (e.g. 'cns', 'oncology').
+                      Drives NIH IC filtering via nih_ic_codes_for_ta() — not hardcoded.
+                      Empty string (default) = no IC filter = all NIH (correct for
+                      cross-disease research tools).
 
     Returns:
         Deterministic SegmentTree; distributions encoded in (low, high, confidence).
     """
-    keyword = product_name.strip() if product_name.strip() else (idea[:80].strip() if idea else "laboratory data logging instrumentation")
-    nih_result   = await query_nih_reporter(keyword)
+    keyword    = product_name.strip() if product_name.strip() else (idea[:80].strip() if idea else "laboratory data logging instrumentation")
+    ic_codes   = nih_ic_codes_for_ta(ta)
+    nih_result = await query_nih_reporter(keyword, agency_codes=ic_codes)
     nih_labs_val = float(nih_result["lab_count"])
     nih_source   = nih_result["source"]
     nih_method: Literal["retrieved", "modeled"] = (
@@ -740,14 +793,22 @@ async def build_segment_tree(
     template: str,
     idea: str,
     product_name: str = "",
+    ta: str = "",
 ) -> SegmentTree:
     """
     Dispatcher: build a SegmentTree for the named template.
 
+    Args:
+        template:     Segmentation template name (LIFE_SCIENCES_RESEARCH).
+        idea:         Full product description text.
+        product_name: Short product name (NIH keyword override).
+        ta:           Therapeutic area from intake — passed to nih_ic_codes_for_ta()
+                      to derive the NIH IC filter without hardcoding (Rule 3).
+
     Currently supports: LIFE_SCIENCES_RESEARCH.
     """
     if template == LIFE_SCIENCES_RESEARCH:
-        return await build_life_sciences_research_tree(idea=idea, product_name=product_name)
+        return await build_life_sciences_research_tree(idea=idea, product_name=product_name, ta=ta)
     raise ValueError(
         f"Unknown segmentation template: '{template}'. "
         f"Supported: '{LIFE_SCIENCES_RESEARCH}'"
