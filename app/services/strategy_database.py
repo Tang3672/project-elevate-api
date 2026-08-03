@@ -400,11 +400,11 @@ def format_strategies_for_report(sub_expert_id: str) -> list:
     strategies = get_strategies_for_domain(sub_expert_id, max_strategies=4)
     return [
         {
-            "strategy": s["strategy"][:100],
-            "example": s["example_company"] + " - " + s["example_drug"],
-            "what_they_did": s["what_they_did"][:150],
-            "how_to_apply": s.get("how_to_apply", s.get("applicability", ""))[:200],
-            "source_url": s["source_url"],
+            "strategy":    s["strategy"],
+            "example":     s["example_company"] + " — " + s["example_drug"],
+            "what_they_did": s["what_they_did"],
+            "how_to_apply":  s.get("how_to_apply", s.get("applicability", "")),
+            "source_url":  s["source_url"],
         }
         for s in strategies
     ]
@@ -857,6 +857,79 @@ DOMAIN_SPECIFIC_STRATEGIES["drug_cns"] = [
         "source_url": "https://pubmed.ncbi.nlm.nih.gov/37459244/",
     },
 ]
+
+# ── RESEARCH TOOL & NON-CLINICAL INFRASTRUCTURE STRATEGIES ──────────────────
+
+DOMAIN_SPECIFIC_STRATEGIES.update({
+
+    "research_tool_non_clinical": [
+        {
+            "category": "Research Tool Commercialization",
+            "strategy": "Publish in Nature Methods or PLOS ONE before commercial launch — peer-reviewed protocol papers are the highest-ROI marketing spend for academic research tools",
+            "example_company": "10x Genomics",
+            "example_drug": "Chromium scRNA-seq platform",
+            "what_they_did": "10x Genomics co-authored the foundational Chromium single-cell RNA-seq workflow paper (Zheng et al., Science 2017, PMID 28091601) before aggressive commercial rollout. The citation became the most-cited paper in the field. Academic labs adopted the platform because it was the standard-of-record in the published literature.",
+            "how_to_apply": "Prioritize a methods paper with ≥2 academic PI co-authors before any direct sales motion. It compresses the sales cycle from months to weeks because the PI's peers have already endorsed the methodology in print. Target Nature Methods, HardwareX, or PLOS ONE. Budget 3–6 months and include the data pipeline and reproducibility protocol, not just the hardware.",
+            "source_url": "https://pubmed.ncbi.nlm.nih.gov/28091601/",
+            "applicability": "Research tools sold to academic PIs. Citation count on the methods paper directly predicts adoption rate in the academic market.",
+        },
+        {
+            "category": "Core Facility Beachhead",
+            "strategy": "Win one core facility director and sell to the facility's entire user base — core facilities are the distribution channel with no clinical-sales equivalent",
+            "example_company": "Zeiss (Carl Zeiss AG)",
+            "example_drug": "LSM 880 Airyscan confocal system",
+            "what_they_did": "Zeiss targets institutional core facility directors with multi-year service contracts and structured training programs. One core facility sale (typically $250k–$2M capital) serves 50–200 individual PI labs and converts each PI into a trained user and active recommender to peer institutions.",
+            "how_to_apply": "Map the 5–10 core facilities serving your target modality nationally. Offer the first facility a founding-partner price (30–40% discount) in exchange for co-authorship on a methods paper, a cohort training commitment, and a reference call. This converts a $15k per-lab license into a $100k–$500k facility contract with 50+ downstream trained users.",
+            "source_url": "https://abrf.org/core-facilities",
+            "applicability": "Research hardware and software tools with multi-user deployment. Most effective when workflow complexity benefits from centralized training and the PI is not also the engineer.",
+        },
+        {
+            "category": "SBIR / STTR Non-Dilutive Bridge",
+            "strategy": "SBIR Phase I establishes NIH credibility and pays for the first validated prototype — do not raise pre-seed until after a Phase I award",
+            "example_company": "Open Ephys Productions",
+            "example_drug": "Open Ephys neural acquisition system",
+            "what_they_did": "Open Ephys started as open-source lab hardware at MIT (Siegle et al., Nat Neurosci 2017). Bootstrapped commercialization through SBIR grants and a university core-facility model without VC dilution. Reached 300+ labs worldwide before raising outside capital.",
+            "how_to_apply": "Submit SBIR Phase I ($300k, 6 months) before a pre-seed round. The NIH/NSF award validates the scientific problem, which reduces investor dilution at the next round. Phase II ($1.5M–$2M, 2 years) can fund a full commercial-grade build. The key constraint: SBIR requires a for-profit entity — file the company before submitting.",
+            "source_url": "https://www.sbir.gov/about",
+            "applicability": "Research tools where NIH/NSF grant alignment is natural. SBIR credentialing is particularly valuable for institutional procurement which is risk-averse and grant-funded.",
+        },
+        {
+            "category": "Open-Source Core / Commercial Services",
+            "strategy": "Open-source the core protocol and SDK, sell the commercial services layer — the academic research market rewards transparency and punishes lock-in",
+            "example_company": "Plexon Inc.",
+            "example_drug": "OmniPlex neural data acquisition system",
+            "what_they_did": "Plexon open-sourced its offline sorter and OmniPlex SDK while maintaining closed-source hardware drivers and cloud analytics. Open-source components built ecosystem adoption in 1,000+ labs; proprietary hardware remained the revenue vehicle.",
+            "how_to_apply": "Release firmware, data format specification, and Python/MATLAB SDK under MIT or Apache license before launch. File a provisional patent on the specific hardware implementation first. Open access generates inbound interest from technically capable PI labs that become organic champions. Retain commercial value in hardware, support contracts, and managed cloud sync services.",
+            "source_url": "https://plexon.com/products/plexon-omniplex-neural-data-acquisition-system/",
+            "applicability": "Research infrastructure with a protocol layer (data format, API) that benefits from ecosystem adoption. Particularly effective when the PI is also the engineer and will evaluate the implementation.",
+        },
+    ],
+
+    "research_infrastructure_saas": [
+        {
+            "category": "Research SaaS — Institutional Site License",
+            "strategy": "Land in one department; expand via the research computing office — the IT buying unit is higher-value and faster than PI-by-PI expansion",
+            "example_company": "LabArchives",
+            "example_drug": "LabArchives Electronic Lab Notebook",
+            "what_they_did": "LabArchives shifted from individual PI sales ($10–30/user/month) to institutional site licenses ($20k–$100k/yr) by partnering with university IT and research computing offices rather than PIs. One institutional sale covers hundreds to thousands of users and is renewable on the institution's fiscal cycle, not the PI's grant cycle.",
+            "how_to_apply": "After initial traction (≥5 active labs, ≥3 testimonials), approach the VP Research or CIO with an institutional site-license proposal. Lead with compliance arguments — NSF data management plans, NIH data sharing policy — that matter to the institution beyond individual PIs. The compliance angle often unlocks a budget line that individual PI grant funds cannot.",
+            "source_url": "https://www.labarchives.com",
+            "applicability": "Research SaaS with data management, compliance, or collaboration use cases where institutional IT buyers also benefit, not only individual PIs.",
+        },
+        {
+            "category": "Grant Renewal Timing",
+            "strategy": "Time the enterprise sales pitch to align with R01 renewal cycles — a PI at the start of a new grant period has budget authority; a PI in the no-cost extension period does not",
+            "example_company": "Benchling",
+            "example_drug": "Benchling R&D Cloud (life science SaaS)",
+            "what_they_did": "Benchling's academic sales motion anchors to grant budget periods (typically 5-year R01 cycles). Outreach timed to the start of new award periods, when PIs have full discretion over equipment and software budget lines, converts at 3–5× the rate of outreach timed to the final year.",
+            "how_to_apply": "Build a data layer from NIH RePORTER: pull active awards with start dates, project end dates, and abstract text. Flag labs in year 1–2 of a new award for priority outreach. Suppress or reduce outreach frequency for labs in year 4–5. The sales cycle shrinks from months to weeks when the PI has current budget authority.",
+            "source_url": "https://reporter.nih.gov",
+            "applicability": "Research SaaS priced above $5k/yr per lab where the PI's grant budget is the purchase vehicle. Does not apply to sub-$1k tools bought from lab discretionary funds.",
+        },
+    ],
+
+})
+
 
 # Aliases mapping expert_domain IDs to strategy database keys
 DOMAIN_ALIASES = {

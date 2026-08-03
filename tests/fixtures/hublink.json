@@ -1,0 +1,60 @@
+{
+  "_comment": "Hublink intake fixture — used for all three v1/v2/v3 runs. Keep in sync with actual product description.",
+  "idea": "Hublink is a research data infrastructure platform for academic neuroscience and behavioral science labs. It automates wireless data retrieval from wearable sensors (accelerometers, ECG, peripheral blood oxygen) using Bluetooth Low Energy, replacing manual SD-card extraction by lab personnel. Data is logged to a local server and optionally synced to cloud storage for NIH-grant-funded research projects. The product is sold to academic principal investigators (PIs) and core facilities at research universities. No patient care, no diagnostic claims, no clinical decision support. Buyer is the PI or core facility director. The product creator is Matt Gaidica, director of the WashU Neurotech Hub.",
+  "product_name": "Hublink",
+  "domain": "LIFE_SCIENCES_RESEARCH",
+  "archetype": "research_infrastructure_saas",
+  "pathway": "sbir",
+  "product_type": "research_infrastructure_saas",
+  "clarify_answers": {
+    "buyer_persona": "Individual PI with NIH R01/R21 funding",
+    "price_band": "$20k-$30k per 2-5 year grant cycle (~$7k-$10k annualised)",
+    "status_quo": "Manual SD-card retrieval by grad students; some labs have DIY scripts",
+    "regulatory_gate": "No — the product never informs a clinical decision about an identified patient",
+    "experiment_type": "Long-duration unattended instrumented experiments (days to weeks)",
+    "out_of_scope": "High-bandwidth modalities (video, EEG raw) and clinical patient monitoring"
+  },
+  "banned_tokens_research_domain": [
+    "Project Elevate",
+    "Expert model:",
+    "NTAP",
+    "CPT 99",
+    "J-code",
+    "DRG",
+    "WAC",
+    "DALY",
+    "Breakthrough Device",
+    "PCCP",
+    "Viz.ai",
+    "Livongo",
+    "stroke",
+    "diabetes",
+    "patient capture",
+    "formulary",
+    "epidemiological",
+    "mechanism feasibility",
+    "510(k)",
+    "De Novo",
+    "predicate device",
+    "FDA clearance",
+    "FDA approval probability",
+    "clinical validity"
+  ],
+  "numeric_fields_must_be_stable": [
+    "market_sizing.total_addressable_market_usd",
+    "market_sizing.serviceable_market_usd",
+    "market_sizing.som_usd",
+    "commercialization_scores.moat_score",
+    "commercialization_scores.market_timing_score"
+  ],
+  "market_must_reconcile": {
+    "sam_pct_of_tam_range": [0.20, 0.45],
+    "som_pct_of_sam_range": [0.05, 0.30],
+    "tam_must_not_exceed_usd": 75000000,
+    "tam_must_exceed_usd": 1000000
+  },
+  "required_competitive_rows": [
+    "Status quo / manual SD-card retrieval",
+    "DIY"
+  ]
+}

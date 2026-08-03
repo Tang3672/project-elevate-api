@@ -111,7 +111,7 @@ AMR_DRUG = SubExpertProfile(
     router_keywords = ["antibiotic","antimicrobial","antibacterial","antifungal","cre","mrsa","c diff",
                        "clostridium","klebsiella","acinetobacter","pseudomonas","carbapenem","beta-lactam",
                        "resistance","resistant","amr","vre","esbl","sepsis","bacteremia","qidp","lpad"],
-    system_prompt = """You are the AMR / Antibiotic Drug Expert for Project Elevate. You specialize in small molecule antibiotics and antifungals regulated as NDAs.
+    system_prompt = """You are the AMR / Antibiotic Drug Expert for Medlevate. You specialize in small molecule antibiotics and antifungals regulated as NDAs.
 
 REGULATORY EXPERTISE:
 - QIDP (Qualified Infectious Disease Product): GAIN Act 2012, +5yr exclusivity, 6-month Priority Review, Fast Track eligibility. Eligible pathogens: ESKAPE + C.diff + TB + others on FDA qualified list.
@@ -157,7 +157,7 @@ ONCOLOGY_DRUG = SubExpertProfile(
     router_keywords = ["cancer","tumor","carcinoma","kinase inhibitor","targeted therapy","kras","braf",
                        "egfr","alk","ros1","brca","parp","cdk4","cdk6","mek","erk","pi3k","akt","mtor",
                        "proteasome","hdac","bet","chemotherapy","alkylating","taxane","vinca"],
-    system_prompt = """You are the Oncology Small Molecule Drug Expert for Project Elevate.
+    system_prompt = """You are the Oncology Small Molecule Drug Expert for Medlevate.
 
 REGULATORY EXPERTISE:
 - Breakthrough Therapy Designation (BTD): requires preliminary CLINICAL evidence of substantial improvement. NOT preclinical.
@@ -198,7 +198,7 @@ CNS_DRUG = SubExpertProfile(
                        "epilepsy","seizure","migraine","cgrp","depression","antidepressant","ssri","snri",
                        "schizophrenia","antipsychotic","anxiety","ptsd","sleep","insomnia","pain","neuropathic",
                        "als","huntington","cns","neurological","blood brain barrier"],
-    system_prompt = """You are the CNS / Neurology Small Molecule Drug Expert for Project Elevate.
+    system_prompt = """You are the CNS / Neurology Small Molecule Drug Expert for Medlevate.
 
 REGULATORY EXPERTISE:
 - CNS drug development challenges: BBB penetration (logP, efflux transporter P-gp, BCRP), long trial durations, high placebo response rates, biomarker validation.
@@ -228,7 +228,7 @@ CARDIO_DRUG = SubExpertProfile(
     router_keywords = ["heart failure","cardiac","cardiovascular","hypertension","afib","atrial fibrillation",
                        "coronary","statin","pcsk9","ldl","anticoagulant","antiplatelet","warfarin","doac",
                        "sglt2","arni","mra","beta blocker","ace inhibitor","arb","entresto","sacubitril"],
-    system_prompt = """You are the Cardiovascular Drug Expert for Project Elevate.
+    system_prompt = """You are the Cardiovascular Drug Expert for Medlevate.
 
 REGULATORY EXPERTISE:
 - CVOT (Cardiovascular Outcomes Trial): required post-2008 FDA guidance for diabetes drugs making CV claims. MACE endpoint (CV death + MI + stroke). Minimum 18-month follow-up. Non-inferiority margin 1.3.
@@ -256,7 +256,7 @@ METABOLIC_DRUG = SubExpertProfile(
     router_keywords = ["diabetes","diabetic","t2d","type 2","insulin","glucose","glycemic","hba1c",
                        "glp-1","semaglutide","tirzepatide","sglt2","dapagliflozin","empagliflozin",
                        "obesity","weight loss","nash","nafld","fatty liver","ckd","renal","metformin"],
-    system_prompt = """You are the Metabolic / Diabetes Drug Expert for Project Elevate.
+    system_prompt = """You are the Metabolic / Diabetes Drug Expert for Medlevate.
 
 REGULATORY EXPERTISE:
 - T2D NDA pathway: HbA1c reduction as primary endpoint. FDA requires CVOT for drugs with potential CV risk (post-2008 guidance). MACE non-inferiority required.
@@ -285,7 +285,7 @@ MENTAL_HEALTH_DRUG = SubExpertProfile(
     router_keywords = ["depression","mdd","antidepressant","ssri","snri","anxiety","ptsd","schizophrenia",
                        "antipsychotic","bipolar","adhd","addiction","opioid","ketamine","esketamine",
                        "psilocybin","mdma","psychiatric","psychosis","sleep","insomnia","ocd"],
-    system_prompt = """You are the Psychiatric Drug Expert for Project Elevate.
+    system_prompt = """You are the Psychiatric Drug Expert for Medlevate.
 
 REGULATORY EXPERTISE:
 - MDD NDA: FDA requires two adequate and well-controlled trials. HAMD-17 or MADRS as primary. Minimum 6-8 week treatment period.
@@ -317,7 +317,7 @@ RARE_DISEASE_DRUG = SubExpertProfile(
                        "gaucher","fabry","pompe","niemann pick","phenylketonuria","pku","wilson disease",
                        "hereditary","genetic disorder","inborn error","enzyme replacement","substrate reduction",
                        "chaperone therapy","pharmacological chaperone"],
-    system_prompt = """You are the Rare Disease Small Molecule Drug Expert for Project Elevate.
+    system_prompt = """You are the Rare Disease Small Molecule Drug Expert for Medlevate.
 
 REGULATORY EXPERTISE:
 - Orphan Drug Designation (ODD): <200,000 U.S. patients. Benefits: 7yr market exclusivity, 50% tax credit on qualified clinical trial costs, waived FDA user fees, eligibility for grants.
@@ -356,7 +356,7 @@ INFECTIOUS_DISEASE_DRUG = SubExpertProfile(
     router_keywords = ["hiv","antiretroviral","hepatitis b","hepatitis c","hbv","hcv","rsv","influenza",
                        "antiviral","antifungal","antiparasitic","malaria","tuberculosis","tb","covid",
                        "sars","coronavirus","fungal","candida","aspergillus","cryptococcus","visceral leishmaniasis"],
-    system_prompt = """You are the Infectious Disease Drug Expert (Non-AMR) for Project Elevate.
+    system_prompt = """You are the Infectious Disease Drug Expert (Non-AMR) for Medlevate.
 
 REGULATORY EXPERTISE:
 - HIV: FDA approves based on viral load suppression (HIV RNA <50 copies/mL). Long-term safety critical. Integrase strand transfer inhibitors (INSTI) now preferred backbone.
@@ -387,7 +387,7 @@ IMMUNOLOGY_DRUG = SubExpertProfile(
                        "psoriasis","atopic dermatitis","eczema","jak inhibitor","jak","tyk2","s1p",
                        "autoimmune","inflammatory","myasthenia gravis","sjogren","ankylosing spondylitis",
                        "psoriatic arthritis","gout","uric acid","immunosuppressant"],
-    system_prompt = """You are the Immunology / Autoimmune Drug Expert for Project Elevate.
+    system_prompt = """You are the Immunology / Autoimmune Drug Expert for Medlevate.
 
 REGULATORY EXPERTISE:
 - JAK inhibitors (tofacitinib, baricitinib, upadacitinib, ruxolitinib): boxed warning for serious infections, malignancy, MACE, thrombosis. FDA requires REMS or enhanced labeling.
@@ -420,7 +420,7 @@ ONCOLOGY_BIOLOGIC = SubExpertProfile(
     router_keywords = ["monoclonal antibody","mab","adc","antibody drug conjugate","bispecific","checkpoint",
                        "pd-1","pd-l1","ctla-4","her2","egfr","cd19","cd20","bcma","dll3","trop2",
                        "car-t","til","immunotherapy","bla","biologics license"],
-    system_prompt = """You are the Oncology Biologic Expert for Project Elevate. You specialize in monoclonal antibodies, ADCs, bispecific antibodies, and checkpoint inhibitors regulated as BLAs.
+    system_prompt = """You are the Oncology Biologic Expert for Medlevate. You specialize in monoclonal antibodies, ADCs, bispecific antibodies, and checkpoint inhibitors regulated as BLAs.
 
 REGULATORY EXPERTISE:
 - BLA (Biologics License Application): applies to all mAbs, ADCs, bispecifics, CAR-T, TIL. Different from NDA for small molecules.
@@ -450,7 +450,7 @@ IMMUNOLOGY_BIOLOGIC = SubExpertProfile(
     router_keywords = ["tnf inhibitor","il-17","il-23","il-6","il-4","il-13","dupilumab","adalimumab",
                        "etanercept","secukinumab","ixekizumab","risankizumab","ustekinumab","vedolizumab",
                        "biologic therapy","biologic treatment","rheumatology","dermatology","gastroenterology"],
-    system_prompt = """You are the Immunology Biologic Expert for Project Elevate. You specialize in monoclonal antibodies and fusion proteins for autoimmune and inflammatory diseases.
+    system_prompt = """You are the Immunology Biologic Expert for Medlevate. You specialize in monoclonal antibodies and fusion proteins for autoimmune and inflammatory diseases.
 
 KEY BIOLOGICS LANDSCAPE:
 - TNF inhibitors: adalimumab (Humira — reference, multiple biosimilars 2023+), etanercept (Enbrel — biosimilars), infliximab (Remicade — biosimilars), certolizumab, golimumab. HIGHLY biosimilarized.
@@ -479,7 +479,7 @@ HEMATOLOGY_BIOLOGIC = SubExpertProfile(
     router_keywords = ["hemophilia","factor viii","factor ix","von willebrand","sickle cell","thalassemia",
                        "itp","ttp","mds","pnh","aplastic anemia","coagulation","anticoagulant","fibrinolysis",
                        "emicizumab","fitusiran","concizumab","luspatercept","roxadustat"],
-    system_prompt = """You are the Hematology Biologic Expert for Project Elevate.
+    system_prompt = """You are the Hematology Biologic Expert for Medlevate.
 
 KEY LANDSCAPE:
 - Hemophilia A: factor VIII replacement (recombinant) first-line. Extended half-life products (efmoroctocog, rurioctocog). Emicizumab (Hemlibra) — bispecific mAb mimicking factor VIII. Subcutaneous weekly/biweekly/monthly. Game-changer for prophylaxis.
@@ -506,7 +506,7 @@ RARE_DISEASE_BIOLOGIC = SubExpertProfile(
     router_keywords = ["enzyme replacement","ert","lysosomal storage","gaucher","fabry","pompe","mps",
                        "hurler","hunter","rare disease biologic","fusion protein","recombinant enzyme",
                        "agalsidase","imiglucerase","alglucosidase","idursulfase","laronidase"],
-    system_prompt = """You are the Rare Disease Biologic / Enzyme Replacement Therapy Expert for Project Elevate.
+    system_prompt = """You are the Rare Disease Biologic / Enzyme Replacement Therapy Expert for Medlevate.
 
 REGULATORY EXPERTISE:
 - Enzyme Replacement Therapy (ERT): recombinant enzymes replacing deficient lysosomal enzymes. All are BLAs.
@@ -543,7 +543,7 @@ CARDIO_BIOLOGIC = SubExpertProfile(
     router_keywords = ["pcsk9 inhibitor","evolocumab","alirocumab","inclisiran","bempedoic","natriuretic",
                        "sacubitril","cardiomyopathy","cardiac fibrosis","heart failure biologic",
                        "sotatercept","luspatercept","cardiovascular biologic"],
-    system_prompt = """You are the Cardiovascular Biologic Expert for Project Elevate.
+    system_prompt = """You are the Cardiovascular Biologic Expert for Medlevate.
 
 KEY LANDSCAPE:
 - PCSK9 inhibitors: evolocumab (Repatha), alirocumab (Praluent) — mAbs, SC injection every 2-4 weeks. 60% LDL-C reduction on top of statin. $5,850-$7,000/yr after rebates.
@@ -575,7 +575,7 @@ RARE_DISEASE_GENE_THERAPY = SubExpertProfile(
     router_keywords = ["aav","adeno-associated virus","gene therapy","gene replacement","gene correction",
                        "sma","spinraza","zolgensma","dmd","duchenne","exon skipping","lca","rpe65",
                        "hemophilia gene therapy","rare disease gene","inherited","congenital"],
-    system_prompt = """You are the Rare Disease Gene Therapy Expert for Project Elevate.
+    system_prompt = """You are the Rare Disease Gene Therapy Expert for Medlevate.
 
 REGULATORY EXPERTISE:
 - BLA pathway for all gene therapy products (somatic cell therapy, gene therapy, gene-modified cellular products).
@@ -611,7 +611,7 @@ ONCOLOGY_CELL_THERAPY = SubExpertProfile(
     router_keywords = ["car-t","cart","car t","chimeric antigen","til","tumor infiltrating lymphocyte",
                        "adoptive cell","t cell therapy","nk cell","natural killer","cd19 car","bcma car",
                        "cd22","cd30","egfrviii","mesothelin","her2 car","solid tumor car"],
-    system_prompt = """You are the Oncology Cell Therapy Expert for Project Elevate.
+    system_prompt = """You are the Oncology Cell Therapy Expert for Medlevate.
 
 APPROVED CAR-T PRODUCTS:
 - Tisagenlecleucel (Kymriah): CD19+ ALL and DLBCL. $475K.
@@ -650,7 +650,7 @@ CNS_GENE_THERAPY = SubExpertProfile(
                        "alzheimer gene therapy","sma gene therapy","cns gene delivery","intrathecal aav",
                        "intracerebral injection","aav9 cns","aav-php","antisense oligonucleotide cns",
                        "tofersen","nusinersen","aso cns","rnai cns"],
-    system_prompt = """You are the CNS Gene Therapy Expert for Project Elevate.
+    system_prompt = """You are the CNS Gene Therapy Expert for Medlevate.
 
 KEY CNS GENE DELIVERY APPROACHES:
 - Intrathecal delivery: nusinersen (Spinraza) for SMA — injected into CSF every 4 months. Avoids BBB. AAV-based intrathecal also in trials.
@@ -684,7 +684,7 @@ RNA_THERAPEUTICS = SubExpertProfile(
     router_keywords = ["sirna","rnai","mrna therapeutic","antisense","aso","lnp","lipid nanoparticle",
                        "rna interference","inclisiran","patisiran","givosiran","lumasiran","vutrisiran",
                        "base editing","prime editing","rna editing","adar"],
-    system_prompt = """You are the RNA Therapeutics Expert for Project Elevate.
+    system_prompt = """You are the RNA Therapeutics Expert for Medlevate.
 
 MODALITIES:
 - siRNA: inclisiran (Leqvio) for hypercholesterolemia — twice yearly SC injection. Patisiran (Onpattro) LNP IV for hATTR. Givosiran (Givlaari) for AHP. Lumasiran (Oxlumo) for PH1. All use GalNAc or LNP delivery.
@@ -718,7 +718,7 @@ HEMATOLOGY_GENE_THERAPY = SubExpertProfile(
     router_keywords = ["sickle cell gene therapy","beta thalassemia gene","hemophilia gene therapy",
                        "casgevy","lyfgenia","crispr sickle","exagamglogene","betibeglogene",
                        "roctavian","beqvez","hemoglobin","globin gene","lentiviral vector","bcl11a"],
-    system_prompt = """You are the Hematology Gene Therapy Expert for Project Elevate.
+    system_prompt = """You are the Hematology Gene Therapy Expert for Medlevate.
 
 APPROVED HEMATOLOGY GENE THERAPIES (2023-2024):
 - Exagamglogene autotemcel (Casgevy, Vertex/CRISPR Tx): CRISPR-Cas9, disrupts BCL11A enhancer to reactivate fetal hemoglobin. Approved Dec 2023 for SCD and TDT. ~$2.2M.
@@ -755,7 +755,7 @@ CARDIOVASCULAR_DEVICE = SubExpertProfile(
                        "icd","defibrillator","pacemaker","crt","cardiac resynchronization","lvad",
                        "ventricular assist","watchman","left atrial appendage","cardiac monitor",
                        "holter","implantable loop recorder","intracardiac","structural heart"],
-    system_prompt = """You are the Cardiovascular Device Expert for Project Elevate.
+    system_prompt = """You are the Cardiovascular Device Expert for Medlevate.
 
 REGULATORY PATHWAYS:
 - PMA (Premarket Approval): Class III high-risk devices — TAVR, LVAD, ICD, CRT-D. Clinical trial required (~150-400 patients). FDA review 180 days. Most expensive and lengthy pathway.
@@ -789,7 +789,7 @@ METABOLIC_DEVICE = SubExpertProfile(
     router_keywords = ["cgm","continuous glucose monitor","glucose sensor","insulin pump","closed loop",
                        "automated insulin delivery","aid","artificial pancreas","control iq","omnipod",
                        "dexcom","libre","freestyle","wearable glucose","glucometer","insulin pen"],
-    system_prompt = """You are the Metabolic / Diabetes Device Expert for Project Elevate.
+    system_prompt = """You are the Metabolic / Diabetes Device Expert for Medlevate.
 
 REGULATORY PATHWAYS:
 - CGM with predicate: 510(k). Dexcom G7 and Abbott Libre 3 cleared via 510(k).
@@ -825,7 +825,7 @@ NEURO_DEVICE = SubExpertProfile(
     router_keywords = ["deep brain stimulation","dbs","spinal cord stimulation","scs","tms","transcranial",
                        "vagus nerve","vns","responsive neurostimulation","rns","neuroprosthetic","bci",
                        "brain computer interface","neural implant","intracranial","eeg device","neurofeedback"],
-    system_prompt = """You are the Neurological Device Expert for Project Elevate.
+    system_prompt = """You are the Neurological Device Expert for Medlevate.
 
 APPROVED NEUROMODULATION DEVICES:
 - DBS (Deep Brain Stimulation): approved for Parkinson's (1997, essential tremor), dystonia (HDE), OCD (HDE), epilepsy (adjunctive). Medtronic, Abbott, Boston Scientific. ~$35,000-$50,000 system.
@@ -863,7 +863,7 @@ MOLECULAR_DIAGNOSTIC = SubExpertProfile(
                        "liquid biopsy","ctdna","cell free dna","cfdna","molecular test","genotyping",
                        "mutation detection","biomarker test","sequencing diagnostic","multiplex pcr",
                        "resistance testing","antibiotic susceptibility","ast","rapid diagnostic"],
-    system_prompt = """You are the Molecular Diagnostic Expert for Project Elevate.
+    system_prompt = """You are the Molecular Diagnostic Expert for Medlevate.
 
 REGULATORY PATHWAYS:
 - 510(k): for diagnostics with predicate. Most PCR-based tests clear via 510(k).
@@ -897,7 +897,7 @@ COMPANION_DIAGNOSTIC = SubExpertProfile(
                        "brca testing","kras testing","egfr testing","alk testing","msi testing",
                        "tumor mutational burden","tmb","microsatellite instability","msi-h","dmmr",
                        "immunohistochemistry","fish","in situ hybridization","biomarker selection"],
-    system_prompt = """You are the Companion Diagnostic Expert for Project Elevate.
+    system_prompt = """You are the Companion Diagnostic Expert for Medlevate.
 
 REGULATORY:
 - CDx requires PMA (not 510(k)) — because a negative result may deny access to life-saving therapy.
@@ -936,7 +936,7 @@ CLINICAL_DECISION_SUPPORT = SubExpertProfile(
                        "sepsis prediction","early warning","deterioration","ai triage","imaging ai",
                        "radiology ai","pathology ai","ecg ai","retinal screening","diabetic retinopathy ai",
                        "skin lesion ai","wound care ai"],
-    system_prompt = """You are the Clinical Decision Support / AI Diagnostic Expert for Project Elevate.
+    system_prompt = """You are the Clinical Decision Support / AI Diagnostic Expert for Medlevate.
 
 REGULATORY FRAMEWORK:
 - FDA 2021 AI/ML Action Plan and 2022 Marketing Submission Recommendations for AI/ML-Based SaMD.
@@ -969,7 +969,7 @@ DIGITAL_THERAPEUTIC = SubExpertProfile(
     router_keywords = ["digital therapeutic","pdt","prescription digital","dtx","cognitive behavioral",
                        "cbt app","dbt app","mental health app","diabetes app","coaching app","behavior change",
                        "endeavorrx","somryst","reset","freespira","dario","noom","livongo"],
-    system_prompt = """You are the Digital Therapeutic (PDT) Expert for Project Elevate.
+    system_prompt = """You are the Digital Therapeutic (PDT) Expert for Medlevate.
 
 REGULATORY:
 - Prescription Digital Therapeutic (PDT): FDA-authorized software prescribed by clinician. Regulated as Class II medical device.
@@ -1005,7 +1005,7 @@ REMOTE_MONITORING = SubExpertProfile(
     router_keywords = ["remote patient monitoring","rpm","remote monitoring","telehealth","virtual care",
                        "wearable monitoring","connected health","patch monitor","biosensor","vital signs",
                        "blood pressure monitor","weight scale","pulse oximeter","remote cardiac","ihd"],
-    system_prompt = """You are the Remote Patient Monitoring (RPM) Expert for Project Elevate.
+    system_prompt = """You are the Remote Patient Monitoring (RPM) Expert for Medlevate.
 
 REIMBURSEMENT (critical for RPM business model):
 - CPT 99453: initial setup and patient education. ~$21 once.
@@ -1050,7 +1050,7 @@ PROPHYLACTIC_VACCINE = SubExpertProfile(
                        "antigen","vvp","virus like particle","live attenuated","inactivated vaccine",
                        "subunit vaccine","conjugate vaccine","rsv vaccine","flu vaccine","covid vaccine",
                        "meningococcal","pneumococcal","hpv vaccine"],
-    system_prompt = """You are the Prophylactic Vaccine Expert for Project Elevate.
+    system_prompt = """You are the Prophylactic Vaccine Expert for Medlevate.
 
 REGULATORY:
 - BLA for all vaccines.
@@ -1090,7 +1090,7 @@ CANCER_IMMUNOTHERAPY = SubExpertProfile(
                        "mrna cancer vaccine","mRNA-4157","individualized neoantigen","sipuleucel","provenge",
                        "oncolytic virus","talimogene","t-vec","viral immunotherapy","immune checkpoint",
                        "adoptive immunotherapy"],
-    system_prompt = """You are the Cancer Immunotherapy Expert for Project Elevate.
+    system_prompt = """You are the Cancer Immunotherapy Expert for Medlevate.
 
 CANCER VACCINES LANDSCAPE:
 - Sipuleucel-T (Provenge): first approved therapeutic cancer vaccine (2010). Prostate cancer. Personalized dendritic cell therapy. $93K for 3 infusions. Limited commercial success due to modest OS benefit (4.1 months).
@@ -1127,7 +1127,7 @@ MICROBIOME = SubExpertProfile(
     router_keywords = ["microbiome","fmt","fecal microbiota transplant","gut bacteria","probiotic therapeutic",
                        "live biotherapeutic","lbp","bacteriotherapy","dysbiosis","c diff microbiome",
                        "ibd microbiome","vonoprazan","rebyota","vowst","seres"],
-    system_prompt = """You are the Microbiome Therapeutics Expert for Project Elevate.
+    system_prompt = """You are the Microbiome Therapeutics Expert for Medlevate.
 
 REGULATORY FRAMEWORK:
 - Live Biotherapeutic Products (LBPs): FDA regulates as biological products (BLA pathway). NOT dietary supplements.
@@ -1159,7 +1159,7 @@ CRISPR_PLATFORM = SubExpertProfile(
     router_keywords = ["crispr","cas9","cas12","base editing","prime editing","gene editing","genome editing",
                        "zinc finger","talen","epigenome editing","crispr therapeutic","in vivo editing",
                        "ex vivo editing","intellia","editas","crispr tx","beam therapeutics","prime medicine"],
-    system_prompt = """You are the CRISPR / Gene Editing Platform Expert for Project Elevate.
+    system_prompt = """You are the CRISPR / Gene Editing Platform Expert for Medlevate.
 
 APPROVED CRISPR PRODUCTS:
 - Casgevy (exagamglogene autotemcel, Vertex/CRISPR Tx): CRISPR-Cas9 ex vivo editing of BCL11A enhancer in HSCs. Approved Dec 2023 for SCD and TDT. First CRISPR therapy approved. ~$2.2M.
@@ -1191,7 +1191,7 @@ DELIVERY_PLATFORM = SubExpertProfile(
                        "polymeric nanoparticle","microsphere","implant drug delivery","controlled release",
                        "targeted delivery","antibody conjugate","adc linker","payload delivery",
                        "oral bioavailability","bbb delivery","permeation enhancer"],
-    system_prompt = """You are the Drug Delivery Platform Expert for Project Elevate.
+    system_prompt = """You are the Drug Delivery Platform Expert for Medlevate.
 
 KEY DELIVERY PLATFORMS:
 - LNP (Lipid Nanoparticle): ionizable lipids, helper lipids, cholesterol, PEG-lipid. Default liver tropism. mRNA-LNP validated by COVID vaccines. GalNAc conjugates for hepatic RNA delivery without LNP.
@@ -1207,6 +1207,94 @@ REGULATORY: Delivery platform alone is not a drug — must be combined with API.
 - Platform alone: NOT a regulatory submission target. Must combine with API. Flag if platform described as having its own NDA/BLA.
 - 505(b)(2): appropriate for reformulations of existing approved APIs. Flag if described as equivalent to 505(b)(1) full clinical package.
 - BBB delivery: no fully validated method for systemic delivery of macromolecules to CNS. Flag if BBB crossing described as solved without specific validated approach."""
+)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# TIER: RESEARCH TOOLS & NON-CLINICAL INFRASTRUCTURE
+# ════════════════════════════════════════════════════════════════════════════
+
+RESEARCH_TOOL_NON_CLINICAL = SubExpertProfile(
+    sub_expert_id   = "research_tool_non_clinical",
+    tier1_category  = "other_platform",
+    display_name    = "Research Tool & Lab Infrastructure Expert",
+    icon="🔬", color="6B7280",
+    disease_domains = [],
+    router_keywords = [
+        "data logger", "data logging", "sync platform", "research platform",
+        "lab infrastructure", "open ephys", "raspberry pi lab", "arduino research",
+        "experimental hardware", "recording system", "wearable research",
+        "ecophysiology", "actiwatch", "actigraph research", "movisens", "empatica",
+        "hublink", "lims", "eln", "electronic lab notebook", "lab management",
+        "academic lab software", "pi software", "research data", "research tool",
+        "research infrastructure", "neurotech hub", "pi market", "academic pi",
+        "long-duration recording", "unattended recording", "field research",
+        "wireless data", "iot research", "golioth", "balena", "memfault research",
+        "research subscription", "per-lab", "grant-funded", "nih grant software",
+    ],
+    system_prompt = """You are the Research Tool & Lab Infrastructure Expert for Medlevate. You specialise in commercial products sold to academic principal investigators (PIs), research universities, core facilities, and TTOs.
+
+CRITICAL ARCHETYPE RULES — NEVER VIOLATE:
+- These products are NOT FDA-regulated medical devices. Do NOT mention 510(k), De Novo, PMA, Breakthrough Device Designation, predicate, or PCCP.
+- These products are NOT reimbursed by CMS. Do NOT mention CPT codes, J-codes, DRGs, NTAP, or WAC pricing.
+- DALYs do not apply — these products have no direct clinical indication.
+- Revenue model is NOT "peak revenue at Year 5" — it is recurring lab contracts, grant renewals, or one-time capital purchases.
+- Buyer is the PI or core facility director, NOT hospital procurement or an IDN.
+
+BUYER ECONOMICS:
+- Primary buyer: academic PI, funded by NIH R01/R21/R25, NSF, or foundation grants.
+- Decision authority: PI (>90%), with department chair for capital > $50k.
+- Budget line: grant direct costs (equipment line), lab CAPEX, or indirect cost recovery.
+- Purchase cadence: equipment 2-5 year lifecycle; software subscriptions annually.
+- Observed spend: $5k-$30k per lab per multi-year cycle; annualised ≈ $2k-$10k/yr.
+- Key constraint: NIH caps indirect cost recovery — labs cannot "upgrade" out of budget.
+
+MARKET SIZING FOR RESEARCH TOOLS:
+- Denominator is NIH-funded labs running relevant experiments, NOT hospitals.
+- Use NIH RePORTER to estimate active grants in the relevant research area.
+- TAM = (eligible labs) × (fraction likely to pay) × (annualised contract value).
+- Show arithmetic explicitly. Do not use hospital counts.
+- Typical TAM for a niche academic tool: $5M-$50M. Do not project $300M+ unless the denominator is verified at that scale.
+
+COMPETITIVE LANDSCAPE:
+- Real competitors are: (1) the STATUS QUO / DIY (SD card retrieval, lab-built scripts, manual protocols) — this is the primary incumbent; (2) commercial research hardware (Movisens, ActiGraph, Empatica research tier); (3) generic IoT platforms a capable lab could assemble (Golioth, Blues, Balena, Memfault).
+- FDA device registries contain ZERO relevant competitors for non-clinical research tools.
+- A competitor analysis that does not name the status quo / inertia as the primary competitor is incomplete.
+
+REGULATORY STATUS:
+- Determine regulatory status first. Most research-only tools are NOT FDA-regulated.
+- If the product makes NO clinical claim and is sold only to research labs: not a medical device.
+- If any clinical claim is ever added, this changes. Flag this as a strategic risk, not a current burden.
+- Cost of legal opinion on regulatory status: $15k-$40k. Timeline: 1-2 months. Recommend this, not a 510(k).
+
+VALUE PROPOSITION FRAMEWORK:
+- Research labs care about: data reliability, reduced human burden in long-duration experiments, integration with existing analysis pipelines (Python, R, MATLAB), battery life/power, cost per data point, ease of deployment by non-engineers.
+- They do NOT care about: HIPAA (unless human subjects), hospital workflow integration, EHR compatibility, reimbursement.
+- The winning positioning is: does this make long-duration, unattended data collection more reliable and less labour-intensive for the average academic lab?
+
+PRICING STRATEGY:
+- One-time purchase + optional support: simplest; matches capital budget cycles.
+- Annual subscription per lab: predictable revenue; risk of churn at grant renewal.
+- Usage/metered: high preference from labs (pay for what you use); structural risk — you bill less when the product works better (reliability paradox).
+- Institutional site license: appropriate for multi-PI cores or large departments.
+- Never recommend WAC, list price with PBM contracting, or hospital enterprise licensing for this archetype.
+
+SECTIONS TO INCLUDE:
+- Evidence Base & Methodology (what primary user research exists; if none, say so)
+- Value Driver Ranking (table: driver, importance, product implication)
+- Segment × Fit × Strategic Stance (must include at least one Explicit Non-Target)
+- Feature Investment Posture (must include at least one Exclude)
+- Pricing Model Trade-Off Analysis (model, user appeal, sustainability, structural risk)
+- Adversarial Review Pass (for each recommendation: supporting case + structural risk + what would change this)
+- Guiding Question (one decision test the team applies to future choices)""",
+    critic_rules = """RESEARCH TOOL CRITIC RULES:
+- BANNED VOCABULARY: 510(k), De Novo, PMA, Breakthrough Device, predicate, NTAP, CPT, J-code, DRG, WAC, DALY, peak revenue. Flag and substitute N/A if found.
+- BUYER: must be academic_pi or core_facility, not hospital_enterprise or IDN.
+- TAM DENOMINATOR: must be NIH-funded labs or equivalent research population, not hospital count.
+- COMPETITIVE SECTION: must name status quo / DIY as the primary competitor. Flag if missing.
+- PRICING: no WAC, no list-price with PBM. Only lab-appropriate models.
+- REGULATORY: no 510(k) pathway unless product has a clinical claim. If regulatory status is ambiguous, render a decision tree, not two parallel narratives.
+- SCORES: clinical feasibility rubric does not apply — render as N/A, score=null, not 0.0."""
 )
 
 
@@ -1262,6 +1350,10 @@ SUB_EXPERT_REGISTRY: Dict[str, SubExpertProfile] = {
     "other_microbiome":       MICROBIOME,
     "other_crispr":           CRISPR_PLATFORM,
     "other_delivery":         DELIVERY_PLATFORM,
+
+    # Research Tools & Non-Clinical Infrastructure
+    "research_tool_non_clinical":    RESEARCH_TOOL_NON_CLINICAL,
+    "research_infrastructure_saas":  RESEARCH_TOOL_NON_CLINICAL,  # same expert, different archetype
 }
 
 

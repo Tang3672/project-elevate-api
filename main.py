@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api import needs
 from app.api.demand import admin_router, demand_router
 from app.api.alignment import router as alignment_router
+from app.api.pdf import router as pdf_router
 from app.db.database import init_db
 from app.db.demand_repository import ensure_demand_signals_table
 from app.core.config import settings
@@ -48,6 +49,9 @@ app.include_router(admin_router,         prefix="/api/v1/admin",   tags=["admin"
 
 # Step 3: inventor alignment
 app.include_router(alignment_router,     prefix="/api/v1/alignment", tags=["alignment"])
+
+# P2: PDF / HTML report export
+app.include_router(pdf_router,           prefix="/api/v1",           tags=["pdf"])
 
 @app.get("/health")
 async def health_check():

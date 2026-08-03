@@ -1,0 +1,364 @@
+{
+  "version": "1.1",
+  "last_updated": "2026-07",
+  "description": "Disease-specific clinical pathway gating data. Each entry defines the fraction of the total prevalent/incident disease population that would realistically be enrolled in INITIAL trials for a novel therapeutic, diagnostic, or device — before label expansion. Fractions are based on clinical guideline eligibility, landmark trial enrollment criteria, and FDA label populations. Curated from AHA/ASA, ACC/AHA, NCCN, ASCO, ESMO, ERS, ADA, ACR guidelines and pivotal trial publications.",
+  "diseases": {
+    "ischemic stroke": {
+      "fraction": 0.12,
+      "rationale": "Initial trials for novel neuroprotective or reperfusion-augmenting agents are conducted in tPA-eligible (IV alteplase, ~10% of all AIS) and/or thrombectomy-eligible (large vessel occlusion, ~6-8%) patients. Not all 800K US annual ischemic strokes qualify — only ~80-100K tPA-treated and ~50K thrombectomy patients constitute the realistic initial study population. Large, unselected stroke populations appear in trials only after initial label establishment.",
+      "expansion_yr": 5,
+      "citation": "AHA/ASA Stroke Guidelines 2022 (Circulation 2022;145:e744); SWIFT PRIME, DAWN, DEFUSE-3; NINDS tPA trial 1995",
+      "aliases": ["AIS", "acute ischemic stroke", "cerebrovascular accident", "brain infarction", "stroke ischemic"]
+    },
+    "hemorrhagic stroke": {
+      "fraction": 0.35,
+      "rationale": "Intracerebral hemorrhage (ICH) trials typically enroll patients presenting within 4.5-24h with hematoma volume <60 mL and no surgical indication — approximately 35% of all ICH presentations. Subarachnoid hemorrhage is a separate indication requiring separate trials.",
+      "expansion_yr": 4,
+      "citation": "AHA/ASA ICH Guideline 2022 (Stroke 2022;53:e282); MISTIE III eligibility criteria",
+      "aliases": ["intracerebral hemorrhage", "ICH", "brain bleed", "hemorrhagic CVA"]
+    },
+    "non-small cell lung cancer": {
+      "fraction": 0.12,
+      "rationale": "Novel targeted therapies for NSCLC are typically first developed in a specific biomarker-defined subpopulation (KRAS G12C ~13%, EGFR exon20 ~3%, MET amp ~4%, RET fusion ~1%, NTRK ~1%). The initial trial population is the biomarker-selected fraction of NSCLC patients. Biomarker-agnostic drugs (immunotherapy combinations) may start in PD-L1 high (>50%, ~25%) or all-comers with biomarker enrichment.",
+      "expansion_yr": 4,
+      "citation": "SEER Cancer Statistics 2023; FDA NSCLC biomarker guidance; KEYNOTE-024, MARIPOSA, KRYSTAL-1 enrollment criteria",
+      "aliases": ["NSCLC", "non-small-cell lung cancer", "lung adenocarcinoma", "lung squamous", "KRAS G12C lung", "EGFR lung"]
+    },
+    "small cell lung cancer": {
+      "fraction": 0.70,
+      "rationale": "The large majority (~70%) of SCLC is diagnosed at extensive stage (ES-SCLC), which is the primary target for novel systemic therapies. Limited-stage SCLC (LS-SCLC, ~30%) is typically treated with chemoradiation and is a separate indication. Initial trials for novel SCLC drugs focus on ES-SCLC, first-line or relapsed/refractory.",
+      "expansion_yr": 3,
+      "citation": "SEER Cancer Statistics 2023; CASPIAN, IMpower133 trial eligibility (ES-SCLC only)",
+      "aliases": ["SCLC", "small-cell lung cancer", "extensive-stage SCLC", "ES-SCLC"]
+    },
+    "breast cancer her2 positive": {
+      "fraction": 0.18,
+      "rationale": "HER2-positive (IHC 3+ or FISH amplified) breast cancer represents ~15-20% of all breast cancers. New HER2-directed agents are initially approved in metastatic HER2+ breast cancer (2L+ setting), which is a further subset. Early HER2+ (adjuvant) trials come after metastatic approval.",
+      "expansion_yr": 4,
+      "citation": "SEER Cancer Statistics 2023; Wolff et al. JCO 2023 HER2 testing guidelines; DESTINY-Breast03 enrollment criteria",
+      "aliases": ["HER2+ breast", "HER2 positive breast cancer", "breast cancer HER2", "HER2-positive breast"]
+    },
+    "triple negative breast cancer": {
+      "fraction": 0.13,
+      "rationale": "TNBC (ER-/PR-/HER2-) accounts for ~10-15% of all breast cancers. Novel TNBC therapies typically start in metastatic TNBC (mTNBC), which is ~50% of TNBC patients at any given time. PD-L1+ mTNBC (CPS ≥10) is an initial target for immunotherapy combinations (~40% of mTNBC). BRCA-mutated TNBC (~20%) is targeted by PARP inhibitors.",
+      "expansion_yr": 3,
+      "citation": "SEER Cancer Statistics 2023; KEYNOTE-522, ASCENT, OlympiAD trial enrollment criteria",
+      "aliases": ["TNBC", "triple-negative breast cancer", "triple negative breast", "ER-negative PR-negative HER2-negative"]
+    },
+    "colorectal cancer": {
+      "fraction": 0.15,
+      "rationale": "Novel targeted CRC therapies typically start in MSI-H/dMMR CRC (~15% of all CRC) for immunotherapy or in specific molecular subsets (RAS wild-type, BRAF V600E ~8-10%, HER2-amplified ~3-4%). First-line mCRC trials enroll ~50% of the CRC population that is metastatic at diagnosis.",
+      "expansion_yr": 4,
+      "citation": "SEER Cancer Statistics 2023; KEYNOTE-177 (MSI-H), BEACON-CRC (BRAF V600E) enrollment criteria",
+      "aliases": ["CRC", "colon cancer", "rectal cancer", "colorectal carcinoma", "MSI-H CRC", "dMMR CRC"]
+    },
+    "pancreatic cancer": {
+      "fraction": 0.65,
+      "rationale": "~85% of PDAC diagnoses are locally advanced or metastatic (unresectable), where novel systemic therapies are tested. Resectable PDAC (~15%) is a separate adjuvant/neoadjuvant setting. Most PDAC trials start in first- or second-line metastatic setting due to the aggressive natural history and rapid progression.",
+      "expansion_yr": 3,
+      "citation": "SEER Cancer Statistics 2023; NAPOLI-3, OLAPARIB (POLO) trial enrollment; NCCN PDAC Guidelines 2024",
+      "aliases": ["PDAC", "pancreatic ductal adenocarcinoma", "exocrine pancreatic cancer", "pancreatic adenocarcinoma"]
+    },
+    "ovarian cancer": {
+      "fraction": 0.22,
+      "rationale": "BRCA1/2-mutated ovarian cancer represents ~22% of all ovarian cancer (germline + somatic). PARP inhibitors are approved specifically in BRCA-mutated or HRD+ ovarian cancer. Platinum-sensitive relapsed ovarian cancer (PSROC) is the initial indication for most maintenance therapies.",
+      "expansion_yr": 4,
+      "citation": "SEER Cancer Statistics 2023; SOLO-1, PAOLA-1 trial enrollment criteria; ESMO ovarian cancer guidelines 2023",
+      "aliases": ["ovarian carcinoma", "BRCA ovarian cancer", "epithelial ovarian cancer", "high-grade serous ovarian"]
+    },
+    "multiple myeloma": {
+      "fraction": 0.45,
+      "rationale": "Novel MM therapies typically start in relapsed/refractory multiple myeloma (RRMM, 2L+), which includes patients who have already received at least 1-2 prior lines of therapy — approximately 45-55% of total MM patients at any given time. Newly diagnosed MM (NDMM) trials come after proof-of-concept in RRMM.",
+      "expansion_yr": 4,
+      "citation": "IMF myeloma statistics 2023; DARA-RRMM (POLLUX, CASTOR) trial eligibility; NCCN MM Guidelines 2024",
+      "aliases": ["MM", "myeloma", "plasma cell myeloma", "RRMM", "relapsed refractory myeloma"]
+    },
+    "acute myeloid leukemia": {
+      "fraction": 0.40,
+      "rationale": "Fit-for-intensive-chemotherapy AML (typically age <75, good PS) represents ~40-50% of all AML. Novel targeted agents (IDH1/IDH2, FLT3 inhibitors) were initially approved in specific molecular subsets (~20-30% each). Elderly/unfit AML is a separate indication for lower-intensity regimens.",
+      "expansion_yr": 3,
+      "citation": "SEER Cancer Statistics 2023; DiNardo et al. NEJM 2018 (enasidenib IDH2); RATIFY (midostaurin FLT3) enrollment criteria",
+      "aliases": ["AML", "acute myelogenous leukemia", "AML newly diagnosed", "FLT3 AML", "IDH1 AML", "IDH2 AML"]
+    },
+    "diffuse large b-cell lymphoma": {
+      "fraction": 0.40,
+      "rationale": "Relapsed/refractory DLBCL (rrDLBCL, 2L+ after R-CHOP) represents ~40% of all DLBCL patients. CAR-T therapies and novel immunotherapies were initially approved in rrDLBCL (3L+). First-line DLBCL trials for novel combinations come after R/R data.",
+      "expansion_yr": 3,
+      "citation": "SEER Cancer Statistics 2023; ZUMA-7, TRANSFORM, BELINDA trial eligibility (rrDLBCL)",
+      "aliases": ["DLBCL", "large B-cell lymphoma", "aggressive lymphoma", "diffuse large B cell"]
+    },
+    "prostate cancer metastatic": {
+      "fraction": 0.20,
+      "rationale": "Metastatic castration-resistant prostate cancer (mCRPC) represents ~15-25% of all prostate cancer prevalence at any given time. Novel hormonal agents and PARP inhibitors were initially approved in mCRPC (post-docetaxel or post-AR inhibitor). mCSPC (metastatic castration-sensitive) is a separate earlier setting.",
+      "expansion_yr": 4,
+      "citation": "SEER Cancer Statistics 2023; PROFOUND (olaparib mCRPC), TALAPRO-2 trial eligibility; NCCN Prostate Cancer 2024",
+      "aliases": ["mCRPC", "metastatic castration-resistant prostate cancer", "CRPC", "prostate cancer mCRPC"]
+    },
+    "melanoma": {
+      "fraction": 0.45,
+      "rationale": "BRAF V600E/K-mutated melanoma represents ~45-50% of all cutaneous melanoma. BRAF/MEK inhibitors and immunotherapy combinations are tested in metastatic melanoma first (~30% of all melanoma). Adjuvant melanoma trials follow after metastatic approval.",
+      "expansion_yr": 3,
+      "citation": "SEER Cancer Statistics 2023; COMBI-d (dabrafenib/trametinib), KEYNOTE-006 enrollment criteria",
+      "aliases": ["cutaneous melanoma", "BRAF mutant melanoma", "metastatic melanoma", "stage IV melanoma"]
+    },
+    "hepatocellular carcinoma": {
+      "fraction": 0.55,
+      "rationale": "Trial-eligible HCC (Child-Pugh A, ECOG PS 0-1, adequate hepatic reserve) represents ~55-65% of all HCC diagnoses. Novel systemic therapies are tested in this population (advanced/intermediate HCC). Early HCC (BCLC 0-A, resectable or ablatable) is a separate setting with different endpoints.",
+      "expansion_yr": 4,
+      "citation": "SEER Cancer Statistics 2023; IMbrave150, HIMALAYA trial eligibility criteria; BCLC staging 2022",
+      "aliases": ["HCC", "liver cancer", "hepatoma", "primary liver cancer", "advanced HCC"]
+    },
+    "urothelial carcinoma": {
+      "fraction": 0.30,
+      "rationale": "Metastatic or locally advanced urothelial carcinoma (mUC) ineligible for platinum-based chemotherapy represents ~30% of all bladder/urothelial cancer. Novel immunotherapies (anti-PD-L1) were initially approved in cisplatin-ineligible or previously-treated mUC. Muscle-invasive bladder cancer (MIBC) neoadjuvant is a separate setting.",
+      "expansion_yr": 3,
+      "citation": "SEER Cancer Statistics 2023; KEYNOTE-052, IMvigor210 trial eligibility (platinum-ineligible mUC)",
+      "aliases": ["bladder cancer", "urothelial cancer", "transitional cell carcinoma", "TCC bladder", "mUC"]
+    },
+    "heart failure": {
+      "fraction": 0.45,
+      "rationale": "Novel HF drugs typically target either HFrEF (LVEF <40%, ~45-50% of HF patients) or HFpEF (LVEF ≥50%, ~45-50%). Pivotal trials are conducted in one phenotype. The initial TAM = roughly half of total HF prevalence in the US (~3M of 6.7M). Empirically: DAPA-HF, EMPEROR-Reduced enrolled HFrEF; EMPEROR-Preserved, DELIVER enrolled HFpEF.",
+      "expansion_yr": 6,
+      "citation": "ACC/AHA Heart Failure Guideline 2022 (JACC 2022;79:e263); DAPA-HF, EMPEROR-Reduced, DELIVER enrollment criteria",
+      "aliases": ["CHF", "cardiac failure", "decompensated heart failure", "congestive heart failure"]
+    },
+    "heart failure hfref": {
+      "fraction": 0.45,
+      "rationale": "HFrEF (LVEF <40%) = ~45% of all HF patients; pivotal trials (DAPA-HF, EMPEROR-Reduced, PARADIGM-HF) restricted to this subtype.",
+      "expansion_yr": 5,
+      "citation": "DAPA-HF (Wiviott NEJM 2019), EMPEROR-Reduced (Packer NEJM 2020), PARADIGM-HF enrollment criteria",
+      "aliases": ["systolic heart failure", "reduced EF heart failure", "HFrEF", "heart failure with reduced ejection fraction"]
+    },
+    "heart failure hfpef": {
+      "fraction": 0.45,
+      "rationale": "HFpEF (LVEF ≥50%) = ~45% of all HF patients; trials (EMPEROR-Preserved, DELIVER) restricted to this subtype plus NT-proBNP enrichment.",
+      "expansion_yr": 5,
+      "citation": "EMPEROR-Preserved (Anker NEJM 2021), DELIVER (Solomon NEJM 2022) enrollment criteria",
+      "aliases": ["diastolic heart failure", "preserved EF heart failure", "HFpEF", "heart failure with preserved ejection fraction"]
+    },
+    "atrial fibrillation": {
+      "fraction": 0.35,
+      "rationale": "Novel AF therapies (rhythm control, stroke prevention) typically start in non-valvular AF (NVAF) with CHA2DS2-VASc ≥2 — approximately 35-40% of all AF. Valvular AF, post-cardiac surgery AF, and lone AF in young patients are separate clinical populations with different risk profiles.",
+      "expansion_yr": 4,
+      "citation": "ACC/AHA AF Guidelines 2023; ROCKET AF, ARISTOTLE, ENGAGE AF-TIMI enrollment criteria",
+      "aliases": ["AFib", "Afib", "paroxysmal AF", "persistent AF", "nonvalvular atrial fibrillation", "NVAF"]
+    },
+    "pulmonary arterial hypertension": {
+      "fraction": 0.60,
+      "rationale": "Clinical trials in PAH enroll WHO functional class II-III patients (approximately 60% of PAH at diagnosis), who have symptomatic disease but have not yet progressed to FC IV (end-stage, ~15%). Most pivotal PAH trials have excluded FC I and FC IV for safety reasons.",
+      "expansion_yr": 5,
+      "citation": "ERS/ESC PAH Guidelines 2022 (EHJ 2022;43:3618); AMBITION, GRIPHON trial enrollment criteria",
+      "aliases": ["PAH", "pulmonary hypertension", "group 1 pulmonary hypertension", "WHO group 1 PH"]
+    },
+    "type 2 diabetes": {
+      "fraction": 0.28,
+      "rationale": "Novel T2D drugs typically enroll patients inadequately controlled on ≥1 existing agent with HbA1c 7.5-10% — approximately 25-30% of all T2D patients. The remaining majority is well-controlled on existing therapies (metformin, SGLT2i, GLP-1RA). High CV risk subpopulations (T2D+ASCVD or HF or CKD) used for cardiorenal-focused trials.",
+      "expansion_yr": 3,
+      "citation": "ADA Standards of Medical Care 2024 (Diabetes Care 2024); ACCORD/UKPDS T2D epidemiology; DECLARE-TIMI trial eligibility",
+      "aliases": ["T2D", "T2DM", "type-2 diabetes", "diabetes mellitus type 2", "non-insulin dependent diabetes"]
+    },
+    "type 1 diabetes": {
+      "fraction": 0.40,
+      "rationale": "Novel T1D drugs (immunotherapy, closed-loop systems) typically enroll adults or adolescents with suboptimal glycemic control (HbA1c 7.5-10%) — approximately 40% of T1D prevalence. Newly diagnosed T1D (within 3 months, for immune intervention) is a separate narrow population (~25,000 US/year).",
+      "expansion_yr": 4,
+      "citation": "Juvenile Diabetes Research Foundation statistics 2023; T1D Exchange Registry data; TrialNet",
+      "aliases": ["T1D", "T1DM", "type-1 diabetes", "insulin-dependent diabetes", "juvenile diabetes"]
+    },
+    "nash": {
+      "fraction": 0.20,
+      "rationale": "NASH with significant fibrosis (F2-F3, NASH Activity Score ≥4) is the target population for novel hepatic therapies — approximately 20% of total NAFLD/MAFLD prevalence. Cirrhotic NASH (F4) and non-fibrotic NASH (F0-F1) are separate populations. Liver biopsy confirmation is required for most pivotal NASH trials, further restricting practical enrollment.",
+      "expansion_yr": 5,
+      "citation": "AASLD/EASL NASH Guidelines 2023; RESOLVE-IT, STELLAR trial eligibility criteria (F2-F3 NASH)",
+      "aliases": ["NAFLD", "MAFLD", "non-alcoholic steatohepatitis", "metabolic-associated steatohepatitis", "MASH", "nonalcoholic steatohepatitis"]
+    },
+    "obesity": {
+      "fraction": 0.30,
+      "rationale": "Novel anti-obesity drugs are typically initially approved in adults with BMI ≥30 OR BMI ≥27 with at least one weight-related comorbidity (T2D, HTN, dyslipidemia) — approximately 30% of all obese adults. Class III obesity (BMI ≥40) or those with diabetes are often initial targets for dose-finding studies. Pediatric obesity is a separate indication.",
+      "expansion_yr": 3,
+      "citation": "CDC obesity statistics 2023 (42% of US adults obese); STEP 1-5 (semaglutide), SURMOUNT-1 (tirzepatide) eligibility",
+      "aliases": ["overweight", "BMI ≥30", "class I obesity", "morbid obesity", "class III obesity", "excess weight"]
+    },
+    "copd": {
+      "fraction": 0.35,
+      "rationale": "Novel COPD drugs target symptomatic patients with significant airflow obstruction (GOLD II-IV, FEV1/FVC <0.70 + FEV1 <80%) with ≥1 exacerbation per year — approximately 30-35% of all COPD patients who are moderate-to-severe and exacerbation-prone. Mild COPD (GOLD I) is typically excluded from pivotal trials.",
+      "expansion_yr": 4,
+      "citation": "GOLD COPD Guidelines 2024; IMPACT, ETHOS, KRONOS trial eligibility criteria (GOLD II-IV, ≥1 exacerbation)",
+      "aliases": ["chronic obstructive pulmonary disease", "emphysema", "chronic bronchitis", "GOLD COPD", "obstructive lung disease"]
+    },
+    "idiopathic pulmonary fibrosis": {
+      "fraction": 0.65,
+      "rationale": "IPF clinical trials enroll patients with definite or probable UIP on HRCT, mild-to-moderate severity (FVC 50-90% predicted, DLco ≥30%) — approximately 65% of all IPF patients at any given time. Severe IPF (FVC <50%) is excluded from most trials due to rapid decline and poor prognosis. Novel anti-fibrotic drugs target this moderate-severity core population.",
+      "expansion_yr": 3,
+      "citation": "ATS/ERS IPF Guidelines 2022; INPULSIS (nintedanib), ASCEND (pirfenidone) trial eligibility criteria",
+      "aliases": ["IPF", "pulmonary fibrosis", "interstitial lung disease", "usual interstitial pneumonia", "UIP"]
+    },
+    "asthma": {
+      "fraction": 0.15,
+      "rationale": "Biologics for asthma (anti-IL-5, anti-IL-4/13, anti-TSLP) target severe uncontrolled asthma with specific biomarkers — approximately 5-10% of all asthma patients. Type 2 high asthma (elevated eosinophils ≥300 cells/µL, or FeNO ≥25 ppb) is ~55% of severe asthma (~5-8% of all asthma). Novel small-molecule bronchodilators may target a broader moderate-severe population (15-20% of all asthma).",
+      "expansion_yr": 5,
+      "citation": "GINA Guidelines 2024; MENSA (mepolizumab), ZONDA (benralizumab), NAVIGATOR (tezepelumab) eligibility criteria",
+      "aliases": ["severe asthma", "eosinophilic asthma", "allergic asthma", "bronchial asthma", "poorly controlled asthma"]
+    },
+    "cystic fibrosis": {
+      "fraction": 0.55,
+      "rationale": "CFTR modulators (elexacaftor/tezacaftor/ivacaftor) are approved for F508del homozygous or F508del heterozygous with MF mutation (~90% of CF patients age ≥6). Initial CFTR modulator trials enrolled F508del homozygous patients specifically (~45% of all CF). Remaining patients (minimal function mutations, class I) require different modulator approaches.",
+      "expansion_yr": 3,
+      "citation": "Cystic Fibrosis Foundation Patient Registry 2022; AURORA, VX-445 trial eligibility (F508del homozygous)",
+      "aliases": ["CF", "cystic fibrosis F508del", "CFTR mutation", "F508del cystic fibrosis"]
+    },
+    "alzheimer's disease": {
+      "fraction": 0.20,
+      "rationale": "Approved anti-amyloid therapies (lecanemab, donanemab) target early AD — MCI due to AD or mild AD dementia — confirmed by amyloid PET or CSF biomarker (~20% of the 6.7M US Alzheimer's population in early stages with accessible confirmatory biomarker data). Advanced/moderate/severe AD (majority) is excluded from anti-amyloid trials. Infrastructure for amyloid testing also gates enrollment.",
+      "expansion_yr": 5,
+      "citation": "Alzheimer's Association 2024 Facts & Figures; CLARITY-AD (lecanemab), TRAILBLAZER-ALZ (donanemab) eligibility; Janelidze et al. JAMA Neurol 2021",
+      "aliases": ["Alzheimer", "AD", "Alzheimer disease", "early AD", "MCI Alzheimer", "mild cognitive impairment Alzheimer"]
+    },
+    "parkinson's disease": {
+      "fraction": 0.25,
+      "rationale": "Novel neuroprotective or symptomatic PD drugs typically start in early-stage PD (Hoehn & Yahr I-II, within 5 years of diagnosis) for disease modification, or mid-stage (H&Y III) for symptomatic control — approximately 25-30% of total PD prevalence. Advanced PD (H&Y IV-V) is a separate population for device-based interventions (DBS, pump).",
+      "expansion_yr": 5,
+      "citation": "Parkinson's Foundation statistics 2023; PASADENA (prasinezumab), SPARK trial eligibility criteria",
+      "aliases": ["PD", "Parkinson disease", "Parkinson's", "idiopathic Parkinson's", "early PD", "levodopa-treated Parkinson's"]
+    },
+    "amyotrophic lateral sclerosis": {
+      "fraction": 0.50,
+      "rationale": "ALS drug trials enroll patients within 2-3 years of symptom onset with definite/probable ALS (El Escorial criteria), relatively preserved function (ALSFRS-R ≥35-40, FVC ≥50%) — approximately 50% of all ALS patients. Patients in late stages (FVC <50%, tracheotomy) are excluded from most drug trials. SOD1-ALS (the tofersen-targeted population) is ~2% of ALS.",
+      "expansion_yr": 3,
+      "citation": "ALS Association statistics 2023; PHOENIX (tofersen), CENTAUR trial eligibility criteria; El Escorial diagnostic criteria",
+      "aliases": ["ALS", "Lou Gehrig's disease", "motor neuron disease", "MND", "SOD1-ALS"]
+    },
+    "multiple sclerosis": {
+      "fraction": 0.45,
+      "rationale": "Novel DMTs for MS are typically first developed in relapsing-remitting MS (RRMS), which is ~85% of MS at onset and ~45-50% of total MS prevalence (others are progressive). First-in-class agents are often initially approved for active RRMS (with ≥1 relapse on existing DMT or ≥2 relapses/year — ~35-40% of RRMS).",
+      "expansion_yr": 4,
+      "citation": "National MS Society statistics 2023; ULTIMATE I/II (ublituximab), SUNBEAM (ozanimod) eligibility criteria",
+      "aliases": ["RRMS", "relapsing-remitting MS", "relapsing MS", "multiple sclerosis relapsing"]
+    },
+    "epilepsy": {
+      "fraction": 0.30,
+      "rationale": "Drug-resistant focal epilepsy (≥2 failed AEDs with ≥4 seizures/month) is the target for novel antiseizure medications and devices — approximately 30% of total epilepsy prevalence (~1M of 3.4M US). Add-on (adjunctive) trials in drug-resistant focal epilepsy are the standard FDA registration pathway for new ASMs.",
+      "expansion_yr": 4,
+      "citation": "CDC epilepsy statistics 2023; Kwan et al. Neurology 2010 (drug-resistance definition); MOMENTUM (cenobamate Phase 3) eligibility",
+      "aliases": ["drug-resistant epilepsy", "refractory epilepsy", "focal epilepsy", "partial onset seizures", "ASM"]
+    },
+    "rheumatoid arthritis": {
+      "fraction": 0.35,
+      "rationale": "Novel DMARDs for RA are tested in MTX-inadequate responders (MTX-IR) with moderate-to-severe disease (DAS28 ≥3.2) — approximately 30-35% of all RA patients. Prior-biologic failures (anti-TNF-IR) are the target for later-line agents. Methotrexate-naive patients are a separate earlier-line indication.",
+      "expansion_yr": 4,
+      "citation": "ACR RA Guideline 2021; SELECT-BEYOND, ORAL-SYNC (tofacitinib MTX-IR), MOBILITY trial eligibility",
+      "aliases": ["RA", "rheumatoid arthritis MTX-IR", "moderate-severe RA", "active RA", "seropositive RA"]
+    },
+    "systemic lupus erythematosus": {
+      "fraction": 0.30,
+      "rationale": "SLE trials target moderate-to-severe active disease (SLEDAI ≥6-8) despite standard therapy — approximately 30% of all SLE patients. Lupus nephritis (LN, affecting ~50% of SLE but trialed separately) and neuropsychiatric SLE are separate indications. Most novel SLE drugs start in general active SLE before LN-specific expansion.",
+      "expansion_yr": 5,
+      "citation": "ACR SLE Guidelines 2023; BLISS-52/76 (belimumab), TULIP-1/2 (anifrolumab) enrollment criteria (SLEDAI ≥8)",
+      "aliases": ["SLE", "lupus", "systemic lupus", "connective tissue disease", "active SLE"]
+    },
+    "crohn's disease": {
+      "fraction": 0.45,
+      "rationale": "Novel biologic/small molecule trials for Crohn's disease target moderate-to-severe active disease (CDAI 220-450 or SES-CD ≥7) in patients who have failed conventional therapy (steroids/immunomodulators) — approximately 40-50% of all CD patients. Mild Crohn's and post-surgical prevention are separate indications.",
+      "expansion_yr": 4,
+      "citation": "ECCO CD Guidelines 2023; GEMINI II (vedolizumab), GALAXI-1 (guselkumab), ADVANCE/MOTIVATE (upadacitinib) enrollment criteria",
+      "aliases": ["CD", "Crohn disease", "ileocolonic Crohn's", "small bowel Crohn's", "fistulizing Crohn's", "active Crohn's"]
+    },
+    "ulcerative colitis": {
+      "fraction": 0.45,
+      "rationale": "UC trials enroll moderate-to-severe active UC (Mayo score ≥6, endoscopic subscore ≥2) who have failed aminosalicylates and/or conventional immunosuppression — approximately 40-50% of all UC patients. Mild UC is managed with topicals; severe/fulminant UC requiring hospitalization is a separate indication.",
+      "expansion_yr": 4,
+      "citation": "ECCO UC Guidelines 2023; TRUE NORTH (ozanimod), U-ACHIEVE (upadacitinib) enrollment criteria (Mayo ≥6)",
+      "aliases": ["UC", "ulcerative colitis", "inflammatory bowel disease", "IBD UC", "active UC", "moderate-severe UC"]
+    },
+    "psoriasis": {
+      "fraction": 0.25,
+      "rationale": "Biologic approvals for plaque psoriasis target moderate-to-severe disease (BSA ≥10% OR DLQI ≥10 OR IGA ≥3) who are candidates for systemic therapy — approximately 25% of all psoriasis patients. Mild psoriasis (BSA <10%) is managed topically and is not a target for novel biologics unless they demonstrate superior tolerability.",
+      "expansion_yr": 3,
+      "citation": "AAD Psoriasis Guidelines 2020; VOYAGE-1/2 (guselkumab), BE READY (bimekizumab) eligibility criteria (IGA ≥3, BSA ≥10%)",
+      "aliases": ["plaque psoriasis", "moderate-severe psoriasis", "chronic plaque psoriasis", "psoriasis vulgaris"]
+    },
+    "atopic dermatitis": {
+      "fraction": 0.20,
+      "rationale": "Moderate-to-severe atopic dermatitis (IGA 3-4, EASI ≥16, SCORAD ≥25) candidates for systemic therapy represent approximately 15-20% of all AD patients. Mild AD is managed with topicals. Novel targeted agents (IL-4/13, IL-31, OX40 pathway) start in this subgroup.",
+      "expansion_yr": 4,
+      "citation": "AAD AD Guidelines 2023; SOLO-1/2 (dupilumab), JADE MONO-1 (abrocitinib) eligibility criteria (IGA ≥3)",
+      "aliases": ["AD", "eczema", "atopic eczema", "moderate-severe AD", "chronic eczema"]
+    },
+    "sepsis": {
+      "fraction": 0.25,
+      "rationale": "Novel sepsis drugs/interventions are trialed in highest-severity subpopulation (septic shock or SOFA ≥4), approximately 25% of all sepsis patients. The all-sepsis population (1.7M US/yr) is too heterogeneous for pivotal trials; virtually every sepsis trial restricts enrollment by severity, organ failure, or pathogen criteria.",
+      "expansion_yr": 4,
+      "citation": "Rudd et al. Lancet 2020; SCCM Sepsis-3 definition; PROWESS-SHOCK, ARISE trial criteria",
+      "aliases": ["septic shock", "severe sepsis", "bacteremia", "ICU sepsis", "high-risk sepsis"]
+    },
+    "mrsa": {
+      "fraction": 0.40,
+      "rationale": "MRSA antibiotic trials enroll hospital-acquired or invasive MRSA infections (bacteremia, endocarditis, hospital-acquired pneumonia). Community MRSA (uncomplicated SSTI-only) is excluded from most hospital-indication trials. Initial indication = serious/hospitalized MRSA infections (~40% of all MRSA infections in US).",
+      "expansion_yr": 3,
+      "citation": "FDA ABSSSI/HABP/VABP guidance 2014; MRSA surveillance CDC AR Threats Report 2019; LOCK, VANQUISH trial criteria",
+      "aliases": ["methicillin-resistant Staphylococcus aureus", "MRSA bacteremia", "invasive MRSA", "MRSA infection"]
+    },
+    "clostridioides difficile": {
+      "fraction": 0.50,
+      "rationale": "CDI trials typically target first recurrence or high-risk primary CDI (age ≥65, severe disease, ribotype 027). Prevention of recurrence is the dominant unmet need (~50% of CDI that is recurrent or at high-risk for recurrence). Primary uncomplicated CDI is well-controlled by existing antibiotics.",
+      "expansion_yr": 3,
+      "citation": "IDSA CDI Guidelines 2021; MODIFY I/II (bezlotoxumab), SER-109 trial eligibility criteria",
+      "aliases": ["CDI", "C. diff", "C. difficile", "Clostridioides difficile infection", "recurrent CDI", "RCDI"]
+    },
+    "spinal muscular atrophy": {
+      "fraction": 0.85,
+      "rationale": "SMA gene therapies (Zolgensma) and ASOs (Spinraza) have been studied across SMA type 1 (most severe, ~60% of SMA), type 2 (~25%), and type 3 (~15%). Initial approvals were in symptomatic infants and children. For new modalities, the target is all SMN1-deletion SMA patients regardless of severity = ~85% of total SMA (excluding very late-diagnosed adults on existing treatment).",
+      "expansion_yr": 2,
+      "citation": "SMA Foundation statistics 2023; STR1VE, CHERISH (nusinersen) trial eligibility; AVXS-101 Phase 1 trial",
+      "aliases": ["SMA", "spinal muscular atrophy type 1", "SMA type 2", "SMA type 3", "SMN1 deletion"]
+    },
+    "duchenne muscular dystrophy": {
+      "fraction": 0.70,
+      "rationale": "DMD exon-skipping therapies are initially approved in patients with exon-skip-amenable mutations (exon 51 skip amenable ~13%, exon 53 ~10%, exon 45 ~8%). New mutation-agnostic approaches (gene therapy, stop codon readthrough) target ambulatory DMD patients across all mutations (~70% of DMD patients are ambulatory at initial trial)",
+      "expansion_yr": 3,
+      "citation": "Parent Project Muscular Dystrophy statistics 2023; EXONDYS-51 (eteplirsen), ELEVIDYS (delandistrogene) trial eligibility",
+      "aliases": ["DMD", "Duchenne dystrophy", "exon skipping DMD", "dystrophinopathy"]
+    },
+    "sickle cell disease": {
+      "fraction": 0.40,
+      "rationale": "Disease-modifying therapies (voxelotor, crizanlizumab, gene therapy) are initially developed in HbSS or HbSβ0-thalassemia patients with ≥1 vaso-occlusive crisis (VOC)/year — approximately 40% of all SCD patients. Gene therapies target patients eligible for stem cell transplant procedures. Mild SCD (HbSC genotype) is a separate milder phenotype.",
+      "expansion_yr": 4,
+      "citation": "ASH SCD Guidelines 2020; HOPE (voxelotor), SUSTAIN (crizanlizumab), HGB-206/207 (gene therapy) trial eligibility",
+      "aliases": ["SCD", "sickle cell anemia", "HbSS", "HbSC", "sickle-β thalassemia", "vaso-occlusive disease"]
+    },
+    "glioblastoma": {
+      "fraction": 0.65,
+      "rationale": "GBM is already a narrow patient population (~14K US/yr). Initial trials typically enroll newly diagnosed GBM (approximately 10K/yr, the IDH-wildtype subset). Recurrent GBM is a separate indication (smaller N per cycle of recurrence). Novel therapies typically start in newly diagnosed GBM post-resection + temozolomide.",
+      "expansion_yr": 3,
+      "citation": "CBTRUS Statistical Report 2023; NCCN CNS Tumor Guidelines 2024; RTOG 0525, STUPP protocol enrollment criteria",
+      "aliases": ["GBM", "glioblastoma multiforme", "GBM IDH-wildtype", "high-grade glioma", "grade 4 glioma"]
+    },
+    "iga nephropathy": {
+      "fraction": 0.55,
+      "rationale": "Novel IgAN therapies target patients with eGFR 20-90 mL/min/1.73m2, urine protein-creatinine ratio ≥1 g/g despite maximum tolerated RAS blockade — approximately 50-60% of all IgAN patients. Rapidly progressive IgAN (RPGN) and end-stage IgAN (eGFR <20) are separate populations.",
+      "expansion_yr": 4,
+      "citation": "KDIGO IgAN Guidelines 2021; NefIgArd (sparsentan), PROTECT (sparsentan) trial eligibility criteria",
+      "aliases": ["IgAN", "IgA nephropathy", "Berger disease", "mesangial IgA nephropathy", "IgA glomerulonephritis"]
+    },
+    "focal segmental glomerulosclerosis": {
+      "fraction": 0.60,
+      "rationale": "FSGS trials target primary/idiopathic FSGS with nephrotic-range proteinuria (UPCR ≥1.5-2 g/g) and eGFR ≥25 mL/min — approximately 55-65% of all FSGS diagnoses. Secondary FSGS (obesity-related, medication-induced) is excluded from most pivotal trials. Steroid-resistant FSGS is the primary therapeutic target.",
+      "expansion_yr": 4,
+      "citation": "KDIGO Glomerular Guidelines 2021; DUPLEX (sparsentan) trial eligibility; Heerspink et al. NEJM 2022",
+      "aliases": ["FSGS", "focal segmental glomerulosclerosis", "primary FSGS", "steroid-resistant FSGS", "nephrotic FSGS"]
+    },
+    "diabetic kidney disease": {
+      "fraction": 0.30,
+      "rationale": "Novel renoprotective therapies for DKD target patients with T2D + eGFR 25-75 mL/min/1.73m2 + UACR ≥200-300 mg/g despite standard of care (ACEi/ARB + SGLT2i) — approximately 25-30% of all DKD patients (the progressive-high-risk subgroup). Early DKD (UACR <300) is managed with existing medications.",
+      "expansion_yr": 4,
+      "citation": "KDIGO CKD-DKD Guidelines 2022; FIGARO-DKD (finerenone), CREDENCE trial eligibility criteria",
+      "aliases": ["DKD", "diabetic nephropathy", "diabetic chronic kidney disease", "T2D CKD", "CKD diabetes"]
+    },
+    "hiv": {
+      "fraction": 0.30,
+      "rationale": "Novel ARVs for HIV typically start in treatment-experienced patients with documented resistance to ≥2 existing drug classes — approximately 20-30% of all people with HIV on treatment in the US. Novel long-acting formulations (LA-ART) are now being tested in treatment-naive patients as first-line alternatives.",
+      "expansion_yr": 3,
+      "citation": "DHHS ARV Guidelines 2024; SUNLENCA (lenacapavir), ATLAS-2M (cabotegravir+rilpivirine) eligibility criteria",
+      "aliases": ["HIV-1", "HIV infection", "antiretroviral-experienced HIV", "drug-resistant HIV", "virologically suppressed HIV"]
+    }
+  }
+}

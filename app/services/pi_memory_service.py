@@ -190,25 +190,29 @@ async def get_pi_memory_context(user_id: int) -> str:
         
         memories = [dict(r) for r in rows]
         
-        lines = ["[PI INSTITUTIONAL MEMORY — use this to personalize the report]"]
-        lines.append(f"This PI has generated {sum(m['report_count'] for m in memories)} reports on Project Elevate.")
-        lines.append("Their research history:")
-        
+        lines = ["[PI INSTITUTIONAL MEMORY — personalisation only, strict scope rules below]"]
+        lines.append(f"This PI has generated {sum(m['report_count'] for m in memories)} reports on Medlevate.")
+        lines.append("Their prior research areas (for context only):")
+
         for m in memories:
-            competitors = m.get("key_competitors") or []
-            tam = m.get("tam_estimate") or 0
+            # H-03: only emit domain/stage — never TAM, regulatory strategy, or competitors
+            # from prior reports. Those numbers belong to different products and must not
+            # cross-contaminate the current report with fabricated analogies.
             lines.append(
-                f"- {m['disease_area']} ({m['product_type']}): "
-                f"TAM ~${tam/1e6:.0f}M, "
-                f"stage={m['development_stage']}, "
-                f"competitors=[{', '.join(competitors[:3])}], "
-                f"regulatory={m['regulatory_strategy'][:100]}"
+                f"- {m['disease_area']} ({m['product_type']}), "
+                f"stage={m['development_stage']}"
             )
-        
-        lines.append("Use this history to: avoid repeating basics they already know, "
-                     "flag if their new idea overlaps with prior research, "
-                     "note if competitive landscape has changed since their last report.")
-        
+
+        lines.append(
+            "\nSCOPE RULES (mandatory — these are security constraints, not preferences):\n"
+            "1. Do NOT reference TAM estimates, regulatory costs, or market numbers from prior reports. "
+            "Those numbers were computed for different products and are not analogies for this product.\n"
+            "2. Do NOT cite 'the PI\\'s prior [X] report' as a source for any claim in this report. "
+            "Each report is independent. Cross-report citation is a data integrity violation.\n"
+            "3. You may use this history only to: skip basics they already understand, "
+            "and acknowledge their multi-domain expertise."
+        )
+
         return "\n".join(lines)
     
     except Exception as e:

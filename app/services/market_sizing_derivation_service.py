@@ -153,6 +153,9 @@ def _classify_archetype(idea: str, product_type: str) -> str:
     # ids (drug_small_molecule, digital_health, …) and the ProductType enum values
     # (software, diagnostic, medical_device, …) so a SaMD isn't priced as a drug.
     pt_map = {
+        # Non-clinical research tools (H-07) — buyer is academic PI, not hospital
+        "research_tool_non_clinical":   "research_tool_non_clinical",
+        "research_infrastructure_saas": "research_tool_non_clinical",
         # tier1_category ids
         "drug_small_molecule":   "pharma_small_molecule",
         "biologic":              "pharma_biologic",
@@ -602,8 +605,8 @@ def _derive_pharma_formula(
             f"Order-of-entry share {entry_share:.0%} (BLP simulation)",
         ],
         confidence_note=(
-            f"95% CI: {_fmt(tam*0.5)}–{_fmt(tam*2.0)} (±2× range; IQVIA reports 71% forecast error "
-            f"for 5-year drug revenue projections; primary uncertainty: diagnostic yield ±30%)."
+            f"Primary uncertainty: diagnostic yield (±30%) and WAC-to-net spread (±15%). "
+            f"Sensitivity range under pessimistic/optimistic input assumptions: {_fmt(tam*0.5)}–{_fmt(tam*2.0)}."
         ),
         primary_citations=[
             {"ref": "Barendregt 2003", "title": "DisMod II", "url": "https://pubmed.ncbi.nlm.nih.gov/12773212/"},
@@ -790,7 +793,7 @@ def _derive_gene_therapy_formula(
             f"Benefit duration {benefit_years:.0f} years (durable genetic correction)",
             f"Treatment center capacity ramp: {center_ramp:.0%} at Year 5",
         ],
-        confidence_note=f"95% CI: {_fmt(tam*0.4)}–{_fmt(tam*2.5)}. Wide range reflects durability uncertainty and payer outcomes-based contract terms.",
+        confidence_note=f"Wide sensitivity range ({_fmt(tam*0.4)}–{_fmt(tam*2.5)}) driven by outcome-based contract structure and durability uncertainty.",
         primary_citations=[
             {"ref": "Novelli 2023", "title": "Gene therapy pricing ISPOR", "url": "https://pubmed.ncbi.nlm.nih.gov/36781367/"},
             {"ref": "CMS CGTA 2024", "title": "CMS Cell & Gene Therapy Access Model", "url": "https://www.cms.gov/newsroom/fact-sheets/cms-cell-and-gene-therapy-access-model"},
@@ -979,7 +982,7 @@ def _derive_vaccine_formula(
             f"Net price: ${net_price:,.0f}/dose × {dose_series} doses",
             f"ACIP status: {acip_status}",
         ],
-        confidence_note=f"95% CI: {_fmt(tam*0.5)}–{_fmt(tam*1.8)}. Driven by ACIP recommendation timing, uptake rate variation, and competitive landscape.",
+        confidence_note=f"Primary uncertainty: ACIP recommendation timing and competitive uptake rate. Sensitivity range: {_fmt(tam*0.5)}–{_fmt(tam*1.8)}.",
         primary_citations=[
             {"ref": "CDC ACIP 2024", "title": "ACIP vaccination recommendations", "url": "https://www.cdc.gov/vaccines/acip/"},
             {"ref": "CDC VFC 2024", "title": "VFC vaccine price list", "url": "https://www.cdc.gov/vaccines/programs/vfc/"},
@@ -1171,7 +1174,7 @@ def _derive_device_surgical_formula(
             f"Net device revenue ${device_revenue_per_procedure:,.0f}/procedure",
             "Procedure-volume model, NOT drug-pricing model",
         ],
-        confidence_note=f"95% CI: {_fmt(tam*0.6)}–{_fmt(tam*1.5)}. Procedure volumes are well-characterized (HCUP) — primary uncertainty is device cost negotiation and attachment rate.",
+        confidence_note=f"Procedure volumes well-characterized (HCUP); primary uncertainty is device-cost negotiation and attachment rate. Sensitivity range: {_fmt(tam*0.6)}–{_fmt(tam*1.5)}.",
         primary_citations=[
             {"ref": "HCUP NIS 2022", "title": "National Inpatient Sample", "url": "https://hcupnet.ahrq.gov/"},
             {"ref": "CMS IPPS FY2024", "title": "DRG payment rates", "url": "https://www.cms.gov/medicare/payment/prospective-payment-systems/acute-inpatient-pps"},
@@ -1253,7 +1256,7 @@ def _derive_device_capital_formula(
         tam_fmt=_fmt(tam), sam_fmt=_fmt(sam), som_fmt=_fmt(som),
         key_assumptions=[f"{sites:,} addressable sites", f"${asp:,} system ASP", f"{cycle}-yr replacement cycle",
                          "Install-base model, NOT procedures x DRG or drug pricing"],
-        confidence_note=f"95% CI: {_fmt(tam*0.4)}-{_fmt(tam*1.8)}. Capital sales cycles (budget/siting) add timing variance.",
+        confidence_note=f"Capital sales cycles (budget approval, siting) introduce timing variance. Sensitivity range: {_fmt(tam*0.4)}–{_fmt(tam*1.8)}.",
         primary_citations=[{"ref": "IMV/COCIR", "title": "Medical imaging census", "url": "https://www.imvinfo.com/"},
                            {"ref": "ECRI", "title": "Capital-equipment benchmarks", "url": "https://www.ecri.org/"}])
 
@@ -1416,7 +1419,7 @@ def _derive_ivd_formula(
             f"Manufacturer revenue ~60% of CLFS = ${manufacturer_revenue_per_test:.0f}/test",
             "Test-volume model, NOT drug-prevalence model",
         ],
-        confidence_note=f"95% CI: {_fmt(tam*0.5)}–{_fmt(tam*1.6)}. Test volume well-characterized via CMS; primary uncertainty is reimbursement coverage (LCD/NCD determination).",
+        confidence_note=f"Test volume well-characterized via CMS; primary uncertainty is LCD/NCD coverage determination. Sensitivity range: {_fmt(tam*0.5)}–{_fmt(tam*1.6)}.",
         primary_citations=[
             {"ref": "CMS CLFS 2024", "title": "Clinical Laboratory Fee Schedule", "url": "https://www.cms.gov/medicare/payment/clinical-laboratory-fee-schedule"},
             {"ref": "CAP Q-Probes", "title": "Lab cost accounting", "url": "https://www.cap.org/"},
@@ -1531,7 +1534,7 @@ def _derive_samd_formula(
             formula=f"N_units = {units:,} {unit_label}",
             value=float(units),
             unit=unit_label,
-            source_paper="KLAS Research Digital Health 2023; IQVIA Digital Health Trends Report 2023; Rock Health Digital Health Funding Report 2024.",
+            source_paper="KLAS Research Digital Health 2023; IQVIA Digital Health Trends Report 2023; AHA Annual Survey (hospital/system counts).",
             source_url="https://klasresearch.com/",
             explanation=(
                 f"**SaMD/digital health TAM uses {'site-license' if is_enterprise else 'per-patient subscription'} "
@@ -1557,7 +1560,7 @@ def _derive_samd_formula(
                 f"Enterprise SaaS is negotiated directly between vendor and hospital procurement; "
                 f"per-patient subscriptions are priced relative to CMS RPM/CCM reimbursement rates."
             ),
-            data_source="KLAS Research contract benchmarks; CMS NCD database; Rock Health pricing survey",
+            data_source="KLAS Research contract benchmarks; CMS NCD database; Chilmark Research SaaS pricing",
             assumptions=["Pricing stable; no mandatory rebates"],
         ),
         DerivationStep(
@@ -1565,7 +1568,7 @@ def _derive_samd_formula(
             title="Step 3 — TAM, SAM, SOM",
             formula=f"TAM = {units:,} × ${revenue_per_unit:,} = {_fmt(tam)} | SAM = {_fmt(sam)} | SOM = {_fmt(som)}",
             value=tam, unit="USD",
-            source_paper="IQVIA Digital Health Trends 2023; Rock Health 2024 Digital Health Funding; Chilmark Research.",
+            source_paper="IQVIA Digital Health Trends 2023; Chilmark Research Digital Health Market 2024; CMS enrollment data.",
             source_url="https://www.iqvia.com/",
             explanation=(
                 f"TAM = {_fmt(tam)} at full market penetration. "
@@ -1593,11 +1596,185 @@ def _derive_samd_formula(
             f"Revenue ${revenue_per_unit:,} per unit per year",
             "SaaS model, NOT drug WAC/GTN pricing",
         ],
-        confidence_note=f"95% CI: {_fmt(tam*0.4)}–{_fmt(tam*2.0)}. Digital health has higher uncertainty (CMS reimbursement policy, hospital budget cycles) than established pharma verticals.",
+        confidence_note=f"Higher uncertainty than established pharma: CMS reimbursement policy and hospital budget cycles. Sensitivity range: {_fmt(tam*0.4)}–{_fmt(tam*2.0)}.",
         primary_citations=[
             {"ref": "KLAS 2023", "title": "Digital health contract benchmarks", "url": "https://klasresearch.com/"},
             {"ref": "IQVIA Digital Health 2023", "title": "Digital health market trends", "url": "https://www.iqvia.com/"},
             {"ref": "CMS NCD", "title": "National Coverage Determinations", "url": "https://www.cms.gov/medicare/coverage/coverage-determinations"},
+        ],
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# RESEARCH TOOL / NON-CLINICAL INFRASTRUCTURE (H-07 / H-08)
+# Buyer = academic PI on grant cycle, NOT hospital enterprise.
+# Formula: eligible_labs × annualised_spend_per_lab
+# Sources: NIH RePORTER (lab count); primary user research (spend band).
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _derive_research_tool_formula(
+    idea: str, disease_name: str, therapeutic_area: str,
+    us_prev: int, signals: dict,
+) -> "MarketSizingDerivation":
+    """
+    Bottom-up TAM for non-clinical research tools.
+
+    Economics derive from the BUYER MODEL, not patient counts:
+      TAM = eligible_labs × annualised_spend_per_lab
+
+    Spec ref: H-07 — TAM must derive from buyer population, not hospital count.
+    Numbers from academic_neurotech_lab_buyer() defaults; NIH RePORTER for lab count.
+    """
+    try:
+        from app.services.buyer_model import academic_neurotech_lab_buyer, MarketSizeResult
+        bm = academic_neurotech_lab_buyer()
+        ms = MarketSizeResult(buyer_model=bm, sam_fraction=0.30, som_fraction=0.15,
+                              som_horizon_years=5)
+        pop_lo  = bm.buyer_population_lo
+        pop_hi  = bm.buyer_population_hi
+        sp_lo   = bm.annualised_spend_lo()
+        sp_hi   = bm.annualised_spend_hi()
+        tam     = ms.tam_lo_usd   # conservative; report uses the range
+        sam     = ms.sam_lo_usd
+        som     = ms.som_lo_usd
+        pop_src = bm.population_source
+        sp_src  = bm.spend_source
+    except Exception as _e:
+        logger.warning("buyer_model import failed in derivation — using hardcoded defaults: %s", _e)
+        pop_lo, pop_hi = 3_000, 8_000
+        sp_lo,  sp_hi  = 6_667, 10_000   # $20k-$30k / 3yr cycle
+        tam  = pop_lo * sp_lo             # ~$20M
+        sam  = tam * 0.30
+        som  = sam * 0.15
+        pop_src = "NIH RePORTER — estimate pending verification"
+        sp_src  = "Assumed — operator should supply observed spend from primary research ⚠"
+
+    steps = [
+        DerivationStep(
+            step_num=1,
+            title="Step 1 — Eligible buyer population",
+            formula=f"NIH-funded labs running instrumented multi-day experiments: {pop_lo:,}–{pop_hi:,}",
+            value=float((pop_lo + pop_hi) / 2),
+            unit="labs",
+            source_paper=pop_src,
+            source_url="https://reporter.nih.gov/",
+            explanation=(
+                f"Buyer is an academic PI, not a hospital enterprise. "
+                f"Population = NIH-funded neuroscience / ecology / physiology labs that run "
+                f"instrumented long-duration unattended experiments. "
+                f"Range: {pop_lo:,} (conservative, confirmed active neurotech) to "
+                f"{pop_hi:,} (broader STEM research lab estimate). "
+                f"Source: {pop_src}."
+            ),
+            data_source=pop_src,
+            assumptions=[
+                "Denominator is NIH-funded labs, not US hospitals (H-07 fix)",
+                "Only labs running multi-day instrumented experiments are eligible",
+            ],
+        ),
+        DerivationStep(
+            step_num=2,
+            title="Step 2 — Annualised spend per lab",
+            formula=f"${sp_lo:,.0f}–${sp_hi:,.0f}/yr per lab (from ${sp_lo*3:,.0f}–${sp_hi*3:,.0f}/3-yr grant cycle)",
+            value=float((sp_lo + sp_hi) / 2),
+            unit="USD/lab/yr",
+            source_paper=sp_src,
+            source_url="",
+            explanation=(
+                f"Purchase cadence: multi-year grant cycle (~3 yrs). "
+                f"Observed spend: ${sp_lo*3:,.0f}–${sp_hi*3:,.0f} per cycle from primary PI interviews. "
+                f"Annualised: divide by 3 → ${sp_lo:,.0f}–${sp_hi:,.0f}/yr. "
+                f"Source: {sp_src}. "
+                f"NOTE: if the product's asking price exceeds the observed spend ceiling, "
+                f"flag the gap per H-07 serviceable-buyer reconciliation before proceeding."
+            ),
+            data_source=sp_src,
+            assumptions=[
+                f"Annualisation factor = 1/3 (3-year grant cycle)",
+                "Spend band from primary user research — should be updated with n>10 interviews",
+            ],
+        ),
+        DerivationStep(
+            step_num=3,
+            title="Step 3 — Total Addressable Market (TAM)",
+            formula=f"TAM = {pop_lo:,} labs × ${sp_lo:,.0f}/yr = {_fmt(pop_lo * sp_lo)} (lo) | "
+                    f"{pop_hi:,} × ${sp_hi:,.0f} = {_fmt(pop_hi * sp_hi)} (hi)",
+            value=float(tam),
+            unit="USD",
+            source_paper="Bottom-up buyer model (H-07 formula)",
+            source_url="",
+            explanation=(
+                f"TAM = buyer_population × annualised_spend. Range: "
+                f"{_fmt(pop_lo * sp_lo)}–{_fmt(pop_hi * sp_hi)}. "
+                f"Conservative estimate used as planning floor."
+            ),
+            data_source="Buyer model arithmetic",
+            assumptions=["100% market capture (theoretical ceiling)"],
+        ),
+        DerivationStep(
+            step_num=4,
+            title="Step 4 — Serviceable Addressable Market (SAM, 30% of TAM)",
+            formula=f"SAM = TAM × 30% = {_fmt(sam)}",
+            value=float(sam),
+            unit="USD",
+            source_paper="Expert estimate — labs likely to switch from DIY/status-quo within 5 yrs",
+            source_url="",
+            explanation=(
+                "Primary competition is status quo (manual SD cards, lab-built scripts). "
+                "~30% of eligible labs are early adopters who would switch given strong "
+                "reliability/convenience case. This fraction should be validated with "
+                "structured interview data (n≥30 PIs)."
+            ),
+            data_source="Expert estimate",
+            assumptions=["30% early-adopter fraction pending primary research validation"],
+        ),
+        DerivationStep(
+            step_num=5,
+            title="Step 5 — Serviceable Obtainable Market (SOM, 15% of SAM over 5 yrs)",
+            formula=f"SOM = SAM × 15% = {_fmt(som)}",
+            value=float(som),
+            unit="USD",
+            source_paper="Conservative 5-year capture, consistent with early-stage research tool launches",
+            source_url="",
+            explanation=(
+                "15% SAM penetration over 5 years assumes: (1) 12–18 month sales cycle per lab, "
+                "(2) referral-driven growth from early adopters, (3) pricing at or below "
+                "observed spend band to reduce friction."
+            ),
+            data_source="Expert estimate",
+            assumptions=["5-year horizon", "15% SAM capture at product/market fit"],
+        ),
+    ]
+
+    return MarketSizingDerivation(
+        idea=idea,
+        archetype="research_tool_non_clinical",
+        archetype_label="Research Tool / Non-Clinical Data Infrastructure (Buyer Model)",
+        formula_name="Bottom-Up PI Buyer Model (H-07 compliant)",
+        formula_overview=(
+            f"TAM = {pop_lo:,}–{pop_hi:,} NIH-funded labs × "
+            f"${sp_lo:,.0f}–${sp_hi:,.0f}/yr annualised spend = "
+            f"{_fmt(pop_lo * sp_lo)}–{_fmt(pop_hi * sp_hi)}"
+        ),
+        steps=steps,
+        us_tam_usd=tam, us_sam_usd=sam, us_som_usd=som,
+        tam_fmt=f"{_fmt(pop_lo * sp_lo)}–{_fmt(pop_hi * sp_hi)}",
+        sam_fmt=_fmt(sam),
+        som_fmt=_fmt(som),
+        key_assumptions=[
+            f"Buyer = academic PI on grant cycle (NOT hospital enterprise)",
+            f"Lab population: {pop_lo:,}–{pop_hi:,} eligible labs (NIH RePORTER)",
+            f"Annualised spend: ${sp_lo:,.0f}–${sp_hi:,.0f}/lab/yr (primary research)",
+            "SAM = 30% early adopters; SOM = 15% SAM over 5 yrs",
+        ],
+        confidence_note=(
+            f"Lab count from NIH RePORTER queries (unverified); spend band from n=10 PI interviews. "
+            f"Both inputs should be refined with a larger primary research sample. "
+            f"Sensitivity range under pessimistic/optimistic assumptions: {_fmt(pop_lo * sp_lo * 0.5)}–{_fmt(pop_hi * sp_hi * 1.5)}."
+        ),
+        primary_citations=[
+            {"ref": "NIH RePORTER", "title": "NIH-funded research grants by topic", "url": "https://reporter.nih.gov/"},
+            {"ref": sp_src, "title": "PI spend band (primary research)", "url": ""},
         ],
     )
 
@@ -1722,6 +1899,7 @@ def generate_market_sizing_derivation(
     disease_name: str = "",
     therapeutic_area: str = "other",
     us_patient_population: int = 0,
+    sub_expert_id: str = "",
 ) -> MarketSizingDerivation:
     """
     Mixture of Experts router: classifies the innovation and dispatches to
@@ -1729,6 +1907,7 @@ def generate_market_sizing_derivation(
     appropriate to its vertical — not a one-size-fits-all drug pricing model.
 
     Expert routing:
+      research_tool_non_clinical               →  PI Buyer Model (H-07/H-08 compliant)
       pharma_small_molecule / pharma_biologic  →  DisMod Bottom-Up Pharma
       gene_cell_therapy                        →  Annual Incidence Cohort (ISPOR)
       vaccine                                  →  ACIP Population-at-Risk Model
@@ -1737,13 +1916,25 @@ def generate_market_sizing_derivation(
       in_vitro_diagnostic                      →  CLFS Test Volume Model
       software_samd                            →  Enterprise SaaS / Per-Patient Model
       combination                              →  Hybrid device + drug components
+
+    sub_expert_id: when provided, takes priority over product_type for routing.
+    This ensures research_tool_non_clinical is never misrouted to pharma_small_molecule
+    just because ProductType.OTHER is the fallback enum value.
     """
-    archetype = _classify_archetype(idea, product_type)
+    # sub_expert_id is a stronger routing signal than product_type — use it first.
+    _sid = (sub_expert_id or "").lower()
+    if _sid in ("research_tool_non_clinical", "research_infrastructure_saas"):
+        archetype = "research_tool_non_clinical"
+    else:
+        archetype = _classify_archetype(idea, product_type)
     signals   = _extract_idea_signals(idea)
     dn        = disease_name or idea[:60]
 
-    logger.info("MoE routing: archetype=%s signals=%s", archetype,
+    logger.info("MoE routing: archetype=%s sub_expert_id=%s signals=%s", archetype, sub_expert_id or "(none)",
                 {k: v for k, v in signals.items() if v})
+
+    if archetype == "research_tool_non_clinical":
+        return _derive_research_tool_formula(idea, dn, therapeutic_area, us_patient_population, signals)
 
     if archetype == "gene_cell_therapy":
         return _derive_gene_therapy_formula(idea, dn, therapeutic_area, us_patient_population, signals)
@@ -1792,7 +1983,7 @@ def format_derivation_for_prompt(deriv: MarketSizingDerivation) -> str:
     lines += [
         f"",
         f"Key assumptions: {' | '.join(deriv.key_assumptions[:4])}",
-        f"Confidence: {deriv.confidence_note}",
+        f"Uncertainty note: {deriv.confidence_note}",
         f"",
         f"═══ MANDATORY MARKET SIZING NUMBERS — USE EXACTLY ═══",
         f"TAM: {deriv.tam_fmt} | SAM: {deriv.sam_fmt} | SOM: {deriv.som_fmt}",

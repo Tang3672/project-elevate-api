@@ -104,8 +104,33 @@ def _regulatory_hint(sub_expert_id: str) -> str:
         return "Use the FDA pathway appropriate to the specific platform. Do NOT assume an antibiotic NDA/QIDP."
     return ""   # drug/unknown — no injected hint (drug path unchanged)
 
+# ── Non-clinical research tool archetype identifiers ─────────────────────────
+# Panels whose rubrics require a clinical indication or FDA pathway are not
+# scored for these archetypes — they render as N/A (H-09).
+_RESEARCH_TOOL_ARCHETYPES = frozenset({
+    "research_tool_non_clinical",
+    "research_infrastructure_saas",
+})
+
 # ── Per-domain commercial hints for the commercial panel ─────────────────────
 _COMMERCIAL_DOMAIN_HINTS: dict[str, str] = {
+    "research_tool_non_clinical": (
+        "Buyer is an academic PI funded by NIH/NSF grants. "
+        "Purchase cadence: every 2-5 years (grant cycle). "
+        "Observed spend band: $20k-$30k per cycle = ~$6k-$10k/yr annualised. "
+        "Budget line: grant direct costs, equipment line. "
+        "Revenue model: per-lab subscription or one-time site license — NOT WAC pricing, NOT CPT, NOT J-code. "
+        "Primary competitor: status quo (manual SD cards, lab-built scripts). "
+        "Pricing comparable: commercial research data loggers (ActiGraph, Empatica research tier, Movisens). "
+        "Do NOT reference hospital systems, DRG, NTAP, or drug pricing as comparables."
+    ),
+    "research_infrastructure_saas": (
+        "Buyer is an academic PI or core facility director funded by institutional or federal grants. "
+        "Purchase cadence: annual SaaS or multi-year site license. "
+        "Budget line: indirect or direct costs, IT budget. "
+        "Revenue model: per-institution or per-lab SaaS license — NOT drug WAC or CPT codes. "
+        "Do NOT reference hospital payers, DRG, NTAP, or drug pricing."
+    ),
     "drug_amr":               "Hospital formulary acquisition. GPO contracts critical. NTAP coverage adds 65-75% above DRG. Pull incentives (PASTEUR Act, BARDA) are key commercial levers.",
     "biologic_oncology":      "J-code reimbursement or buy-and-bill. Payer prior auth based on biomarker. Specialty pharmacy channel. ASP+6% in oncology office. CAR-T: ~$400k-$500k launch price precedent.",
     "drug_oncology":          "Specialty pharmacy. Payer prior auth based on biomarker. ASP+6% for IV. Oral oncology: specialty pharmacy, copay assistance programs critical.",
@@ -445,19 +470,46 @@ async def run_expert_panel(
     product_type: str = "drug",
     market_context: str = "",
     development_phase: str = "preclinical",
+    archetype: str = "",
 ) -> ExpertPanelResult:
     """
-    Run all three sub-expert panels in parallel. Each panel has a different analytical
-    lens and produces structured JSON with specific numbers/names — not prose.
+    Run sub-expert panels in parallel. Each panel has a different analytical lens.
 
-    Designed to be called inside an asyncio.gather alongside other data fetches
-    so it adds zero latency to the overall report generation flow.
+    H-09 gate: clinical and regulatory panels require a clinical indication and an
+    FDA pathway. For non-clinical research tools these rubrics do not apply —
+    running them produces meaningless scores (0.0/10 mechanism feasibility,
+    "not regulated" pathway) that pollute the executive summary. They are skipped
+    and left as None, which renders as N/A in panel_to_dict and is excluded from
+    all composites.
 
     Key improvements over pure LLM:
     - Regulatory panel anchors on ptrs_tables.py calibrated historical FDA approval data
     - Commercial panel anchors on deal_comps.py sourced from AUTM/BIO transaction databases
     """
     import asyncio
+
+    _arch = (archetype or sub_expert_id or "").lower()
+    _is_research_tool = any(_arch == rt or _arch.startswith(rt) for rt in _RESEARCH_TOOL_ARCHETYPES)
+
+    if _is_research_tool:
+        # Clinical validity and regulatory pathway panels are structurally inapplicable
+        # for non-clinical research tools. Only the commercial panel runs, with a
+        # research-tool-appropriate prompt via _COMMERCIAL_DOMAIN_HINTS.
+        logger.info(
+            "Panel gate [H-09]: skipping clinical and regulatory panels for archetype '%s' "
+            "(not applicable — no clinical indication, no FDA pathway)", _arch,
+        )
+        commercial = await _run_commercial_panel(
+            disease_name, idea, sub_expert_id, market_context, development_phase,
+        )
+        result = ExpertPanelResult(clinical=None, regulatory=None, commercial=commercial,
+                                   error_count=(1 if commercial is None else 0))
+        logger.info(
+            "Expert panel complete [research tool]: clinical=N/A regulatory=N/A commercial=%s",
+            "✓" if commercial else "✗",
+        )
+        return result
+
     clinical, regulatory, commercial = await asyncio.gather(
         _run_clinical_panel(disease_name, idea),
         _run_regulatory_panel(disease_name, idea, sub_expert_id, product_type, development_phase),

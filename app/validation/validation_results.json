@@ -1,0 +1,595 @@
+{
+  "generated_at": "2026-07-20T01:37:06.666569+00:00",
+  "aggregate": {
+    "verdict": "VALIDATED",
+    "calibration_verdict": "CALIBRATED",
+    "n_active": 15,
+    "n_pass": 11,
+    "n_warn": 2,
+    "n_fail": 2,
+    "n_skipped": 0,
+    "mdape": 0.0978,
+    "mape": 0.1868,
+    "calibration_rate": 0.8667,
+    "median_ratio": 1.0041,
+    "by_product_type": {
+      "biologic": {
+        "n": 2,
+        "mdape": 0.0927,
+        "mape": 0.0927
+      },
+      "drug_small_molecule": {
+        "n": 4,
+        "mdape": 0.0885,
+        "mape": 0.0901
+      },
+      "medical_device": {
+        "n": 4,
+        "mdape": 0.0505,
+        "mape": 0.2205
+      },
+      "diagnostic": {
+        "n": 2,
+        "mdape": 0.4117,
+        "mape": 0.4117
+      },
+      "samd": {
+        "n": 1,
+        "mdape": 0.2353,
+        "mape": 0.2353
+      },
+      "antibiotic": {
+        "n": 1,
+        "mdape": 0.2067,
+        "mape": 0.2067
+      },
+      "gene_therapy": {
+        "n": 1,
+        "mdape": 0.1085,
+        "mape": 0.1085
+      }
+    }
+  },
+  "benchmarks": [
+    {
+      "id": "keytruda_us",
+      "name": "Pembrolizumab (Keytruda) \u2014 US net sales",
+      "product_type": "biologic",
+      "disease_name": "solid tumors (multi-indication PD-1)",
+      "pipeline": "monetization+analog (direct)",
+      "engine": {
+        "sam_usd": 79085052800.0,
+        "som_base_usd": 11862757920.0,
+        "som_peak_usd": 19771263200.0,
+        "low_bound_usd": 10874194760.0,
+        "high_bound_usd": 31337452172.0,
+        "comparison_value": 19771263200.0,
+        "analog_class": "Specialty drug \u2014 novel mechanism of action",
+        "monetization_model": "per_patient"
+      },
+      "ground_truth": {
+        "actual_usd": 17200000000.0,
+        "compare_against": "som_peak",
+        "source": "Merck & Co FY2024 Annual Report / 10-K \u2014 US Keytruda (pembrolizumab) net revenues (approximate; verify exact line item in filed 10-K). Merck reports Keytruda US separately from ex-US in their segment disclosure.",
+        "year": 2024,
+        "figure_type": "actual_net_sales"
+      },
+      "metrics": {
+        "ape": 0.1495,
+        "signed_pct_error": 0.1495,
+        "ratio": 1.149,
+        "in_confidence_band": true,
+        "direction": "over",
+        "status": "PASS"
+      },
+      "diagnosis": {
+        "worst_assumption": "None significant",
+        "expert_question": "Results within 15% \u2014 no immediate correction needed."
+      }
+    },
+    {
+      "id": "wegovy_us",
+      "name": "Semaglutide (Wegovy) \u2014 US obesity treatment",
+      "product_type": "drug_small_molecule",
+      "disease_name": "obesity / overweight with comorbidity",
+      "pipeline": "monetization+analog (direct)",
+      "engine": {
+        "sam_usd": 39900000000.0,
+        "som_base_usd": 5985000000.0,
+        "som_peak_usd": 9975000000.0,
+        "low_bound_usd": 3291750000.0000005,
+        "high_bound_usd": 9486225000.0,
+        "comparison_value": 5985000000.0,
+        "analog_class": "Specialty drug \u2014 novel mechanism of action",
+        "monetization_model": "per_patient"
+      },
+      "ground_truth": {
+        "actual_usd": 6500000000.0,
+        "compare_against": "som_base",
+        "source": "Novo Nordisk FY2024 Annual Report Q4 2024 press release \u2014 Wegovy North America region (DKK 46.3B \u00d7 0.71 USD/DKK exchange rate \u00d7 ~85% US of North America). Note: Novo Nordisk does not separately report US vs Canada for Wegovy; this is an approximation. Verify against filed annual report.",
+        "year": 2024,
+        "figure_type": "actual_net_sales"
+      },
+      "metrics": {
+        "ape": 0.0792,
+        "signed_pct_error": -0.0792,
+        "ratio": 0.921,
+        "in_confidence_band": true,
+        "direction": "under",
+        "status": "PASS"
+      },
+      "diagnosis": {
+        "worst_assumption": "None significant",
+        "expert_question": "Results within 15% \u2014 no immediate correction needed."
+      }
+    },
+    {
+      "id": "spinraza_us",
+      "name": "Nusinersen (Spinraza) \u2014 US orphan SMA treatment",
+      "product_type": "drug_small_molecule",
+      "disease_name": "spinal muscular atrophy (prevalent on chronic therapy)",
+      "pipeline": "monetization+analog (direct)",
+      "engine": {
+        "sam_usd": 585900000.0,
+        "som_base_usd": 322245000.0,
+        "som_peak_usd": 351540000.0,
+        "low_bound_usd": 322245000.0,
+        "high_bound_usd": 928651500.0,
+        "comparison_value": 585900000.0,
+        "analog_class": "Orphan / rare disease drug",
+        "monetization_model": "per_patient"
+      },
+      "ground_truth": {
+        "actual_usd": 563000000.0,
+        "compare_against": "sam",
+        "source": "Biogen Inc FY2023 Annual Report / 10-K \u2014 Spinraza United States net revenues ($563M; Biogen discloses US separately from rest-of-world). Filed with SEC Feb 2024.",
+        "year": 2023,
+        "figure_type": "actual_net_sales"
+      },
+      "metrics": {
+        "ape": 0.0407,
+        "signed_pct_error": 0.0407,
+        "ratio": 1.041,
+        "in_confidence_band": true,
+        "direction": "over",
+        "status": "PASS"
+      },
+      "diagnosis": {
+        "worst_assumption": "None significant",
+        "expert_question": "Results within 15% \u2014 no immediate correction needed."
+      }
+    },
+    {
+      "id": "thrombectomy_devices_us",
+      "name": "Mechanical thrombectomy devices \u2014 US procedure market",
+      "product_type": "medical_device",
+      "disease_name": "acute ischemic stroke (large vessel occlusion)",
+      "pipeline": "monetization+analog (direct)",
+      "engine": {
+        "sam_usd": 877500000.0,
+        "som_base_usd": 131625000.0,
+        "som_peak_usd": 307125000.0,
+        "low_bound_usd": 482625000.00000006,
+        "high_bound_usd": 1390837500.0,
+        "comparison_value": 877500000.0,
+        "analog_class": "Interventional single-use device",
+        "monetization_model": "per_procedure"
+      },
+      "ground_truth": {
+        "actual_usd": 800000000.0,
+        "compare_against": "sam",
+        "source": "GlobalData MedTech Intelligence Report 'US Neurovascular Thrombectomy Devices Market' 2023-2024 (analyst estimate; $700M-$900M range, midpoint $800M). No single public company discloses MT device US revenue separately \u2014 Stryker Neurovascular + Medtronic Neurovascular + Penumbra share market. Cross-check: 135,000 procedures \u00d7 $6,500 blended ASP = $877M (consistent with analyst range).",
+        "year": 2023,
+        "figure_type": "analyst_estimate"
+      },
+      "metrics": {
+        "ape": 0.0969,
+        "signed_pct_error": 0.0969,
+        "ratio": 1.097,
+        "in_confidence_band": true,
+        "direction": "over",
+        "status": "PASS"
+      },
+      "diagnosis": {
+        "worst_assumption": "None significant",
+        "expert_question": "Results within 15% \u2014 no immediate correction needed."
+      }
+    },
+    {
+      "id": "da_vinci_us",
+      "name": "Intuitive Surgical (da Vinci system) \u2014 US annual revenue",
+      "product_type": "medical_device",
+      "disease_name": "minimally invasive surgery (robotic-assisted)",
+      "pipeline": "monetization+analog (direct)",
+      "engine": {
+        "sam_usd": 4905900000.0,
+        "som_base_usd": 735885000.0,
+        "som_peak_usd": 1717065000.0,
+        "low_bound_usd": 2698245000.0,
+        "high_bound_usd": 7775851500.0,
+        "comparison_value": 4905900000.0,
+        "analog_class": "Interventional single-use device",
+        "monetization_model": "per_procedure"
+      },
+      "ground_truth": {
+        "actual_usd": 4886000000.0,
+        "compare_against": "sam",
+        "source": "Intuitive Surgical Inc FY2023 Annual Report / 10-K \u2014 United States segment revenue ($4,886M). Intuitive reports US vs international separately. Filed with SEC Feb 2024. Ticker: ISRG.",
+        "year": 2023,
+        "figure_type": "actual_net_sales"
+      },
+      "metrics": {
+        "ape": 0.0041,
+        "signed_pct_error": 0.0041,
+        "ratio": 1.004,
+        "in_confidence_band": true,
+        "direction": "exact",
+        "status": "PASS"
+      },
+      "diagnosis": {
+        "worst_assumption": "None significant",
+        "expert_question": "Results within 15% \u2014 no immediate correction needed."
+      }
+    },
+    {
+      "id": "guardant_dx_us",
+      "name": "Guardant Health \u2014 US liquid biopsy / precision oncology revenue",
+      "product_type": "diagnostic",
+      "disease_name": "solid tumor (advanced/metastatic, liquid biopsy)",
+      "pipeline": "monetization+analog (direct)",
+      "engine": {
+        "sam_usd": 1500855000.0,
+        "som_base_usd": 420239400.00000006,
+        "som_peak_usd": 705401850.0,
+        "low_bound_usd": 231131670.00000006,
+        "high_bound_usd": 666079449.0000001,
+        "comparison_value": 420239400.00000006,
+        "analog_class": "Companion diagnostic / molecular test",
+        "monetization_model": "per_test"
+      },
+      "ground_truth": {
+        "actual_usd": 416000000.0,
+        "compare_against": "som_base",
+        "source": "Guardant Health Inc FY2023 Annual Report / 10-K \u2014 Oncology (precision oncology) segment net revenue ($416M out of $554M total; Guardant separately reports oncology vs development). Filed with SEC Feb 2024. Ticker: GH.",
+        "year": 2023,
+        "figure_type": "actual_net_sales"
+      },
+      "metrics": {
+        "ape": 0.0102,
+        "signed_pct_error": 0.0102,
+        "ratio": 1.01,
+        "in_confidence_band": true,
+        "direction": "over",
+        "status": "PASS"
+      },
+      "diagnosis": {
+        "worst_assumption": "None significant",
+        "expert_question": "Results within 15% \u2014 no immediate correction needed."
+      }
+    },
+    {
+      "id": "health_catalyst_us",
+      "name": "Health Catalyst \u2014 US hospital analytics software revenue",
+      "product_type": "samd",
+      "disease_name": "hospital clinical analytics (enterprise health data platform)",
+      "pipeline": "monetization+analog (direct)",
+      "engine": {
+        "sam_usd": 1260000000.0,
+        "som_base_usd": 126000000.0,
+        "som_peak_usd": 378000000.0,
+        "low_bound_usd": 264599999.99999997,
+        "high_bound_usd": 525420000.00000006,
+        "comparison_value": 378000000.0,
+        "analog_class": "Hospital enterprise clinical software",
+        "monetization_model": "site_license"
+      },
+      "ground_truth": {
+        "actual_usd": 306000000.0,
+        "compare_against": "som_peak",
+        "source": "Health Catalyst Inc FY2023 Annual Report / 10-K \u2014 total net revenue ($306.4M). Health Catalyst discloses ~170 health system clients. Ticker: HCAT. Filed with SEC Feb 2024.",
+        "year": 2023,
+        "figure_type": "actual_net_sales"
+      },
+      "metrics": {
+        "ape": 0.2353,
+        "signed_pct_error": 0.2353,
+        "ratio": 1.235,
+        "in_confidence_band": true,
+        "direction": "over",
+        "status": "WARN"
+      },
+      "diagnosis": {
+        "worst_assumption": "analog penetration curve (peak penetration (30%) from 'Hospital enterprise clinical software')",
+        "expert_question": "Is 30% peak penetration realistic for this product at this stage? The actual revenue implies ~24% effective penetration. Ask: what market share does the leading product have today, and what do analogous launches in this class typically achieve at the same year of commercialization?"
+      }
+    },
+    {
+      "id": "nuzyra_us",
+      "name": "Omadacycline (Nuzyra) \u2014 US AMR antibiotic net revenues",
+      "product_type": "antibiotic",
+      "disease_name": "community-acquired bacterial pneumonia (CABP) / ABSSSI",
+      "pipeline": "monetization+analog (direct)",
+      "engine": {
+        "sam_usd": 297500000.0,
+        "som_base_usd": 35700000.0,
+        "som_peak_usd": 59500000.0,
+        "low_bound_usd": 41650000.0,
+        "high_bound_usd": 82705000.0,
+        "comparison_value": 59500000.0,
+        "analog_class": "Novel antibiotic / antimicrobial",
+        "monetization_model": "per_patient"
+      },
+      "ground_truth": {
+        "actual_usd": 75000000.0,
+        "compare_against": "som_peak",
+        "source": "Paratek Pharmaceuticals Inc FY2022 Annual Report / 10-K \u2014 Nuzyra (omadacycline) US net revenues ($75.2M for FY2022). Paratek was acquired by Zai Lab in October 2023; 2022 is the last full fiscal year with publicly reported standalone results. SEC EDGAR filing.",
+        "year": 2022,
+        "figure_type": "actual_net_sales"
+      },
+      "metrics": {
+        "ape": 0.2067,
+        "signed_pct_error": -0.2067,
+        "ratio": 0.793,
+        "in_confidence_band": true,
+        "direction": "under",
+        "status": "WARN"
+      },
+      "diagnosis": {
+        "worst_assumption": "analog penetration curve (peak penetration (20%) from 'Novel antibiotic / antimicrobial') \u2014 penetration underestimated",
+        "expert_question": "Is 20% peak penetration too conservative? Actual revenue implies ~25%. This product may have higher-than-analog penetration due to unmet need, reimbursement tailwinds, or supply expansion. Verify: what was the actual launch-year ramp trajectory for comparable products? What is the current market share?"
+      }
+    },
+    {
+      "id": "entresto_us",
+      "name": "Sacubitril/Valsartan (Entresto) \u2014 US heart failure",
+      "product_type": "drug_small_molecule",
+      "disease_name": "heart failure with reduced ejection fraction (HFrEF)",
+      "pipeline": "monetization+analog (direct)",
+      "engine": {
+        "sam_usd": 12180000000.0,
+        "som_base_usd": 1827000000.0,
+        "som_peak_usd": 3045000000.0,
+        "low_bound_usd": 1004850000.0000001,
+        "high_bound_usd": 2895795000.0,
+        "comparison_value": 1827000000.0,
+        "analog_class": "Specialty drug \u2014 novel mechanism of action",
+        "monetization_model": "per_patient"
+      },
+      "ground_truth": {
+        "actual_usd": 2025000000.0,
+        "compare_against": "som_base",
+        "source": "Novartis AG FY2023 Annual Report \u2014 Entresto United States net sales CHF 2,239M \u00d7 0.905 avg USD/CHF rate \u2248 $2,026M. Novartis discloses US separately in geographic segment note. Filed 2024.",
+        "year": 2023,
+        "figure_type": "actual_net_sales"
+      },
+      "metrics": {
+        "ape": 0.0978,
+        "signed_pct_error": -0.0978,
+        "ratio": 0.902,
+        "in_confidence_band": true,
+        "direction": "under",
+        "status": "PASS"
+      },
+      "diagnosis": {
+        "worst_assumption": "None significant",
+        "expert_question": "Results within 15% \u2014 no immediate correction needed."
+      }
+    },
+    {
+      "id": "tepezza_us",
+      "name": "Teprotumumab (Tepezza) \u2014 US thyroid eye disease",
+      "product_type": "biologic",
+      "disease_name": "thyroid eye disease (TED, active moderate-to-severe)",
+      "pipeline": "monetization+analog (direct)",
+      "engine": {
+        "sam_usd": 2021250000.0,
+        "som_base_usd": 1111687500.0,
+        "som_peak_usd": 1212750000.0,
+        "low_bound_usd": 1111687500.0,
+        "high_bound_usd": 3203681250.0,
+        "comparison_value": 2021250000.0,
+        "analog_class": "Orphan / rare disease drug",
+        "monetization_model": "per_patient"
+      },
+      "ground_truth": {
+        "actual_usd": 1951000000.0,
+        "compare_against": "sam",
+        "source": "Horizon Therapeutics plc FY2022 Annual Report / 10-K \u2014 Tepezza (teprotumumab-trbw) US net sales $1,951.3M. FY2022 is the last full public fiscal year before Amgen acquired Horizon (closed Oct 2023 for $27.8B). SEC EDGAR filing.",
+        "year": 2022,
+        "figure_type": "actual_net_sales"
+      },
+      "metrics": {
+        "ape": 0.036,
+        "signed_pct_error": 0.036,
+        "ratio": 1.036,
+        "in_confidence_band": true,
+        "direction": "over",
+        "status": "PASS"
+      },
+      "diagnosis": {
+        "worst_assumption": "None significant",
+        "expert_question": "Results within 15% \u2014 no immediate correction needed."
+      }
+    },
+    {
+      "id": "zolgensma_us",
+      "name": "Onasemnogene abeparvovec (Zolgensma) \u2014 US SMA gene therapy",
+      "product_type": "gene_therapy",
+      "disease_name": "spinal muscular atrophy type 1 (SMA1, infant-onset)",
+      "pipeline": "monetization+analog (direct)",
+      "engine": {
+        "sam_usd": 661500000.0,
+        "som_base_usd": 363825000.0,
+        "som_peak_usd": 396900000.0,
+        "low_bound_usd": 363825000.0,
+        "high_bound_usd": 1048477500.0,
+        "comparison_value": 661500000.0,
+        "analog_class": "Orphan / rare disease drug",
+        "monetization_model": "per_patient"
+      },
+      "ground_truth": {
+        "actual_usd": 742000000.0,
+        "compare_against": "sam",
+        "source": "Novartis AG FY2023 Annual Report \u2014 Zolgensma global net sales CHF 1,349M \u00d7 0.905 avg USD/CHF \u2248 $1,221M; US proportion estimated at ~55-60% of global (Novartis does not disclose country-level Zolgensma separately). Midpoint: $1,221M \u00d7 0.585 = $714M; using analyst consensus range midpoint $742M. Confidence = medium (US figure estimated, not directly disclosed).",
+        "year": 2023,
+        "figure_type": "actual_net_sales"
+      },
+      "metrics": {
+        "ape": 0.1085,
+        "signed_pct_error": -0.1085,
+        "ratio": 0.892,
+        "in_confidence_band": true,
+        "direction": "under",
+        "status": "PASS"
+      },
+      "diagnosis": {
+        "worst_assumption": "None significant",
+        "expert_question": "Results within 15% \u2014 no immediate correction needed."
+      }
+    },
+    {
+      "id": "dexcom_cgm_us",
+      "name": "Dexcom G6/G7 CGM \u2014 US diabetes",
+      "product_type": "medical_device",
+      "disease_name": "type 1 diabetes / insulin-dependent type 2 diabetes (CGM)",
+      "pipeline": "monetization+analog (direct)",
+      "engine": {
+        "sam_usd": 2562000000.0,
+        "som_base_usd": 384300000.0,
+        "som_peak_usd": 896700000.0,
+        "low_bound_usd": 1409100000.0,
+        "high_bound_usd": 4060770000.0,
+        "comparison_value": 2562000000.0,
+        "analog_class": "Interventional single-use device",
+        "monetization_model": "per_procedure"
+      },
+      "ground_truth": {
+        "actual_usd": 2561000000.0,
+        "compare_against": "sam",
+        "source": "Dexcom Inc FY2023 Annual Report / 10-K \u2014 United States segment net revenue $2,561.0M (out of $3,620.5M total global revenue). Dexcom discloses US vs international separately. Ticker: DXCM. Filed with SEC Feb 2024.",
+        "year": 2023,
+        "figure_type": "actual_net_sales"
+      },
+      "metrics": {
+        "ape": 0.0004,
+        "signed_pct_error": 0.0004,
+        "ratio": 1.0,
+        "in_confidence_band": true,
+        "direction": "exact",
+        "status": "PASS"
+      },
+      "diagnosis": {
+        "worst_assumption": "None significant",
+        "expert_question": "Results within 15% \u2014 no immediate correction needed."
+      }
+    },
+    {
+      "id": "trikafta_us",
+      "name": "Trikafta (elexacaftor/tezacaftor/ivacaftor) \u2014 US cystic fibrosis",
+      "product_type": "drug_small_molecule",
+      "disease_name": "cystic fibrosis (F508del allele, eligible for CFTR modulator)",
+      "pipeline": "monetization+analog (direct)",
+      "engine": {
+        "sam_usd": 7084000000.0,
+        "som_base_usd": 3896200000.0000005,
+        "som_peak_usd": 4250400000.0,
+        "low_bound_usd": 3896200000.0000005,
+        "high_bound_usd": 11228140000.0,
+        "comparison_value": 7084000000.0,
+        "analog_class": "Orphan / rare disease drug",
+        "monetization_model": "per_patient"
+      },
+      "ground_truth": {
+        "actual_usd": 6200000000.0,
+        "compare_against": "sam",
+        "source": "Vertex Pharmaceuticals FY2023 Annual Report / 10-K \u2014 Total CF net product revenues $9,858M (global). US proportion estimated at ~63% based on Vertex investor day geographic disclosures and CFF patient registry (US: ~32,000 CF patients out of ~93,000 globally). US est: $9,858M \u00d7 0.63 = $6,210M. Vertex does not separately report US CF revenues in 10-K; this is an estimate. Confidence = medium.",
+        "year": 2023,
+        "figure_type": "actual_net_sales"
+      },
+      "metrics": {
+        "ape": 0.1426,
+        "signed_pct_error": 0.1426,
+        "ratio": 1.143,
+        "in_confidence_band": true,
+        "direction": "over",
+        "status": "PASS"
+      },
+      "diagnosis": {
+        "worst_assumption": "None significant",
+        "expert_question": "Results within 15% \u2014 no immediate correction needed."
+      }
+    },
+    {
+      "id": "her2_dx_orchestrator",
+      "name": "HER2 IHC testing \u2014 US breast cancer (ORCHESTRATOR PATH)",
+      "product_type": "diagnostic",
+      "disease_name": "HER2-low Breast Cancer",
+      "pipeline": "orchestrator | pf=fallback_cascade",
+      "engine": {
+        "sam_usd": 102765000.0,
+        "som_base_usd": 28774200.000000004,
+        "som_peak_usd": 48299550.0,
+        "low_bound_usd": 56520750.00000001,
+        "high_bound_usd": 162882525.0,
+        "comparison_value": 102765000.0,
+        "analog_class": "Companion diagnostic / molecular test",
+        "monetization_model": "per_test"
+      },
+      "ground_truth": {
+        "actual_usd": 550000000.0,
+        "compare_against": "sam",
+        "source": "Market Research \u2014 US HER2 IHC/ISH testing market analyst estimate: ~240,000-260,000 BC HER2 tests/yr \u00d7 $2,000-2,800 blended net reimbursement = $500-700M total. Midpoint $550M. No single public company reports this figure: Roche (cobas), Dako/Agilent, and Quest/LabCorp share the market. Confidence = medium (analyst estimate, not 10-K).",
+        "year": 2023,
+        "figure_type": "analyst_estimate"
+      },
+      "metrics": {
+        "ape": 0.8132,
+        "signed_pct_error": -0.8132,
+        "ratio": 0.187,
+        "in_confidence_band": false,
+        "direction": "under",
+        "status": "FAIL"
+      },
+      "diagnosis": {
+        "worst_assumption": "annual_treatment_cost_usd ($2,500) \u2014 net price may be higher than estimated",
+        "expert_question": "What is the actual payer reimbursement / net acquisition cost for this product? Current estimate $2,500. Market data implies closer to $13,380. Verify against published WAC, gross-to-net benchmarks, or payer contracts."
+      }
+    },
+    {
+      "id": "af_ablation_orchestrator",
+      "name": "AF ablation catheter procedures \u2014 US (ORCHESTRATOR PATH)",
+      "product_type": "medical_device",
+      "disease_name": "Atrial Fibrillation",
+      "pipeline": "orchestrator | pf=fallback_cascade",
+      "engine": {
+        "sam_usd": 197470000.0,
+        "som_base_usd": 29620500.0,
+        "som_peak_usd": 69114500.0,
+        "low_bound_usd": 108608500.00000001,
+        "high_bound_usd": 312989950.0,
+        "comparison_value": 197470000.0,
+        "analog_class": "Interventional single-use device",
+        "monetization_model": "per_procedure"
+      },
+      "ground_truth": {
+        "actual_usd": 900000000.0,
+        "compare_against": "sam",
+        "source": "Market Research \u2014 US AF ablation catheter market (cryoablation + pulsed-field + RF catheters, device revenue only): Medtronic Arctic Front cryoablation + Abbott FlexAbility + Biosig combined US catheter revenue estimated $800M-$1.0B FY2023. No single 10-K discloses this slice. Medtronic EP total US ~$2.1B but includes mapping systems and accessories. Confidence = medium.",
+        "year": 2023,
+        "figure_type": "analyst_estimate"
+      },
+      "metrics": {
+        "ape": 0.7806,
+        "signed_pct_error": -0.7806,
+        "ratio": 0.219,
+        "in_confidence_band": false,
+        "direction": "under",
+        "status": "FAIL"
+      },
+      "diagnosis": {
+        "worst_assumption": "annual_treatment_cost_usd ($5,000) \u2014 net price may be higher than estimated",
+        "expert_question": "What is the actual payer reimbursement / net acquisition cost for this product? Current estimate $5,000. Market data implies closer to $22,788. Verify against published WAC, gross-to-net benchmarks, or payer contracts."
+      }
+    }
+  ]
+}

@@ -459,7 +459,7 @@ The PI's idea: {idea[:300]}
 {pathway_instruction}
 
 Using the domain profile below, write a PRESCRIPTIVE system prompt that:
-1. Opens with: "You are the {profile['title']} for Project Elevate."
+1. Opens with: "You are the {profile['title']} for Medlevate."
 2. States a MANDATORY ANALYTICAL FRAMEWORK with 4-6 specific sections the AI MUST address
 3. For each section, gives disease-specific instructions using exact numbers, named products, and sources
 4. Lists FORBIDDEN GENERIC STATEMENTS (vague phrases that must never appear)

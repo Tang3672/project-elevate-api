@@ -102,13 +102,39 @@ def _vaccine(p: dict) -> dict:
     return {"us_tam_usd": tam, "peak_revenue_usd": tam * p["peak_penetration"], "formula": "vaccine"}
 
 
+def _research_tool_bottom_up(p: dict) -> dict:
+    """
+    Bottom-up TAM for non-clinical research tools (H-07/H-08).
+
+    Params:
+      eligible_labs           — number of labs that could buy (from NIH RePORTER or estimate)
+      adoption_rate           — fraction likely to adopt (0-1)
+      annualised_price_usd    — annual equivalent cost per lab (spend_per_cycle / cycle_years)
+      net_price_factor        — discounting for academic pricing / channel (0-1)
+
+    TAM = labs × adoption × annualised_price × net_price_factor
+    """
+    tam = (
+        p["eligible_labs"]
+        * p["adoption_rate"]
+        * p["annualised_price_usd"]
+        * p.get("net_price_factor", 1.0)
+    )
+    return {
+        "us_tam_usd": tam,
+        "peak_revenue_usd": tam * p.get("peak_penetration", p["adoption_rate"]),
+        "formula": "research_tool_bottom_up",
+    }
+
+
 _FORMULA_MAP = {
-    "drug_prevalence": _drug_prevalence,
-    "drug_incidence":  _drug_incidence,
-    "gene_therapy":    _gene_therapy,
-    "amr_antibiotic":  _amr_antibiotic,
-    "device":          _device,
-    "vaccine":         _vaccine,
+    "drug_prevalence":         _drug_prevalence,
+    "drug_incidence":          _drug_incidence,
+    "gene_therapy":            _gene_therapy,
+    "amr_antibiotic":          _amr_antibiotic,
+    "device":                  _device,
+    "vaccine":                 _vaccine,
+    "research_tool_bottom_up": _research_tool_bottom_up,
 }
 
 

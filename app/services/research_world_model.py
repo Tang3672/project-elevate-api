@@ -45,13 +45,18 @@ _FACT_EXPIRY_DAYS = 90  # world model facts expire after 90 days
 
 
 async def init_world_model_table():
-    """Create the research_world_model table if it doesn't exist."""
+    """Create the research_world_model table if it doesn't exist.
+
+    H-03: user_id column is REQUIRED — all reads/writes are scoped by it.
+    Facts without a user_id are never surfaced to any user's report.
+    """
     from app.db.database import get_pool
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS research_world_model (
                 id              SERIAL PRIMARY KEY,
+                user_id         TEXT NOT NULL DEFAULT '__unscoped__',
                 disease_name    TEXT NOT NULL,
                 entity_type     TEXT NOT NULL,
                 entity_name     TEXT,
@@ -62,21 +67,38 @@ async def init_world_model_table():
                 expires_at      TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '90 days')
             )
         """)
+        # H-03: add user_id column to existing tables (idempotent migration)
+        await conn.execute("""
+            ALTER TABLE research_world_model
+            ADD COLUMN IF NOT EXISTS user_id TEXT NOT NULL DEFAULT '__unscoped__'
+        """)
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS rwm_disease_idx ON research_world_model (disease_name)
         """)
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS rwm_expiry_idx ON research_world_model (expires_at)
         """)
-    logger.info("research_world_model table ready")
+        # Composite index so user-scoped reads are fast
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS rwm_user_disease_idx
+            ON research_world_model (user_id, disease_name)
+        """)
+    logger.info("research_world_model table ready (H-03: user_id-scoped)")
 
 
-async def load_world_model(disease_name: str) -> str:
+async def load_world_model(disease_name: str, user_id: Optional[str] = None) -> str:
     """
     Load prior research context for a disease from the world model.
     Returns a formatted string to inject at the top of the next report.
     Empty string if no prior knowledge.
+
+    H-03: user_id MUST be provided and is enforced as a query filter.
+    Never returns facts belonging to a different user. If user_id is None,
+    returns empty string (no cross-user reads, ever).
     """
+    if not user_id:
+        # H-03: no user_id → no cross-user reads. Return empty.
+        return ""
     try:
         from app.db.database import get_pool
         pool = await get_pool()
@@ -85,10 +107,11 @@ async def load_world_model(disease_name: str) -> str:
                 SELECT entity_type, entity_name, fact, source, confidence
                 FROM research_world_model
                 WHERE lower(disease_name) = lower($1)
+                  AND user_id = $2
                   AND expires_at > NOW()
                 ORDER BY confidence DESC, created_at DESC
                 LIMIT 40
-            """, disease_name)
+            """, disease_name, user_id)
 
         if not rows:
             return ""
@@ -135,11 +158,21 @@ async def load_world_model(disease_name: str) -> str:
         return ""
 
 
-async def update_world_model(disease_name: str, report_data: dict, pub_data: dict = None, ci_data: dict = None):
+async def update_world_model(
+    disease_name: str,
+    report_data: dict,
+    pub_data: dict = None,
+    ci_data: dict = None,
+    user_id: Optional[str] = None,
+):
     """
     After a report is generated, extract key entities and facts and write them
-    to the world model for use in future reports on the same disease.
+    to the world model for use in ONLY THIS USER's future reports on the same disease.
+
+    H-03: user_id MUST be provided. Facts without a user_id are tagged
+    '__unscoped__' and are never returned to any real user via load_world_model.
     """
+    _uid = user_id or "__unscoped__"
     try:
         facts = _extract_facts_from_report(disease_name, report_data, pub_data, ci_data)
         if not facts:
@@ -151,13 +184,14 @@ async def update_world_model(disease_name: str, report_data: dict, pub_data: dic
 
         async with pool.acquire() as conn:
             for fact in facts:
-                # Upsert: don't duplicate identical facts
+                # H-03: include user_id in every insert
                 await conn.execute("""
                     INSERT INTO research_world_model
-                        (disease_name, entity_type, entity_name, fact, source, confidence, expires_at)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7)
+                        (user_id, disease_name, entity_type, entity_name, fact, source, confidence, expires_at)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                     ON CONFLICT DO NOTHING
                 """,
+                    _uid,
                     disease_name.lower(),
                     fact["entity_type"],
                     fact.get("entity_name"),

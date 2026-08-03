@@ -38,6 +38,12 @@ class PIReportRequest(BaseModel):
         description="auto | antibiotic_amr | oncology | cardiology | neurology_cns | metabolic_diabetes | mental_health")
     tier1_category: str = Field(default="drug_small_molecule",
         description="drug_small_molecule | biologic | gene_cell_therapy | medical_device | diagnostic | digital_health | vaccine_immunotherapy | other_platform")
+    product_name: Optional[str] = Field(default=None,
+        description="Short brand / working name (e.g. 'NeuroSense'). If omitted, derived from idea text.")
+    institution: Optional[str] = Field(default=None,
+        description="Originating institution (e.g. 'University of Michigan', 'NIH NIBIB').")
+    domain: Optional[str] = Field(default=None,
+        description="LIFE_SCIENCES_CLINICAL | LIFE_SCIENCES_RESEARCH | ENGINEERING_HARDWARE | SOFTWARE_INFRASTRUCTURE | ENERGY_CLIMATE | OTHER_DEEP_TECH. Auto-detected if omitted.")
 
 
 @router.post("/check", response_model=AlignmentReport)
@@ -133,6 +139,8 @@ async def get_pi_report(payload: PIReportRequest, current_user = Depends(get_cur
         report = await generate_pi_report(
             _idea_from_payload(payload), payload.product_type, payload.disease_domain,
             payload.tier1_category, funding_pathway=payload.funding_pathway,
+            product_name=payload.product_name, institution=payload.institution,
+            domain=payload.domain,
         )
         await _increment_usage(current_user)
         return report
@@ -161,6 +169,8 @@ async def get_pi_report_async(payload: PIReportRequest, current_user = Depends(g
                 idea, payload.product_type, payload.disease_domain,
                 payload.tier1_category, funding_pathway=payload.funding_pathway,
                 user_id=(_user or {}).get("id"), skip_verification=True,
+                product_name=payload.product_name, institution=payload.institution,
+                domain=payload.domain,
             )
             rd = report.model_dump(mode="json")
             try:
@@ -863,6 +873,50 @@ async def competitive_sweep(
                         "competitive pipeline in the Opportunity section above."}
 
 
+@router.post("/classify")
+async def classify_product_endpoint(
+    body: dict,
+    current_user = Depends(get_current_user),
+):
+    """
+    Stage-1 product classifier (Spec v3 C.1).
+
+    Accepts: { "idea": str }
+    Returns: Classification fields + conditioned IntakeQuestion[]
+
+    Domain + archetype are resolved deterministically via soft_router +
+    product_archetype. The LLM (Haiku) is used only for display fields
+    (product_name, one_line, trl, ambiguities).
+    """
+    from app.services.product_classifier import classify_product, get_conditioned_questions, questions_to_legacy_format
+    from dataclasses import asdict
+
+    idea = (body.get("idea") or "").strip()
+    if not idea or len(idea) < 20:
+        raise HTTPException(status_code=400, detail="Idea too short for classification")
+
+    try:
+        cls = classify_product(idea)
+        conditioned_qs = get_conditioned_questions(cls)
+        legacy_qs = questions_to_legacy_format(conditioned_qs)
+
+        return {
+            "classification": {
+                "product_name": cls.product_name,
+                "one_line":     cls.one_line,
+                "domain":       cls.domain,
+                "archetype":    cls.archetype,
+                "trl":          cls.trl,
+                "confidence":   cls.confidence,
+                "ambiguities":  cls.ambiguities,
+            },
+            "questions": legacy_qs,
+        }
+    except Exception as exc:
+        logger.error("classify_product_endpoint failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @router.post("/clarify")
 async def generate_clarifying_questions(
     body: dict,
@@ -880,9 +934,34 @@ async def generate_clarifying_questions(
     pathway = body.get("pathway", "commercial")
     product_type = body.get("product_type", "")
     disease_hint = body.get("disease_name", "")
+    # Optional: if the caller already has a Classification object (from /classify),
+    # use the conditioned question bank instead of the LLM-generated questions.
+    # This guarantees every question has a binds_to field (spec C.2).
+    classification_hint = body.get("classification")  # dict or None
 
     if not idea or len(idea) < 20:
         raise HTTPException(status_code=400, detail="Idea too short")
+
+    # Fast path: conditioned questions from the deterministic bank
+    if classification_hint and isinstance(classification_hint, dict):
+        try:
+            from app.services.product_classifier import (
+                Classification, get_conditioned_questions, questions_to_legacy_format
+            )
+            cls = Classification(
+                product_name=classification_hint.get("product_name", ""),
+                one_line=classification_hint.get("one_line", ""),
+                domain=classification_hint.get("domain", "LIFE_SCIENCES_CLINICAL"),
+                archetype=classification_hint.get("archetype", "therapeutic_small_molecule"),
+                trl=int(classification_hint.get("trl", 3)),
+                confidence=float(classification_hint.get("confidence", 0.5)),
+                ambiguities=classification_hint.get("ambiguities", []),
+            )
+            conditioned_qs = get_conditioned_questions(cls)
+            legacy_qs = questions_to_legacy_format(conditioned_qs)
+            return {"questions": legacy_qs, "pathway": pathway, "conditioned": True}
+        except Exception as _cond_exc:
+            logger.warning("conditioned question fast-path failed: %s — falling through to LLM", _cond_exc)
 
     # Run live competitive sweep in parallel so the questions can reference real named competitors
     competitive_context = ""
@@ -1033,6 +1112,46 @@ Return ONLY a JSON array of 6 objects. No other text.
         match = re.search(r'\[.*\]', text, re.DOTALL)
         if match:
             questions = json.loads(match.group())
+            # Inject binds_to from the field key so every question has the C.2 contract field.
+            _FIELD_TO_BINDS: dict[str, str] = {
+                "eligible_subpopulation": "seg.gate.eligible_population",
+                "target_population": "seg.primary_use_case",
+                "line_of_therapy": "seg.gate.line_of_therapy",
+                "mechanism_novelty": "dev.mechanism_novelty",
+                "development_evidence": "dev.evidence_stage",
+                "validation_evidence": "dev.evidence_stage",
+                "clinical_differentiation": "dev.clinical_validation_done",
+                "buyer": "buyer.persona",
+                "economic_buyer": "buyer.persona",
+                "price_band": "price.observed_band",
+                "competitive_advantage": "comp.nearest_named_competitor",
+                "competitive_edge": "comp.nearest_named_competitor",
+                "status_quo": "comp.status_quo",
+                "target_sites": "seg.gate.facility_type",
+                "intended_use": "seg.primary_use_case",
+            }
+            for q in questions:
+                if "binds_to" not in q:
+                    fk = (q.get("field") or "").lower()
+                    q["binds_to"] = _FIELD_TO_BINDS.get(fk, f"intake.{fk}" if fk else "intake.misc")
+            # For device-like products (SaMD / digital health), the revenue model is
+            # ambiguous (site license vs per-patient vs enterprise SaaS). Prepend a
+            # monetization_unit question so the report picks the right pricing model.
+            if _is_devicelike:
+                _mono_q = {
+                    "question": "How is this product sold — and what is the unit of payment?",
+                    "field": "monetization_unit",
+                    "options": [
+                        "hospital site license (annual, all patients included)",
+                        "enrolled patient / per-case fee (usage-based)",
+                        "enterprise SaaS — health-system-wide contract",
+                        "procedure-bundled payment (CPT / DRG add-on)",
+                    ],
+                    "hint": "This determines whether your revenue model is volume-driven or seat-driven",
+                    "binds_to": "price.deal_structure",
+                    "inferred_model": "SiteLicenseModel",
+                }
+                questions = [_mono_q] + questions
             return {"questions": questions[:8], "pathway": pathway}
         return {"questions": [], "pathway": pathway}
     except Exception as e:
@@ -1204,3 +1323,411 @@ async def analyze_experimental_data(
     except Exception as e:
         logger.error("Dataset analysis failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Part E: Assumption Ledger endpoints ──────────────────────────────────────
+
+class AssumptionOverrideRequest(BaseModel):
+    value: float = Field(..., description="New numeric value for this assumption")
+    note:  Optional[str] = Field(default=None, description="Optional note explaining the override")
+
+
+@router.get("/pi-report/{job_id}/assumptions")
+async def get_assumption_ledger(job_id: str, current_user=Depends(get_current_user)):
+    """
+    Part E: Return the full assumption ledger for a completed report.
+    Includes all market sizing assumptions with provenance and sensitivity ranks.
+    """
+    from app.services.report_jobs import get_job
+    job = await get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.get("status") != "done":
+        raise HTTPException(status_code=409, detail="Report not yet complete")
+    report_data = job.get("report") or {}
+    ledger = report_data.get("assumption_ledger")
+    if not ledger:
+        raise HTTPException(status_code=404, detail="No assumption ledger for this report")
+    return ledger
+
+
+@router.get("/pi-report/{job_id}/assumptions/diff")
+async def get_assumption_diff(job_id: str, current_user=Depends(get_current_user)):
+    """
+    Part E.3/E.4: Return user-overridden assumptions with original vs. new values.
+    Includes TAM delta (absolute and % change in us_tam_usd) and version hash.
+    Empty diffs list if no overrides have been applied.
+    """
+    from app.services.report_jobs import get_job
+    from app.services.assumption_ledger_service import ledger_diff
+    from app.models.alignment import AssumptionLedger, AssumptionSource
+    job = await get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    report_data = job.get("report") or {}
+    ledger_raw = report_data.get("assumption_ledger")
+    if not ledger_raw:
+        return {"diffs": [], "override_count": 0, "tam_delta": None, "version_hash": None}
+    ledger = AssumptionLedger(**ledger_raw) if isinstance(ledger_raw, dict) else ledger_raw
+
+    # E.3: compute TAM delta — compare original us_tam_usd to current value
+    tam_delta = None
+    for a in ledger.assumptions:
+        if a.key == "us_tam_usd":
+            original_tam = a.override_value if a.source == AssumptionSource.USER_OVERRIDE else a.value
+            current_tam = a.value
+            if original_tam and original_tam != current_tam:
+                tam_delta = {
+                    "original_usd": original_tam,
+                    "current_usd":  current_tam,
+                    "delta_usd":    current_tam - original_tam,
+                    "delta_pct":    round((current_tam - original_tam) / original_tam * 100, 1)
+                                    if original_tam else 0,
+                }
+            break
+
+    return {
+        "diffs":          ledger_diff(ledger),
+        "override_count": ledger.override_count,
+        "tam_delta":      tam_delta,
+        "version_hash":   ledger.version_hash,
+        "last_modified":  ledger.last_modified,
+    }
+
+
+@router.patch("/pi-report/{job_id}/assumptions/{assumption_key}")
+async def override_assumption(
+    job_id: str,
+    assumption_key: str,
+    body: AssumptionOverrideRequest,
+    current_user=Depends(get_current_user),
+):
+    """
+    Part E: Override a single assumption value.
+    The original LLM-generated value is preserved in override_value for diff view.
+    """
+    from app.services.report_jobs import get_job, update_report
+    from app.services.assumption_ledger_service import apply_override
+    from app.models.alignment import AssumptionLedger
+
+    job = await get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.get("status") != "done":
+        raise HTTPException(status_code=409, detail="Report not yet complete")
+
+    report_data = job.get("report") or {}
+    ledger_raw = report_data.get("assumption_ledger")
+    if not ledger_raw:
+        raise HTTPException(status_code=404, detail="No assumption ledger for this report")
+
+    ledger = AssumptionLedger(**ledger_raw) if isinstance(ledger_raw, dict) else ledger_raw
+    updated_ledger, found = apply_override(ledger, assumption_key, body.value, body.note)
+    if not found:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Assumption key '{assumption_key}' not found in ledger",
+        )
+
+    report_data["assumption_ledger"] = updated_ledger.model_dump()
+    await update_report(job_id, report_data)
+    logger.info(
+        "Part E: assumption '%s' overridden to %.4g for job %s by user %s",
+        assumption_key, body.value, job_id, getattr(current_user, "id", "?"),
+    )
+    return {
+        "key": assumption_key,
+        "new_value": body.value,
+        "override_count": updated_ledger.override_count,
+    }
+
+
+# ── Part F: Market-sizing recompute + assumption persistence ──────────────────
+#
+# POST /market-sizing/recompute   — run funnel math with user overrides
+# GET  /market-sizing/override    — load saved override for a segment/report
+# GET  /market-sizing/overrides/{report_id} — list all overrides for a report
+# DELETE /market-sizing/override  — revert (delete) a saved override
+
+
+def _slugify(label: str) -> str:
+    import re
+    return re.sub(r"[^a-z0-9]+", "_", label.lower()).strip("_")
+
+
+def _run_funnel(gates: list[dict], net_price_usd: float, som_pct: float) -> dict:
+    """
+    Pure math: walk a funnel list and return TAM/SAM/SOM + step details.
+    Gates format: [{gate, label, type: absolute|rate, value?, rate?, source?}]
+    First gate must be absolute; all others are multiplied in sequence.
+    """
+    if not gates or gates[0].get("type") != "absolute":
+        raise ValueError("Funnel must start with an absolute gate")
+
+    running = float(gates[0].get("value", 0))
+    steps = [{
+        "gate":          gates[0]["gate"],
+        "label":         gates[0].get("label", gates[0]["gate"]),
+        "running_value": running,
+        "type":          "absolute",
+        "source":        gates[0].get("source", ""),
+        "applied":       None,
+    }]
+
+    for g in gates[1:]:
+        if g.get("type") == "absolute":
+            running = float(g.get("value", running))
+            applied = None
+        else:
+            rate = float(g.get("rate", 1.0))
+            running = running * rate
+            applied = rate
+        steps.append({
+            "gate":          g["gate"],
+            "label":         g.get("label", g["gate"]),
+            "running_value": round(running),
+            "type":          g.get("type", "rate"),
+            "source":        g.get("source", "analyst estimate — REVIEW"),
+            "applied":       applied,
+        })
+
+    sam_pop  = round(running)
+    sam_usd  = round(sam_pop * net_price_usd)
+    tam_usd  = round(steps[0]["running_value"] * net_price_usd)
+    som_pop  = round(sam_pop * som_pct)
+    som_usd  = round(som_pop * net_price_usd)
+
+    weakest = [s["label"] for s in steps if "REVIEW" in (s.get("source") or "") or not s.get("source")]
+    return {
+        "tam_usd":           tam_usd,
+        "sam_population":    sam_pop,
+        "sam_usd":           sam_usd,
+        "som_population":    som_pop,
+        "som_usd":           som_usd,
+        "funnel_steps":      steps,
+        "weakest_assumptions": weakest,
+        "segments_used":     [],   # filled in by caller for multi-segment
+    }
+
+
+class _AddedGate(BaseModel):
+    label:  str
+    type:   str = Field(default="rate", pattern="^(absolute|rate)$")
+    rate:   Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    value:  Optional[float] = Field(default=None, gt=0)
+    source: Optional[str]   = None
+    after:  Optional[str]   = None
+
+    def as_gate_dict(self, slug: str) -> dict:
+        return {
+            "gate":   slug,
+            "label":  self.label,
+            "type":   self.type,
+            "rate":   self.rate,
+            "value":  self.value,
+            "source": self.source or "analyst estimate — REVIEW",
+        }
+
+
+class _GateOverride(BaseModel):
+    rate:  Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    value: Optional[float] = Field(default=None, gt=0)
+
+
+class RecomputeRequest(BaseModel):
+    segment_id:        int
+    net_price_usd:     float = Field(..., gt=0)
+    report_id:         Optional[str] = None
+    persist:           bool = True
+    label:             Optional[str] = None
+    overrides:         dict[str, _GateOverride] = Field(default_factory=dict)
+    added_gates:       list[_AddedGate]         = Field(default_factory=list)
+    removed_gates:     list[str]                = Field(default_factory=list)
+    extra_segment_ids: list[int]                = Field(default_factory=list)
+
+
+@router.post("/market-sizing/recompute")
+async def market_sizing_recompute(body: RecomputeRequest):
+    """
+    Recompute TAM/SAM/SOM for a segment with user-authored overrides.
+    Optionally persists the override set so it can be reloaded with the report.
+    No auth required — the segment and report IDs are the access control.
+    """
+    import app.db.market_segment_repository as _seg_repo
+    import app.db.market_sizing_override_repository as _ovr_repo
+
+    # ── Load base segment ──────────────────────────────────────────────────────
+    seg = await _seg_repo.get_segment_by_id(body.segment_id)
+    if not seg:
+        raise HTTPException(status_code=404, detail=f"Segment {body.segment_id} not found")
+
+    som_pct = float(seg.get("som_penetration_pct", 0.35))
+    base_gates: list[dict] = [dict(g) for g in (seg.get("funnel") or [])]
+
+    # ── Validate overrides reference real gates ────────────────────────────────
+    gate_slugs = {g["gate"] for g in base_gates}
+    for k in body.overrides:
+        if k not in gate_slugs:
+            raise HTTPException(status_code=400, detail=f"unknown gate '{k}' in overrides")
+
+    # ── Validate removed_gates ─────────────────────────────────────────────────
+    for r in body.removed_gates:
+        if r not in gate_slugs:
+            raise HTTPException(status_code=400, detail=f"unknown gate '{r}' in removed_gates")
+
+    # ── Validate added_gates: absolute needs value, rate needs rate ────────────
+    for ag in body.added_gates:
+        if ag.type == "absolute" and ag.value is None:
+            raise HTTPException(status_code=422, detail=f"absolute gate '{ag.label}' requires value")
+        if ag.type == "rate" and ag.rate is None:
+            raise HTTPException(status_code=422, detail=f"rate gate '{ag.label}' requires rate")
+        if ag.after and ag.after not in gate_slugs:
+            raise HTTPException(status_code=400, detail=f"after gate '{ag.after}' not in funnel")
+
+    # ── Build working funnel ───────────────────────────────────────────────────
+    # 1. Remove gates
+    working = [g for g in base_gates if g["gate"] not in body.removed_gates]
+
+    # 2. Apply overrides (only non-null fields)
+    applied_overrides: dict = {}
+    for gate_slug, ov in body.overrides.items():
+        if ov.rate is None and ov.value is None:
+            continue    # empty override — skip
+        for g in working:
+            if g["gate"] == gate_slug:
+                if ov.rate is not None:
+                    g["rate"] = ov.rate
+                    applied_overrides[gate_slug] = {"rate": ov.rate}
+                elif ov.value is not None:
+                    g["value"] = ov.value
+                    applied_overrides[gate_slug] = {"value": ov.value}
+
+    # 3. Insert added gates (slugify label, disambiguate duplicates)
+    used_slugs: set[str] = {g["gate"] for g in working}
+    new_gate_dicts: list[dict] = []
+    for ag in body.added_gates:
+        slug = _slugify(ag.label)
+        if slug in used_slugs:
+            n = 2
+            while f"{slug}_{n}" in used_slugs:
+                n += 1
+            slug = f"{slug}_{n}"
+        used_slugs.add(slug)
+        new_gate_dicts.append((ag.after, ag.as_gate_dict(slug)))
+
+    # Insert after the specified gate (or append if no after)
+    for after_gate, gd in new_gate_dicts:
+        if after_gate:
+            pos = next((i for i, g in enumerate(working) if g["gate"] == after_gate), None)
+            if pos is not None:
+                working.insert(pos + 1, gd)
+            else:
+                working.append(gd)
+        else:
+            working.append(gd)
+
+    # 4. Guard: first gate must still be absolute
+    if not working or working[0].get("type") != "absolute":
+        raise HTTPException(status_code=400,
+            detail="funnel must start with an absolute gate; cannot remove the base population gate")
+
+    # ── Run math for primary segment ───────────────────────────────────────────
+    result = _run_funnel(working, body.net_price_usd, som_pct)
+    result["segments_used"] = [{"id": body.segment_id, "name": seg.get("segment_name", "")}]
+
+    # ── Combine extra segments (additive SAM) ─────────────────────────────────
+    for extra_id in body.extra_segment_ids:
+        extra_seg = await _seg_repo.get_segment_by_id(extra_id)
+        if not extra_seg:
+            continue
+        extra_result = _run_funnel(
+            [dict(g) for g in (extra_seg.get("funnel") or [])],
+            body.net_price_usd,
+            float(extra_seg.get("som_penetration_pct", 0.35)),
+        )
+        result["sam_population"] += extra_result["sam_population"]
+        result["sam_usd"]        += extra_result["sam_usd"]
+        result["som_population"] += extra_result["som_population"]
+        result["som_usd"]        += extra_result["som_usd"]
+        result["tam_usd"]        = max(result["tam_usd"], extra_result["tam_usd"])
+        result["segments_used"].append({"id": extra_id, "name": extra_seg.get("segment_name", "")})
+
+    # ── Persist if report_id and persist=True ─────────────────────────────────
+    saved = False
+    saved_id = None
+    if body.report_id and body.persist:
+        saved_id = await _ovr_repo.save_override(
+            report_id=body.report_id,
+            segment_id=body.segment_id,
+            user_id=None,
+            net_price_usd=body.net_price_usd,
+            overrides=applied_overrides,
+            added_gates=[ag.model_dump() for ag in body.added_gates],
+            removed_gates=body.removed_gates,
+            extra_segment_ids=body.extra_segment_ids,
+            tam_usd=result["tam_usd"],
+            sam_usd=result["sam_usd"],
+            som_usd=result["som_usd"],
+            label=body.label,
+        )
+        saved = True
+
+    return {
+        "market_sizing":    result,
+        "applied_overrides": applied_overrides,
+        "saved":             saved,
+        "saved_override_id": saved_id,
+    }
+
+
+@router.get("/market-sizing/override")
+async def get_market_sizing_override(report_id: str, segment_id: int):
+    """Load a previously saved override for a report+segment and recompute."""
+    import app.db.market_segment_repository as _seg_repo
+    import app.db.market_sizing_override_repository as _ovr_repo
+
+    saved = await _ovr_repo.get_override(report_id, segment_id)
+    if not saved:
+        raise HTTPException(status_code=404, detail="No saved override for this report/segment")
+
+    seg = await _seg_repo.get_segment_by_id(segment_id)
+    if not seg:
+        raise HTTPException(status_code=404, detail=f"Segment {segment_id} not found")
+
+    # Reconstruct as a RecomputeRequest and replay
+    ov_dict = saved.get("overrides") or {}
+    added   = [_AddedGate(**ag) for ag in (saved.get("added_gates") or [])]
+    removed = saved.get("removed_gates") or []
+
+    # Build a fake body and re-run through the same logic
+    fake = RecomputeRequest(
+        segment_id=segment_id,
+        net_price_usd=float(saved.get("net_price_usd", 25000)),
+        overrides={k: _GateOverride(**v) for k, v in ov_dict.items()},
+        added_gates=added,
+        removed_gates=removed,
+        extra_segment_ids=saved.get("extra_segment_ids") or [],
+        persist=False,
+    )
+    resp = await market_sizing_recompute(fake)
+    resp["applied_overrides"] = ov_dict
+    resp["label"] = saved.get("label")
+    return resp
+
+
+@router.get("/market-sizing/overrides/{report_id}")
+async def list_market_sizing_overrides(report_id: str):
+    """List all saved overrides for a report (one per segment)."""
+    import app.db.market_sizing_override_repository as _ovr_repo
+    rows = await _ovr_repo.list_overrides_for_report(report_id)
+    return {"report_id": report_id, "count": len(rows), "overrides": rows}
+
+
+@router.delete("/market-sizing/override")
+async def delete_market_sizing_override(report_id: str, segment_id: int):
+    """Revert all custom assumptions for a segment (delete the saved override)."""
+    import app.db.market_sizing_override_repository as _ovr_repo
+    deleted = await _ovr_repo.delete_override(report_id, segment_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="No saved override to revert")
+    return {"reverted": True}

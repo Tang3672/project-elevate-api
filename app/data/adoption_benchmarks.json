@@ -1,0 +1,93 @@
+[
+  {
+    "id": "specialty_drug_new_moa",
+    "label": "Specialty drug — novel mechanism of action",
+    "applies_to": ["drug_small_molecule", "biologic", "gene_cell_therapy"],
+    "competitive_context": "new_moa",
+    "y1_share": 0.05,
+    "y3_share": 0.15,
+    "peak_share": 0.25,
+    "years_to_peak": 5,
+    "confidence": "medium",
+    "source": "Public sales-history analogs: pembrolizumab (Keytruda) NSCLC 1L, dupilumab (Dupixent) AD — first 5yr ramp normalized to eligible population",
+    "note": "New MoA drugs with no direct competitor at launch; assumes Breakthrough/Priority Review designation"
+  },
+  {
+    "id": "me_too_crowded",
+    "label": "Me-too / crowded class",
+    "applies_to": ["drug_small_molecule", "biologic"],
+    "competitive_context": "me_too",
+    "y1_share": 0.02,
+    "y3_share": 0.05,
+    "peak_share": 0.08,
+    "years_to_peak": 4,
+    "confidence": "medium",
+    "source": "IQVIA analog methodology — 4th+ entrant in crowded class (e.g. JAK inhibitors in RA)",
+    "note": "Highly competitive; requires strong differentiation or price discount"
+  },
+  {
+    "id": "orphan_drug",
+    "label": "Orphan / rare disease drug",
+    "applies_to": ["drug_small_molecule", "biologic", "gene_cell_therapy"],
+    "competitive_context": "orphan",
+    "y1_share": 0.35,
+    "y3_share": 0.55,
+    "peak_share": 0.60,
+    "years_to_peak": 3,
+    "confidence": "medium",
+    "source": "Public orphan drug launches: nusinersen (Spinraza), risdiplam (Evrysdi), voretigene (Luxturna)",
+    "note": "Small designated population, high unmet need; faster uptake but smaller absolute market"
+  },
+  {
+    "id": "hospital_software",
+    "label": "Hospital enterprise clinical software",
+    "applies_to": ["samd", "digital_health_enterprise"],
+    "competitive_context": "hospital_software",
+    "y1_site_penetration": 0.03,
+    "y3_site_penetration": 0.10,
+    "peak_site_penetration": 0.30,
+    "years_to_peak": 6,
+    "confidence": "low",
+    "source": "EHR/clinical AI adoption literature: Epic rollout timelines, Viz.ai CSC penetration 2019-2023",
+    "note": "Slow procurement / IT integration; peak ~30% of addressable sites is aggressive; budget cycle 18-24mo"
+  },
+  {
+    "id": "interventional_device",
+    "label": "Interventional single-use device",
+    "applies_to": ["medical_device", "device"],
+    "competitive_context": "interventional_device",
+    "y1_share": 0.05,
+    "y3_share": 0.15,
+    "peak_share": 0.35,
+    "years_to_peak": 5,
+    "confidence": "medium",
+    "source": "Boston Scientific / Medtronic public disclosure for structural heart devices",
+    "note": "Penetration vs total eligible procedures; assumes FDA PMA/510k + training pathway"
+  },
+  {
+    "id": "companion_diagnostic",
+    "label": "Companion diagnostic / molecular test",
+    "applies_to": ["diagnostic"],
+    "competitive_context": "companion_diagnostic",
+    "y1_share": 0.08,
+    "y3_share": 0.28,
+    "peak_share": 0.47,
+    "years_to_peak": 5,
+    "confidence": "medium",
+    "source": "Guardant Health FY2023 10-K: $416M US oncology revenue vs ~$1.5B addressable SAM (2M cancer Dx × 30% advanced × $2,500 net) implies 28% y3 penetration. Peak calibrated to ~47% (dominant-player ceiling in multi-competitor liquid biopsy market, lower than pure companion Dx tied to single therapeutic).",
+    "note": "Multi-analyte liquid biopsy competes with Foundation Medicine, local labs; lower penetration ceiling than a tied companion Dx. Validation (FY2023): engine $420M vs actual $416M (1% APE after correction from 44%)."
+  },
+  {
+    "id": "antimicrobial",
+    "label": "Novel antibiotic / antimicrobial",
+    "applies_to": ["antibiotic", "drug_amr"],
+    "competitive_context": "antimicrobial",
+    "y1_share": 0.05,
+    "y3_share": 0.12,
+    "peak_share": 0.20,
+    "years_to_peak": 5,
+    "confidence": "low",
+    "source": "Omadacycline (Nuzyra), ceftazidime-avibactam (Avycaz) commercial ramps — antimicrobials notoriously slow uptake; stewardship programs gatekeep prescribing",
+    "note": "ID formulary gatekeeping + stewardship delays = slow ramp even for last-resort agents"
+  }
+]

@@ -770,3 +770,71 @@ def build_calibration_report(
         report["calibration_sources"].append("CMS Part D Drug Spending Dashboard (public domain)")
 
     return report
+
+
+# ── Indication → HHI lookup ───────────────────────────────────────────────────
+
+_INDICATION_TA_KEYWORDS: list[tuple[list[str], str]] = [
+    # (keyword list, ta_key) — first match wins
+    (["car-t", "cart", "cell therapy", "gene cell", "gene_cell"],              "gene_therapy"),
+    (["hematol", "leukemia", "lymphoma", "myeloma", "aml", "cll", "cml"],     "hematology"),
+    (["lung", "nsclc", "sclc", "oncol", "cancer", "tumor", "tumour",
+      "breast", "prostate", "colon", "melanoma", "bladder", "kidney",
+      "glioblastoma", "ovarian", "pancreatic"],                                "oncology"),
+    (["rheumatoid", "autoimmune", "psoriasis", "lupus", "crohn",
+      "immunolog", "uveitis", "atopic", "eczema", "dermatitis"],               "immunology"),
+    (["diabetes", "glp-1", "glp1", "obesity", "metabolic", "hba1c",
+      "insulin", "weight loss", "semaglutide"],                                "metabolic"),
+    (["atrial fibrillation", "anticoagulant", "cardiovascular", "cardiac",
+      "heart failure", "coronary", "stroke anticoagulant", "dvt", "vte"],     "cardiovascular"),
+    (["ibd", "inflammatory bowel", "ulcerative colitis", "crohn's"],           "ibd"),
+    (["nash", "mash", "fatty liver", "nafld"],                                 "nash_mash"),
+    (["multiple sclerosis", "alzheimer", "parkinson", "cns", "neuro",
+      "dementia"],                                                              "cns"),
+    (["rare disease", "orphan", "gene therapy", "spinal muscular",
+      "hemophilia", "sickle cell", "thalassemia"],                             "rare_disease"),
+]
+
+_TA_DRUG_SETS: dict[str, list[str]] = {
+    "oncology":       ["KEYTRUDA", "OPDIVO", "IBRANCE", "REVLIMID", "DARZALEX", "IMBRUVICA"],
+    "immunology":     ["HUMIRA", "STELARA", "SKYRIZI", "RINVOQ", "COSENTYX", "DUPIXENT"],
+    "cardiovascular": ["ELIQUIS", "XARELTO", "JARDIANCE", "FARXIGA"],
+    "metabolic":      ["OZEMPIC", "TRULICITY", "JARDIANCE", "WEGOVY", "FARXIGA"],
+    "cns":            ["OCREVUS", "LEQEMBI"],
+    "rare_disease":   ["ZOLGENSMA", "KYMRIAH", "HEMLIBRA", "TEPEZZA"],
+    "gene_therapy":   ["KYMRIAH", "YESCARTA", "CASGEVY"],
+    "hematology":     ["REVLIMID", "DARZALEX", "IMBRUVICA", "HEMLIBRA", "YESCARTA"],
+    "ibd":            ["STELARA", "ENTYVIO", "RINVOQ"],
+    "nash_mash":      ["REZDIFFRA"],
+}
+
+
+def get_hhi_for_indication(disease_name: str, product_type: str = "") -> Optional[int]:
+    """
+    Return a market HHI (Herfindahl-Hirschman Index) for the given indication.
+
+    Maps disease_name + product_type to a therapeutic area, then computes HHI
+    from CMS Part D beneficiary counts for known drugs in that area.
+
+    Returns None when the indication cannot be mapped to a known TA with CMS data
+    (caller should treat None as "no HHI data" and skip the adjustment).
+
+    Source: DOJ/FTC Horizontal Merger Guidelines (2023); CMS Part D public data.
+    """
+    combined = (disease_name + " " + product_type).lower()
+
+    ta = None
+    for keywords, ta_key in _INDICATION_TA_KEYWORDS:
+        if any(kw in combined for kw in keywords):
+            ta = ta_key
+            break
+
+    if ta is None:
+        return None
+
+    drugs = _TA_DRUG_SETS.get(ta, [])
+    result = compute_hhi(drugs, ta)
+    hhi_raw = result.get("hhi")
+    if hhi_raw is None:
+        return None
+    return int(round(hhi_raw))
