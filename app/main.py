@@ -155,6 +155,22 @@ async def health_check():
     }
 
 
+@app.get("/version")
+async def get_version():
+    import subprocess, os
+    try:
+        commit = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL
+        ).decode().strip()
+        branch = subprocess.check_output(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"], stderr=subprocess.DEVNULL
+        ).decode().strip()
+    except Exception:
+        commit = os.getenv("RAILWAY_GIT_COMMIT_SHA", "unknown")
+        branch = os.getenv("RAILWAY_GIT_BRANCH", "unknown")
+    return {"commit": commit, "branch": branch}
+
+
 
 @app.get("/debug/env-full")
 def debug_env_full():
