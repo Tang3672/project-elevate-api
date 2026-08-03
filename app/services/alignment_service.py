@@ -170,7 +170,7 @@ async def generate_pi_report(
     report = await _generate_expert_report(
         idea, pt, expert, demand_results, hospital_matches_raw, total_signals,
         pi_memory_context=pi_memory_context, funding_pathway=funding_pathway, user_id=user_id,
-        product_name=product_name, institution=institution)
+        product_name=product_name, institution=institution, domain=_resolved_domain)
 
     # H-01: Archetype render-time gate — validate vocabulary before any post-processing.
     # If a generator emits clinical vocabulary (510k, NTAP, CPT) for a research tool,
@@ -866,12 +866,16 @@ def _modality_directive(sub_expert_id: str, product_type) -> str:
     )
 
 
-async def _generate_expert_report(idea, product_type, expert, demand_results, hospital_matches_raw, total_signals, pi_memory_context="", funding_pathway="commercial", user_id=None, product_name=None, institution=None):
+async def _generate_expert_report(idea, product_type, expert, demand_results, hospital_matches_raw, total_signals, pi_memory_context="", funding_pathway="commercial", user_id=None, product_name=None, institution=None, domain: str = "LIFE_SCIENCES_CLINICAL"):
     """
     Generates a PI report using the selected Expert's domain knowledge.
     Injects expert system_prompt + knowledge_base into the researcher context.
     Falls back to antibiotic-specific parsing for AMR; generic parsing for others.
     """
+    # domain is the resolved product domain (LIFE_SCIENCES_RESEARCH or LIFE_SCIENCES_CLINICAL)
+    # passed from generate_pi_report(); used by B-01 / B-02 post-processing below.
+    _resolved_domain: str = domain
+
     #  Two-layer knowledge system
     # Layer 1: Disease Classifier → specific disease name
     disease_info = {}
