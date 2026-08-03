@@ -84,6 +84,10 @@ async def generate_pi_report(
     except (ValueError, AttributeError):
         pt = ProductType.OTHER
 
+    # Pre-bind so NameError is impossible even if the domain-resolution block below
+    # (lines 145-152) is unreachable due to an early exception in route_expert().
+    _resolved_domain: str = "LIFE_SCIENCES_CLINICAL"
+
     source_counts        = await get_signal_counts_by_source()
     total_signals        = sum(r["count"] for r in source_counts)
     idea_embedding       = await embed_text(idea)
