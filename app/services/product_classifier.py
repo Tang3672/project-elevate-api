@@ -55,6 +55,7 @@ class IntakeQuestion:
     options: list[str] | None
     default: Any | None
     impact_rank: int            # 1 = highest impact
+    engine_estimate: str | None = None  # derived from generic comparables (Rule 8 — never operator-specific)
 
 
 # ── Domain / archetype detection ──────────────────────────────────────────────
@@ -235,6 +236,31 @@ def classify_product(idea: str) -> Classification:
 #   dev.evidence_stage, dev.clinical_validation_done
 #   reg.intended_use_jurisdiction, reg.exempt_basis
 #   ip.protection_type, ip.bayh_dole_applicable
+#
+# Rule 8 (Addendum): engine_estimate on price-band questions must be derived
+# from generic comparables in app/market/priors/ — never from operator-specific
+# primary research.  The helper below reads the priors at module load time.
+
+def _lsr_price_band_estimate() -> str:
+    """Return a priors-derived price estimate string for life-sciences research tools.
+
+    Reads app/market/priors/life_sciences_research.py — numbers come from
+    Carnegie/HERD/lab-software comparables, not any specific operator's data.
+    """
+    try:
+        from app.market.priors.life_sciences_research import PRIORS
+        tiers = PRIORS["price_tiers"]
+        acad = int(tiers["academic"]["annual_usd"] / 1_000)
+        core = int(tiers["core_facility"]["annual_usd"] / 1_000)
+        site = int(tiers["site_license"]["annual_usd"] / 1_000)
+        return (
+            f"Engine estimate (lab-software comparables): "
+            f"~${acad}k/yr academic lab · ~${core}k/yr core facility · ~${site}k/yr site license. "
+            "Override with observed customer spend if available."
+        )
+    except Exception:
+        return "Engine estimate: see market/priors/life_sciences_research.py for comparable price tiers."
+
 
 _RESEARCH_QUESTIONS: list[IntakeQuestion] = [
     IntakeQuestion(
@@ -266,6 +292,7 @@ _RESEARCH_QUESTIONS: list[IntakeQuestion] = [
         ],
         default=None,
         impact_rank=2,
+        engine_estimate=_lsr_price_band_estimate(),
     ),
     IntakeQuestion(
         id="rq_status_quo",
@@ -592,15 +619,21 @@ def questions_to_legacy_format(questions: list[IntakeQuestion]) -> list[dict]:
     """
     Convert IntakeQuestion[] to the legacy {question, field, options, hint} format
     so the existing frontend rendering code works without changes.
+
+    engine_estimate is included when present — frontend can display it as a
+    greyed-out hint below the input so PIs can see the engine's default before
+    overriding it with observed data (Rule 8).
     """
     out = []
     for q in questions:
-        out.append({
-            "question": q.text,
-            "field": q.id,
-            "options": q.options or [],
-            "hint": q.why_asked,
-            "binds_to": q.binds_to,
-            "impact_rank": q.impact_rank,
-        })
+        entry: dict = {
+            "question":       q.text,
+            "field":          q.id,
+            "options":        q.options or [],
+            "hint":           q.why_asked,
+            "binds_to":       q.binds_to,
+            "impact_rank":    q.impact_rank,
+            "engine_estimate": q.engine_estimate,
+        }
+        out.append(entry)
     return out
