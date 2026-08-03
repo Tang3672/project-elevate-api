@@ -32,22 +32,28 @@ async def init_report_jobs_table():
                 status      TEXT DEFAULT 'running',
                 report      JSONB,
                 error       TEXT,
+                owner_id    TEXT,
                 created_at  TIMESTAMPTZ DEFAULT NOW(),
                 updated_at  TIMESTAMPTZ DEFAULT NOW()
             )
+        """)
+        # Idempotent: add owner_id column if migrating an existing table
+        await conn.execute("""
+            ALTER TABLE report_jobs ADD COLUMN IF NOT EXISTS owner_id TEXT
         """)
         await conn.execute(
             "CREATE INDEX IF NOT EXISTS report_jobs_created_idx ON report_jobs (created_at)")
     logger.info("report_jobs table ready")
 
 
-async def create_job() -> str:
+async def create_job(owner_id: str | None = None) -> str:
     job_id = uuid.uuid4().hex[:16]
     from app.db.database import get_pool
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute(
-            "INSERT INTO report_jobs (job_id, status) VALUES ($1, 'running')", job_id)
+            "INSERT INTO report_jobs (job_id, status, owner_id) VALUES ($1, 'running', $2)",
+            job_id, str(owner_id) if owner_id is not None else None)
         # Opportunistic cleanup of jobs older than an hour.
         await conn.execute(
             "DELETE FROM report_jobs WHERE created_at < NOW() - INTERVAL '1 hour'")
@@ -96,7 +102,7 @@ async def get_job(job_id: str) -> dict | None:
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT status, report, error FROM report_jobs WHERE job_id=$1", job_id)
+            "SELECT status, report, error, owner_id FROM report_jobs WHERE job_id=$1", job_id)
     if not row:
         return None
     report = row["report"]
@@ -105,4 +111,5 @@ async def get_job(job_id: str) -> dict | None:
             report = json.loads(report)
         except (ValueError, TypeError):
             report = None
-    return {"status": row["status"], "report": report, "error": row["error"]}
+    return {"status": row["status"], "report": report, "error": row["error"],
+            "owner_id": row["owner_id"]}
