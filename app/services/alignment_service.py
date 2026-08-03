@@ -1553,15 +1553,27 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
             logger.warning("Synthesis JSON parse failed: %s", _pe)
             return {}
 
-    raw  = await _call_claude(context, system, max_tokens=8192, model=_synthesis_model)
+    try:
+        raw  = await _call_claude(context, system, max_tokens=8192, model=_synthesis_model)
+    except Exception as _synth_e:
+        logger.error("Synthesis call-1 HTTP error (model=%s ctx_len=%d): %s",
+                     _synthesis_model, len(context), _synth_e)
+        raise
+    logger.info("Synthesis call-1 done: model=%s raw_len=%d first200=%r",
+                _synthesis_model, len(raw), raw[:200])
     data = _parse_safe(raw)
     if not _looks_complete(data):
-        logger.warning("Synthesis came back thin/unparseable — retrying once")
-        raw2 = await _call_claude(
-            context,
-            system + "\n\nIMPORTANT: respond with ONLY one complete, valid JSON object "
-                     "matching the schema. Do not truncate; include every top-level field.",
-            max_tokens=8192, model=_synthesis_model)
+        logger.warning("Synthesis came back thin/unparseable — retrying once (raw[:300]=%r)", raw[:300])
+        try:
+            raw2 = await _call_claude(
+                context,
+                system + "\n\nIMPORTANT: respond with ONLY one complete, valid JSON object "
+                         "matching the schema. Do not truncate; include every top-level field.",
+                max_tokens=8192, model=_synthesis_model)
+        except Exception as _synth2_e:
+            logger.error("Synthesis call-2 HTTP error: %s", _synth2_e)
+            raise
+        logger.info("Synthesis call-2 done: raw_len=%d first200=%r", len(raw2), raw2[:200])
         data2 = _parse_safe(raw2)
         if _looks_complete(data2):
             data = data2
