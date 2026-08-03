@@ -198,6 +198,12 @@ async def get_pi_report_async(payload: PIReportRequest, current_user = Depends(g
                 logger.warning("Background verification failed (non-fatal): %s", _ve)
         except ValueError as e:
             await set_error(job_id, str(e))
+        except asyncio.CancelledError:
+            # Railway container restart killed the task — mark the job as failed so
+            # the frontend can show an actionable error instead of timing out silently.
+            logger.warning("Async PI report task cancelled (container restart?): job=%s", job_id)
+            await set_error(job_id, "Report generation was interrupted by a server restart. Please try again.")
+            raise   # re-raise so asyncio can clean up normally
         except Exception as e:
             logger.error(f"Async PI report failed: {e}", exc_info=True)
             await set_error(job_id, str(e))
