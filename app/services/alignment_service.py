@@ -1703,7 +1703,8 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
         logger.warning("R-04 past-date scrub failed (non-fatal): %s", _r04_e)
 
     # Parse into PIReport
-    report = _parse_expert_response(data, idea, product_type, expert, demand_results, hospital_matches_raw, total_signals)
+    report = _parse_expert_response(data, idea, product_type, expert, demand_results, hospital_matches_raw, total_signals,
+                                    product_name=product_name, institution=institution)
 
     # Fix 1 — make market sizing arithmetically self-consistent so the Math Verifier
     # can't flag rounding drift (LLMs round $99.45M->$99M inconsistently). Recompute
@@ -2144,7 +2145,7 @@ If the exact guidance is not listed above, use the general FDA guidance search: 
 }"""
 
 
-def _parse_expert_response(data, idea, product_type, expert, demand_results, hospital_matches_raw, total_signals):
+def _parse_expert_response(data, idea, product_type, expert, demand_results, hospital_matches_raw, total_signals, product_name=None, institution=None):
     """Parse Claude JSON response into PIReport regardless of domain."""
     di_data = data.get("disease_intelligence", {})
     disease_intel = DiseaseIntelligence(
