@@ -74,6 +74,16 @@ _RESEARCH_IDEA_PATTERNS = [
     r"\bnon[-\s]?clinical\b",
     r"\bcore\s+facilit(y|ies)\b",
     r"\bwearable\s+sensor[s]?.{0,60}\blab\b",
+    # Research infrastructure / lab-software patterns
+    r"\b(scientific|experimental|behavioral|neural|electrophysiology)\s+data\b",
+    r"\bsd[-\s]?card\b",
+    r"\bmemory\s+card[s]?\b",
+    r"\bdata\s+management\s+platform\b",
+    r"\bdata\s+sync(hroniz)?\b",
+    r"\blab(oratory)?\s+software\b",
+    r"\bneurotech\b",
+    r"\bdata\s+acquisition\b",
+    r"\bresearchers?\s+across\b",
 ]
 
 

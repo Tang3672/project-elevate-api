@@ -105,6 +105,16 @@ _SIGNALS: dict[str, list[str]] = {
     "sepsis_digital":      ["sepsis detection","early warning","deterioration","ai icu","samd sepsis","ai triage"],
     "mental_health_dig":   ["digital therapeutic","dtx ","mental health app","dbt digital","prescription digital","pear therapeutics"],
     "rpm_cardiac":         ["remote cardiac monitoring","mcot","holter ai","ambulatory ecg","wearable ecg","cardiac rhythm monitoring"],
+
+    # Research infrastructure / lab software
+    "research_data_platform": [
+        "sd card","sd-card","memory card","experimental data","behavioral data",
+        "scientific data","data sync","data synchroni","lab data",
+        "data management platform","neurotech","electrophysiology data",
+        "acquisition software","data capture","data pipeline","lab software",
+        "research software","cloud data platform","cloud sync research",
+        "sensor data","wearable data","animal data","neural data",
+    ],
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -168,6 +178,8 @@ _SIGNAL_PRIORS: dict[str, dict[str, float]] = {
     "sepsis_digital":      {"digital_cds": 0.75, "diagnostic_biomarker": 0.15, "digital_rpm": 0.10},
     "mental_health_dig":   {"digital_therapeutic": 0.70, "drug_mental_health": 0.20, "digital_rpm": 0.10},
     "rpm_cardiac":         {"digital_rpm": 0.65, "device_cardiovascular": 0.25, "digital_cds": 0.10},
+
+    "research_data_platform": {"research_tool_non_clinical": 0.60, "research_infrastructure_saas": 0.40},
 }
 
 # Minimum weight to include in output (below this, subcategory is irrelevant)
@@ -192,6 +204,7 @@ _SIGNAL_STRENGTH = {
     "cgm_device": 1.3,
     "diagnostic_poc": 1.3,
     "diagnostic_ngs": 1.3,
+    "research_data_platform": 1.5,
 }
 
 
