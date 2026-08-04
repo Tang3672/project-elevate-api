@@ -214,10 +214,22 @@ _SRC = {
     "patents":  "Recent US patent filings (Google Patents)",
     "trl":      "Technology Readiness Level assessment (NIH/BARDA framework)",
     "sbir":     "Recent NIH SBIR/STTR awards in this space (NIH Reporter)",
-    "market":   "Bottom-up market sizing (CDC/SEER epidemiology + CMS pricing)",
     "modality": "Modality base rates (AUTM licensing surveys + FDA approval data)",
     "payer":    "Payer/reimbursement assessment (expert panel + CMS coverage data)",
 }
+
+
+def _market_evidence_source(modality: str = "") -> str:
+    """Return the market sizing evidence label appropriate to the product modality."""
+    m = (modality or "").lower()
+    if m == "research_tool":
+        return "Bottom-up market sizing (NIH-funded lab counts × annual spend per lab)"
+    if m == "diagnostic":
+        return "Bottom-up market sizing (procedure volume × price per test)"
+    if m in ("device", "digital"):
+        return "Bottom-up market sizing (addressable site/procedure counts × ASP)"
+    # Clinical default — drugs, biologics, gene therapy, vaccines
+    return "Bottom-up market sizing (CDC/SEER epidemiology + CMS pricing)"
 
 
 def _band(v: Optional[float]) -> str:
@@ -243,7 +255,11 @@ def build_rationales(signals: dict, scores: dict, market: float, whitespace: flo
     designations = signals.get("designations") or []
     payer = signals.get("payer_barrier")
 
+    _market_src = _market_evidence_source(_mkey)
+
     def d(fact, src):
+        if src == "market":
+            return {"fact": fact, "source": _market_src}
         return {"fact": fact, "source": _SRC.get(src, src)}
 
     def dim(key, drivers):

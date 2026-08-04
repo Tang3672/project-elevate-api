@@ -2054,7 +2054,7 @@ RIGHT: "According to the CDC Antimicrobial Resistance Threats Report (2019), car
 WRONG: "The QIDP pathway provides exclusivity benefits."
 RIGHT: "Under the GAIN Act of 2012 (21 U.S.C. 355f), QIDP designation confers an additional five years of market exclusivity and guarantees Priority Review with a six-month FDA target action date."
 
-For literature_citations entries, write the relevance field as a full sentence explaining exactly what the paper found and why it matters: "Murray et al. (Lancet, 2022) estimated 1.27 million deaths directly attributable to AMR globally in 2019, establishing the epidemiological basis for the unmet need calculation in this report."
+For literature_citations entries, write the relevance field as a full sentence explaining exactly what the paper found and why it matters: "Author et al. (Journal, Year) measured [specific finding], which directly establishes [the unmet need, adoption precedent, or market evidence this report relies on]."
 
 RULES:
 1. Every source_url must point to a SPECIFIC page, not a homepage. Examples:
@@ -2829,7 +2829,7 @@ def _enforce_market_consistency(report, deriv) -> None:
             "combination":                 "blended device + software/diagnostic revenue streams",
             "gene_cell_therapy":           "annual treated cohort × one-time price",
             "vaccine":                     "population at risk × immunization rate × price",
-        }.get(_arch, "eligible patients × annual price")
+        }.get(_arch, "buyers × annual revenue per buyer")
 
         ms.total_addressable_market_usd = float(tam)
         ms.serviceable_market_usd = float(sam)
