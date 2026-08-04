@@ -48,16 +48,31 @@ logger = logging.getLogger(__name__)
 # scenarios — only the reachable share (SAM) and realistic initial penetration
 # (SOM) vary with adoption assumptions. That is the economically-correct way to
 # express conservative/aggressive without inventing different epidemiology.
+
+# Clinical/therapeutic scenario narratives
 SCENARIOS = {
     "conservative": {"sam_mult": 0.70, "som_mult": 0.50,
-                     "narrative": "Slow payer uptake, strong incumbent defense, "
-                                  "narrow initial label."},
+                     "narrative": "Slow clinical adoption, strong incumbent defense, "
+                                  "narrow initial approved indication."},
     "base":         {"sam_mult": 1.00, "som_mult": 1.00,
-                     "narrative": "Adoption in line with comparable launches in "
-                                  "this therapeutic area."},
+                     "narrative": "Adoption in line with comparable product launches "
+                                  "in this indication."},
     "aggressive":   {"sam_mult": 1.30, "som_mult": 1.60,
-                     "narrative": "Fast guideline inclusion, favorable "
-                                  "reimbursement, limited direct competition."},
+                     "narrative": "Fast guideline uptake, favorable payer coverage, "
+                                  "limited direct competition."},
+}
+
+# Research-tool scenario narratives — no payer/label/guideline vocabulary
+SCENARIOS_RESEARCH = {
+    "conservative": {"sam_mult": 0.70, "som_mult": 0.50,
+                     "narrative": "Slow lab adoption, strong status-quo (DIY/manual) "
+                                  "inertia, narrow initial user base."},
+    "base":         {"sam_mult": 1.00, "som_mult": 1.00,
+                     "narrative": "Adoption in line with comparable research tool "
+                                  "launches (methods paper + core-facility beachhead)."},
+    "aggressive":   {"sam_mult": 1.30, "som_mult": 1.60,
+                     "narrative": "Fast conference buzz and citation adoption, "
+                                  "favorable NIH funding climate, few competing solutions."},
 }
 
 # Recognized authoritative source roots -> higher confidence floor.
@@ -209,7 +224,8 @@ def build_provenance(deriv, *, geography: str = "United States") -> dict:
     sam = float(getattr(deriv, "us_sam_usd", 0) or 0)
     som = float(getattr(deriv, "us_som_usd", 0) or 0)
 
-    scenarios = build_scenarios(tam, sam, som)
+    archetype = getattr(deriv, "archetype", "") or ""
+    scenarios = build_scenarios(tam, sam, som, archetype=archetype)
 
     # Append the three aggregate roll-up rows to the waterfall for the UI.
     for label, val, role in (("Total Addressable Market (TAM)", tam, "TAM"),
@@ -253,10 +269,12 @@ def build_provenance(deriv, *, geography: str = "United States") -> dict:
     }
 
 
-def build_scenarios(tam: float, sam: float, som: float) -> list[dict]:
+def build_scenarios(tam: float, sam: float, som: float, *, archetype: str = "") -> list[dict]:
     """Conservative / base / aggressive, clamped so SOM <= SAM <= TAM."""
+    _is_research = archetype.startswith(("research_tool", "research_infrastructure"))
+    scenario_set = SCENARIOS_RESEARCH if _is_research else SCENARIOS
     out: list[dict] = []
-    for name, cfg in SCENARIOS.items():
+    for name, cfg in scenario_set.items():
         s_sam = min(sam * cfg["sam_mult"], tam)
         s_som = min(som * cfg["som_mult"], s_sam)
         out.append({

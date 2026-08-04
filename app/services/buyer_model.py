@@ -247,11 +247,11 @@ def academic_neurotech_lab_buyer(
     population_hi: int = 8_000,
     population_denominator: str = "NIH-funded neuroscience/neurotech labs running instrumented experiments",
     population_source: str = "NIH RePORTER query — estimate pending verification",
-    spend_source: str = "Primary research (specify source)",
+    spend_source: str = "Primary research — operator should supply observed spend from PI interviews ⚠",
 ) -> BuyerModel:
     """
-    Default buyer model for Hublink-class neurotech data-logging tools.
-    Numbers from Gaidica (2026) primary research: n=10 PIs, $20k-$30k per multi-year cycle.
+    Default buyer model for neurotech/lab-data-logging tools.
+    Default spend band assumed; override with observed primary research data.
     """
     return BuyerModel(
         buyer_persona="academic_pi",
