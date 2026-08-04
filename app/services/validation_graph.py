@@ -153,9 +153,14 @@ async def math_verifier_node(state: PIReportState) -> dict:
     """Independently re-derives all market sizing calculations."""
     logger.info("Math verifier running")
     try:
+        from app.services.math_consistency_guard import check_market_arithmetic
+
         ms = state["report"].get("market_sizing", {})
         if not ms:
             return {"math_flags": [], "math_error": None}
+
+        # B-02: deterministic arithmetic check — immune to LLM "resolved" hallucination
+        deterministic_flags = check_market_arithmetic(ms)
 
         user_input = json.dumps({
             "stated_TAM": ms.get("total_addressable_market_usd"),
@@ -167,8 +172,12 @@ async def math_verifier_node(state: PIReportState) -> dict:
         }, indent=2)
 
         raw = await _call_claude(MATH_VERIFIER_SYSTEM, f"Verify these calculations:\n{user_input}")
-        flags = _parse_flags(raw, "Math Verifier")
-        logger.info(f"Math verifier: {len(flags)} flags")
+        llm_flags = _parse_flags(raw, "Math Verifier")
+        flags = deterministic_flags + llm_flags
+        logger.info(
+            f"Math verifier: {len(flags)} flags "
+            f"({len(deterministic_flags)} deterministic, {len(llm_flags)} LLM)"
+        )
         return {"math_flags": flags, "math_error": None}
     except Exception as e:
         logger.error(f"Math verifier failed: {e}")
