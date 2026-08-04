@@ -204,10 +204,16 @@ async def source_verifier_node(state: PIReportState) -> dict:
     """Checks all source citations for validity and plausibility."""
     logger.info("Source verifier running")
     try:
+        from app.services.source_type_guard import (
+            check_source_type_bindings,
+            check_price_segment_consistency,
+        )
+
         report = state["report"]
         di = report.get("disease_intelligence", {})
         ms = report.get("market_sizing", {})
         rp = report.get("regulatory_pathway", {})
+        ma = report.get("market_access", {})
 
         sources_to_check = []
 
@@ -238,14 +244,25 @@ async def source_verifier_node(state: PIReportState) -> dict:
                     "claim": d.get("benefit")
                 })
 
+        # B-03: deterministic source-type binding check (no LLM needed)
+        deterministic_flags = check_source_type_bindings(sources_to_check)
+        deterministic_flags += check_price_segment_consistency(
+            ma.get("buyer_segments", []),
+            state.get("product_type", ""),
+        )
+
         if not sources_to_check:
-            return {"source_flags": [], "source_error": None}
+            return {"source_flags": deterministic_flags, "source_error": None}
 
         user_input = json.dumps(sources_to_check[:15], indent=2)  # Cap at 15 sources
         raw = await _call_claude(SOURCE_VERIFIER_SYSTEM,
                                   f"Verify these {len(sources_to_check)} source citations:\n{user_input}")
-        flags = _parse_flags(raw, "Source Verifier")
-        logger.info(f"Source verifier: {len(flags)} flags")
+        llm_flags = _parse_flags(raw, "Source Verifier")
+        flags = deterministic_flags + llm_flags
+        logger.info(
+            f"Source verifier: {len(flags)} flags "
+            f"({len(deterministic_flags)} deterministic, {len(llm_flags)} LLM)"
+        )
         return {"source_flags": flags, "source_error": None}
     except Exception as e:
         logger.error(f"Source verifier failed: {e}")
