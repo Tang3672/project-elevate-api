@@ -19,6 +19,7 @@ This gives each expert access to current literature that:
 import asyncio
 import logging
 import json
+import re
 from typing import List, Dict, Optional
 import httpx
 
@@ -85,6 +86,74 @@ async def get_landmark_publications(
     return results
 
 
+# ── B-09 Literature relevance gate ────────────────────────────────────────────
+# Title substrings that signal a paper is from a different scientific domain.
+# When a paper from a non-clinical research tool product matches one of these
+# terms its title, it is off-domain and should be dropped — UNLESS the product
+# idea itself mentions the same term (e.g. an RNA-seq analysis tool is allowed
+# to cite DESeq2).
+_OFF_DOMAIN_SIGNALS: frozenset = frozenset({
+    "rna-seq", "rnaseq", "deseq", "fold change", "rna sequence",
+    "protein-protein", "protein interaction", "interaction network",
+    "proteomics", "transcriptomics", "genomics", "differential expression",
+    "gene expression", "gene editing", "gene ontology",
+    "crispr", "crispr-cas", "cas9",
+    "randomized controlled trial", "randomized clinical trial",
+    "placebo-controlled", "double-blind",
+    "chemotherapy", "immunotherapy", "checkpoint inhibitor",
+    "clinical trial", "phase 2 trial", "phase 3 trial",
+    "phase ii trial", "phase iii trial", "phase ii ", "phase iii ",
+    "monoclonal antibod", "antibody therapy",
+})
+
+
+def _is_non_clinical_product(sub_expert_id: str) -> bool:
+    s = (sub_expert_id or "").lower()
+    return "non_clinical" in s or s.startswith("research_tool") or "lab_software" in s
+
+
+def filter_literature_citations(
+    citations: List[dict],
+    idea: str,
+    sub_expert_id: str,
+) -> List[dict]:
+    """
+    B-09: Drop literature citations whose titles signal a clearly off-domain
+    paper for non-clinical research tool products.
+
+    Off-domain detection: paper title contains a term from _OFF_DOMAIN_SIGNALS
+    AND that term is NOT present in the product idea (which would indicate the
+    product itself is in that domain, making the paper legitimate).
+
+    Only fires for non-clinical sub_expert_ids. Clinical products are unchanged.
+    """
+    if not citations or not _is_non_clinical_product(sub_expert_id):
+        return citations
+
+    idea_lower = (idea or "").lower()
+    # Signals the product itself operates in — these are NOT off-domain for it.
+    product_own_signals = {sig for sig in _OFF_DOMAIN_SIGNALS if sig in idea_lower}
+
+    kept = []
+    for c in citations:
+        title_lower = (c.get("title") or "").lower()
+        # Which blocked signals appear in this paper's title?
+        paper_signals = {sig for sig in _OFF_DOMAIN_SIGNALS if sig in title_lower}
+        if not paper_signals:
+            kept.append(c)  # no off-domain signal → pass
+        elif paper_signals & product_own_signals:
+            # At least one paper signal also appears in the product idea →
+            # this domain IS the product's domain (e.g. RNA-seq tool citing DESeq2).
+            kept.append(c)
+        else:
+            logger.debug(
+                "B-09 gate: dropped citation '%s' (off-domain signals: %s)",
+                c.get("title", "")[:80],
+                paper_signals - product_own_signals,
+            )
+    return kept
+
+
 def _build_pubmed_queries(disease_name: str, sub_expert_id: str) -> List[str]:
     """Build targeted PubMed queries based on expert domain."""
     disease = disease_name.split("(")[0].strip()
@@ -109,6 +178,8 @@ def _build_pubmed_queries(disease_name: str, sub_expert_id: str) -> List[str]:
         "diagnostic_molecular":  f'("{disease}"[MeSH] OR "{disease}"[Title]) AND (molecular diagnostic[Title/Abstract] OR biomarker[MeSH]) AND (validation[Title/Abstract] OR sensitivity[Title/Abstract])',
         "vaccine_prophylactic":  f'"{disease}"[MeSH] AND (vaccine[MeSH] OR vaccination[MeSH]) AND (randomized controlled trial[pt] OR phase 3[Title/Abstract])',
         "vaccine_cancer_immuno": f'"{disease}"[MeSH] AND (cancer vaccine[Title/Abstract] OR immunotherapy[MeSH] OR checkpoint[Title/Abstract]) AND (randomized controlled trial[pt] OR meta-analysis[pt])',
+        # Non-clinical research tools: search for adoption/workflow papers, NOT clinical trials
+        "research_tool_non_clinical": f'("{disease}"[Title/Abstract]) AND (software[Title] OR platform[Title] OR tool[Title] OR workflow[Title] OR instrument[Title]) AND (laboratory[Title/Abstract] OR research[Title/Abstract] OR open-source[Title/Abstract] OR reproducib[Title/Abstract])',
     }
 
     default_query = f'"{disease}"[Title/Abstract] AND (clinical trial[pt] OR systematic review[pt] OR meta-analysis[pt])'

@@ -26,6 +26,7 @@ from typing import Optional
 import httpx
 
 from app.services.embedding_service import embed_text
+from app.services.pubmed_service import filter_literature_citations as _filter_lit
 from app.db.demand_repository import search_similar_signals, get_signal_counts_by_source
 from app.db.needs_repository import find_similar_needs
 from app.models.alignment import (
@@ -2291,7 +2292,7 @@ def _parse_expert_response(data, idea, product_type, expert, demand_results, hos
         market_geography       = _geo_obj,
         recommended_next_steps = data.get("recommended_next_steps", []),
         strategic_playbook     = data.get("strategic_playbook", []),
-        literature_citations   = data.get("literature_citations", []),
+        literature_citations   = _filter_lit(data.get("literature_citations", []), idea, sub_expert_id),
         limitations            = data.get("limitations"),
         signals_searched       = total_signals,
         hospital_needs_searched = len(hospital_matches_raw),
@@ -2406,7 +2407,7 @@ async def _generate_antibiotic_report(
         market_geography=geography,
         recommended_next_steps=data.get("recommended_next_steps", []),
         strategic_playbook=data.get("strategic_playbook", []),
-        literature_citations=data.get("literature_citations", []),
+        literature_citations=_filter_lit(data.get("literature_citations", []), idea, "drug_amr"),
         limitations=data.get("limitations"),
         signals_searched=total_signals,
         hospital_needs_searched=len(hospital_matches_raw),
@@ -2541,7 +2542,7 @@ async def _generate_generic_pi_report(
         market_geography=geography,
         recommended_next_steps=data.get("recommended_next_steps", []),
         strategic_playbook=data.get("strategic_playbook", []),
-        literature_citations=data.get("literature_citations", []),
+        literature_citations=_filter_lit(data.get("literature_citations", []), idea, ""),
         limitations=data.get("limitations"),
         signals_searched=total_signals,
         hospital_needs_searched=len(hospital_matches_raw),
@@ -2624,7 +2625,7 @@ def _parse_legacy_response(claude_response, idea, demand_results, hospital_match
         related_conditions=data.get("related_conditions", []),
         recommended_next_steps=data.get("recommended_next_steps", []),
         strategic_playbook=data.get("strategic_playbook", []),
-        literature_citations=data.get("literature_citations", []),
+        literature_citations=_filter_lit(data.get("literature_citations", []), idea, ""),
         limitations=data.get("limitations"),
         idea_submitted=idea,
         signals_searched=total_signals,
