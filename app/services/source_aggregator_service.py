@@ -615,14 +615,15 @@ def format_aggregated_sources(data: Dict, disease_name: str) -> str:
     lines.append("""
 MANDATORY CITATION INSTRUCTIONS:
 The papers above are REAL papers retrieved live from CrossRef, Semantic Scholar, and Europe PMC.
-You MUST cite at least 5 of these papers inline in your report using this format:
-"Author et al. (Journal, Year) found that [specific finding relevant to this report]"
+Cite every paper that is genuinely relevant to a factual claim in your report.
+Use this format: "Author et al. (Journal, Year) found that [specific finding relevant to this report]"
+Do NOT cite a paper unless it directly supports the adjacent claim — do not pad citations.
 
 For EVERY factual claim about:
-- Disease burden/epidemiology -> cite a paper from the list above
-- Treatment landscape -> cite a paper from the list above  
-- Clinical trial design -> cite a paper from the list above
-- Market sizing inputs -> cite a paper from the list above
+- Disease burden/epidemiology -> cite a relevant paper from the list above
+- Treatment landscape -> cite a relevant paper from the list above
+- Clinical trial design -> cite a relevant paper from the list above
+- Market sizing inputs -> cite a relevant paper from the list above
 
 Do NOT say "according to CDC" when a peer-reviewed paper above contains the same data.
 The peer-reviewed citation is ALWAYS preferred over a government website citation.
