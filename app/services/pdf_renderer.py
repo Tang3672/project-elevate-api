@@ -872,6 +872,20 @@ def _build_css(product_name: str) -> str:
       flex: 1;
     }}
 
+    /* ── A-02: Mock / demo watermark ── */
+    .mock-banner {{
+      background: #FEF3C7;
+      color: #78350F;
+      border: 1.5pt solid #D97706;
+      padding: .45rem .75rem;
+      margin-bottom: 1.5rem;
+      font-family: system-ui, -apple-system, sans-serif;
+      font-size: var(--t-sm);
+      font-weight: 600;
+      text-align: center;
+      border-radius: 3pt;
+    }}
+
     /* ── @media print overrides ── */
     @media print {{
       body {{ background: white; }}
@@ -894,6 +908,7 @@ def render_report_html(
     product_name: str = "",
     institution: str = "",
     report_date: str = "",
+    mock_mode: bool = False,
 ) -> str:
     """
     Converts a PIReport dict to a self-contained, print-ready HTML document.
@@ -904,8 +919,12 @@ def render_report_html(
         product_name: F-01 intake field. If empty, derived from idea_submitted.
         institution:  F-01 meta line (e.g. "Washington University Neurotech Hub")
         report_date:  ISO date string. If empty, uses report.generated_at.
+        mock_mode:    When True (or when report.model_version starts with "mock"),
+                      injects a DEMO watermark banner so sample reports are never
+                      mistaken for real outputs.
     """
     pname = product_name or derive_product_name(report)
+    is_mock = mock_mode or (report.get("model_version") or "").lower().startswith("mock")
     domain_label = derive_domain_label(report)
     date_str = derive_report_date(report, report_date)
     institution = institution or (report.get("institution") or "")
@@ -1144,6 +1163,7 @@ def render_report_html(
     <p class="meta">{_e(meta_line)}</p>
     <p class="generated-by">Prepared by Medlevate</p>
   </header>
+  {"<div class='mock-banner' role='alert'>DEMO REPORT — Generated with sample data. Not for investment decisions or distribution.</div>" if is_mock else ""}
   {toc_html}
 
   {exec_html}

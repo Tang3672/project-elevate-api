@@ -1444,7 +1444,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
         "'Sub-Expert Context', or any similar internal-system phrase is NOT a valid source and "
         "must not appear anywhere in the output. If a claim has no external citation, state it "
         "as a model estimate: 'Estimated range based on expert reasoning…' "
-        "B-07 SOURCE TYPE GUARD: match source type to claim type. "
+        "SOURCE TYPE GUARD: match source type to claim type. "
         "Rock Health tracks VC funding into digital health — do NOT cite it for product market size, "
         "revenue, or pricing claims. CMS MPFS Proposed Rule contains fee schedule rates, not market "
         "growth rates — do NOT cite it for CAGR or market growth claims. "
@@ -1459,7 +1459,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
         "and the TAM/SAM/SOM values using ONLY the bottom-up derivation provided above. Keep the "
         "formula field brief — the system renders the exact, verified arithmetic separately, so do "
         "not labor over precise multiplication in your text. "
-        "B-03 PRICE RULE: the price you use in market sizing MUST match the segment the product "
+        "PRICE RULE: the price you use in market sizing MUST match the segment the product "
         "actually sells into. For non-clinical research tools (academic PI buyer), use the "
         "observed spend band from the derivation — never enterprise SaaS pricing. "
         "For clinical products, use WAC or DRG-based pricing from the derivation. "
@@ -1469,7 +1469,8 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
         "context. Do not invent specific exclusivity year-counts or eligibility criteria. Standard "
         "facts you may rely on: NCE small-molecule exclusivity 5 yrs; biologic 12 yrs; Orphan Drug "
         "7 yrs; QIDP adds 5 yrs. If unsure, cite the comparable approved drug rather than asserting a number. "
-        "(11) CROSS-REPORT ISOLATION (H-03 — strictly enforced): this report is ISOLATED. "
+        # H-03: cross-report isolation rule — spec ID kept in comment, not in prompt text.
+        "(11) CROSS-REPORT ISOLATION (strictly enforced): this report is ISOLATED. "
         "Do NOT reference any prior report, prior Medlevate analysis, prior PI submission, or any "
         "previous analysis of a different product. Never write phrases like 'the PI's prior report', "
         "'a previous analysis estimated', 'as noted in the prior stroke diagnostic report', or any "
@@ -1481,7 +1482,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
                 # Explicitly ban mechanism score and approval probability authoring.
                 "\n\nEXPERT PANEL INTEGRATION RULES: "
                 "A Commercial Viability Expert sub-analysis ran before this synthesis. "
-                "CRITICAL — B-01 rule: this is a non-clinical research tool. "
+                "CRITICAL: this is a non-clinical research tool. "
                 "Do NOT write mechanism feasibility scores (e.g. '8.5/10'), "
                 "FDA approval probabilities, or clinical pathway recommendations — "
                 "those panels are not applicable and were not run. "
@@ -1809,16 +1810,28 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
             r"|\(B-\d{2}\s+\w+\)",               # "(B-01 rule)"
             _re_spec.I,
         )
-        _SPEC_TEXT_FIELDS = (
-            "executive_summary", "recommended_next_steps",
-            "confidence_note", "methodology_note",
+        _SPEC_STR_FIELDS = (
+            "executive_summary", "confidence_note", "methodology_note",
+            "positioning_statement", "guiding_question", "limitations",
         )
-        for _sf in _SPEC_TEXT_FIELDS:
+        _SPEC_LIST_FIELDS = (
+            "recommended_next_steps", "strategic_risks",
+        )
+        for _sf in _SPEC_STR_FIELDS:
             _sv = getattr(report, _sf, None)
             if isinstance(_sv, str) and _SPEC_ID_RE.search(_sv):
-                _cleaned = _SPEC_ID_RE.sub("", _sv).strip()
-                setattr(report, _sf, _cleaned)
+                setattr(report, _sf, _SPEC_ID_RE.sub("", _sv).strip())
                 logger.info("spec-id scrubber: removed spec identifiers from '%s'", _sf)
+        for _lf in _SPEC_LIST_FIELDS:
+            _lv = getattr(report, _lf, None)
+            if isinstance(_lv, list):
+                _cleaned_list = [
+                    _SPEC_ID_RE.sub("", s).strip() if isinstance(s, str) else s
+                    for s in _lv
+                ]
+                if _cleaned_list != _lv:
+                    setattr(report, _lf, _cleaned_list)
+                    logger.info("spec-id scrubber: removed spec identifiers from list '%s'", _lf)
     except Exception as _spec_e:
         logger.warning("spec-id scrubber failed (non-fatal): %s", _spec_e)
 
