@@ -374,7 +374,7 @@ def _render_competitive_landscape(ci: dict) -> str:
     for t in trials[:8]:
         trial_rows += f"""<tr>
           <td>{_e(t.get("nct_id",""))}</td>
-          <td>{_e(t.get("title","")[:80])}</td>
+          <td>{_e((t.get("title") or "")[:80])}</td>
           <td>{_e(t.get("status",""))}</td>
           <td>{_e(t.get("sponsor",""))}</td>
         </tr>"""
