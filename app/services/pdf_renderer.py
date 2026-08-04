@@ -213,6 +213,12 @@ def _link(url: str, text: str) -> str:
     return f'<a href="{_e(url)}">{_e(text)}</a>'
 
 
+def _toc_entry(populated: bool, num: str, anchor: str, label: str) -> str:
+    if not populated:
+        return ""
+    return f'      <li><span class="toc-num">§{num}</span><a href="#{anchor}">{label}</a></li>'
+
+
 # ── Section renderers (F-08: tables for structured data) ─────────────────────
 
 def _render_market_sizing(ms: dict) -> str:
@@ -1088,6 +1094,34 @@ def render_report_html(
         "Consult domain specialists before making material business decisions."
     )
 
+    # B-06: dynamic TOC — only list sections that have rendered content
+    _toc_rows = "\n".join(filter(None, [
+        _toc_entry(bool(exec_html),                    "1",  "s-executive",    "The Opportunity"),
+        _toc_entry(bool(evid_html),                    "2",  "s-evidence",     "Evidence Base &amp; Limitations"),
+        _toc_entry(bool(ms_html),                      "3",  "s-market",       "Market Sizing"),
+        _toc_entry(bool(rp_html),                      "4",  "s-regulatory",   "Regulatory &amp; Compliance Overview"),
+        _toc_entry(bool(ma_html),                      "5",  "s-access",       "Market Access &amp; Commercial Strategy"),
+        _toc_entry(bool(ci_html),                      "6",  "s-competitive",  "Competitive Landscape"),
+        _toc_entry("s-value-drivers" in p1_html,       "7",  "s-value-drivers","Value Driver Ranking"),
+        _toc_entry("s-segments"      in p1_html,       "8",  "s-segments",     "Segment Fit"),
+        _toc_entry("s-features"      in p1_html,       "9",  "s-features",     "Feature Investment Posture"),
+        _toc_entry("s-pricing"       in p1_html,       "10", "s-pricing",      "Pricing Model Analysis"),
+        _toc_entry("s-positioning"   in p1_html,       "11", "s-positioning",  "Positioning Statement"),
+        _toc_entry("s-risks"         in p1_html,       "12", "s-risks",        "Strategic Risks"),
+        _toc_entry("s-guiding"       in p1_html,       "13", "s-guiding",      "Guiding Question"),
+        _toc_entry("s-adversarial"   in p1_html,       "14", "s-adversarial",  "Adversarial Review"),
+        _toc_entry(bool(steps_html),                   "15", "s-next-steps",   "Recommended Next Steps"),
+        _toc_entry(bool(cit_html),                     "—",  "s-citations",    "Citations"),
+    ]))
+    toc_html = f"""
+  <!-- F-07: Table of Contents (dynamic — empty sections omitted) -->
+  <nav class="toc" aria-label="Table of contents">
+    <h2>Contents</h2>
+    <ol>
+{_toc_rows}
+    </ol>
+  </nav>"""
+
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1110,29 +1144,7 @@ def render_report_html(
     <p class="meta">{_e(meta_line)}</p>
     <p class="generated-by">Prepared by Medlevate</p>
   </header>
-
-  <!-- F-07: Table of Contents -->
-  <nav class="toc" aria-label="Table of contents">
-    <h2>Contents</h2>
-    <ol>
-      <li><span class="toc-num">§1</span><a href="#s-executive">The Opportunity</a></li>
-      <li><span class="toc-num">§2</span><a href="#s-evidence">Evidence Base &amp; Limitations</a></li>
-      <li><span class="toc-num">§3</span><a href="#s-market">Market Sizing</a></li>
-      <li><span class="toc-num">§4</span><a href="#s-regulatory">Regulatory &amp; Compliance Overview</a></li>
-      <li><span class="toc-num">§5</span><a href="#s-access">Market Access &amp; Commercial Strategy</a></li>
-      <li><span class="toc-num">§6</span><a href="#s-competitive">Competitive Landscape</a></li>
-      <li><span class="toc-num">§7</span><a href="#s-value-drivers">Value Driver Ranking</a></li>
-      <li><span class="toc-num">§8</span><a href="#s-segments">Segment Fit</a></li>
-      <li><span class="toc-num">§9</span><a href="#s-features">Feature Investment Posture</a></li>
-      <li><span class="toc-num">§10</span><a href="#s-pricing">Pricing Model Analysis</a></li>
-      <li><span class="toc-num">§11</span><a href="#s-positioning">Positioning Statement</a></li>
-      <li><span class="toc-num">§12</span><a href="#s-risks">Strategic Risks</a></li>
-      <li><span class="toc-num">§13</span><a href="#s-guiding">Guiding Question</a></li>
-      <li><span class="toc-num">§14</span><a href="#s-adversarial">Adversarial Review</a></li>
-      <li><span class="toc-num">§15</span><a href="#s-next-steps">Recommended Next Steps</a></li>
-      <li><span class="toc-num">—</span><a href="#s-citations">Citations</a></li>
-    </ol>
-  </nav>
+  {toc_html}
 
   {exec_html}
   {evid_html}
