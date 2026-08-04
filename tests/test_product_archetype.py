@@ -552,13 +552,18 @@ class TestDerivationRouting:
         )
         assert len(d.steps) == 5
 
-    def test_tam_fmt_is_range_string(self):
+    def test_tam_fmt_is_midpoint_value(self):
         from app.services.market_sizing_derivation_service import generate_market_sizing_derivation
         d = generate_market_sizing_derivation(
             idea="Lab data logger",
             product_type="other",
             sub_expert_id="research_tool_non_clinical",
         )
-        # tam_fmt should be a range like "$20M–$80M", not a single number
-        assert "–" in d.tam_fmt or "-" in d.tam_fmt, \
-            f"Research tool TAM should be a range (lo–hi), got: {d.tam_fmt}"
+        # tam_fmt is now the midpoint (single value like "$46M"), not a lo–hi range.
+        # The range appears in Step 3's formula string; the headline is the midpoint.
+        assert d.tam_fmt.startswith("$"), f"tam_fmt should be a USD string, got: {d.tam_fmt}"
+        assert "–" not in d.tam_fmt and "–" not in d.tam_fmt, \
+            f"tam_fmt should be the midpoint, not a range: {d.tam_fmt}"
+        # Midpoint is (3k+8k)/2 × (6667+10000)/2 ≈ $46M — must be in plausible range
+        assert "$" in d.tam_fmt and any(c.isdigit() for c in d.tam_fmt), \
+            f"tam_fmt should contain a dollar amount, got: {d.tam_fmt}"
