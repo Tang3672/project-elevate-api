@@ -259,7 +259,8 @@ class TestVerifierHonesty:
         return arbitrator_node(state)
 
     def test_error_flags_give_error_verdict(self):
-        result = self._run_arbitrator(math=[self._flag("ERROR")])
+        # Use SOURCE category — MATH+ERROR now produces BLOCKING (tested in B-02).
+        result = self._run_arbitrator(source=[self._flag("ERROR", "SOURCE")])
         assert result["_verdict"] == "ERROR"
         assert result["validation_passed"] is False
 
@@ -283,15 +284,17 @@ class TestVerifierHonesty:
         assert result["validation_passed"] is True
 
     def test_formatter_sets_status_to_error_when_errors_exist(self):
-        """formatter_node must stamp validation.status = 'ERROR', not 'PASS', on errors."""
+        """formatter_node must stamp validation.status = 'ERROR', not 'PASS', on non-MATH errors.
+        (MATH+ERROR produces BLOCKING — see TestBlockingVerdict in test_b02_verifier_honesty.py.)
+        """
         from app.services.validation_graph import formatter_node
-        err_flag = self._flag("ERROR", "MATH")
+        err_flag = self._flag("ERROR", "SOURCE")
         state = {
             "report": {"executive_summary": "test"},
             "product_type": "other", "sub_expert_id": "",
             "expert_critic_rules": "",
             "all_flags": [err_flag],
-            "math_flags": [err_flag], "source_flags": [], "regulatory_flags": [],
+            "math_flags": [], "source_flags": [err_flag], "regulatory_flags": [],
             "market_flags": [], "factual_flags": [],
             "math_error": None, "source_error": None,
             "regulatory_error": None, "market_error": None, "factual_error": None,

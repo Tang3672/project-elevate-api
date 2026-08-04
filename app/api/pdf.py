@@ -53,8 +53,25 @@ async def get_report_pdf(job_id: str):
     """
     Return the report as a PDF (via headless Chromium) or HTML fallback.
     Content-Disposition sets the F-01 filename: {product}-commercial-intelligence-{date}.pdf
+    Blocked when validation.export_blocked is True (arithmetic errors make the
+    market model factually wrong — the artifact must not be shared).
     """
     report = await _load_report(job_id)
+
+    val = report.get("validation") or {}
+    if val.get("export_blocked"):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "export_blocked",
+                "message": (
+                    "PDF export is blocked because the Math Verifier found an arithmetic "
+                    "inconsistency in the market model. Correct the flagged errors before "
+                    "exporting."
+                ),
+                "validation_summary": val.get("summary", ""),
+            },
+        )
     pname = report.get("product_name") or derive_product_name(report)
     date_str = (report.get("generated_at") or "")[:10]  # ISO date portion
 
