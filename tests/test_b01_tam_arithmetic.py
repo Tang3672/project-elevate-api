@@ -284,3 +284,143 @@ class TestNoDuplicateSensitivityRange:
             f"confidence_note has {len(usd_ranges)} USD ranges {usd_ranges!r}; "
             "at most one is allowed (the parameter range, if present)"
         )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Step-level enforcement — TAM/SAM/SOM steps must match headline after fix
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _make_ms(tam=20_000_000, sam=6_000_000, som=900_000):
+    steps = [
+        SimpleNamespace(label="Step 1 — Eligible buyer population",                              value=3_000.0, unit="labs"),
+        SimpleNamespace(label="Step 2 — Annualised spend per lab",                               value=6_667.0, unit="USD/lab/yr"),
+        SimpleNamespace(label="Step 3 — Total Addressable Market (TAM — midpoint estimate)",     value=float(tam), unit="USD"),
+        SimpleNamespace(label="Step 4 — Serviceable Addressable Market (SAM = 30% of TAM)",     value=float(sam), unit="USD"),
+        SimpleNamespace(label="Step 5 — Serviceable Obtainable Market (SOM = 15% of SAM, 5-yr)", value=float(som), unit="USD"),
+    ]
+    ms = SimpleNamespace(
+        steps=steps,
+        total_addressable_market_usd=float(tam),
+        serviceable_market_usd=float(sam),
+        formula="placeholder",
+        methodology_note="",
+    )
+    return SimpleNamespace(market_sizing=ms), ms
+
+
+def _make_deriv_ns(tam=45_833_333, sam=13_750_000, som=2_062_500):
+    return SimpleNamespace(
+        us_tam_usd=float(tam),
+        us_sam_usd=float(sam),
+        us_som_usd=float(som),
+        archetype="research_tool_non_clinical",
+    )
+
+
+class TestEnforceStepLevelPropagation:
+    """_enforce_market_consistency must update individual step values, not just headline."""
+
+    def _run(self):
+        from app.services.alignment_service import _enforce_market_consistency
+        report, ms = _make_ms(tam=20_000_000)     # pessimistic (the B-01 bug value)
+        _enforce_market_consistency(report, _make_deriv_ns())
+        return ms
+
+    def test_tam_step_updated_from_pessimistic_to_midpoint(self):
+        ms = self._run()
+        tam_step = next(s for s in ms.steps if "total addressable" in s.label.lower())
+        assert tam_step.value == pytest.approx(ms.total_addressable_market_usd, rel=0.001), (
+            f"After enforcement the TAM step must equal the headline. "
+            f"step={tam_step.value:,.0f}, headline={ms.total_addressable_market_usd:,.0f}"
+        )
+
+    def test_tam_step_not_20m_after_enforcement(self):
+        ms = self._run()
+        tam_step = next(s for s in ms.steps if "total addressable" in s.label.lower())
+        assert tam_step.value > 30_000_000, (
+            "TAM step must no longer show the pessimistic $20M after enforcement"
+        )
+
+    def test_sam_step_updated(self):
+        ms = self._run()
+        sam_step = next((s for s in ms.steps if "serviceable addressable" in s.label.lower()), None)
+        if sam_step:
+            assert sam_step.value == pytest.approx(ms.serviceable_market_usd, rel=0.001)
+
+    def test_som_step_updated(self):
+        ms = self._run()
+        som_step = next((s for s in ms.steps if "obtainable" in s.label.lower()), None)
+        if som_step:
+            cap = round(2_062_500 / 13_750_000 * 100, 1)
+            expected = round(ms.serviceable_market_usd * cap / 100)
+            assert som_step.value == pytest.approx(expected, rel=0.001)
+
+    def test_formula_reflects_midpoint_tam(self):
+        ms = self._run()
+        assert "45,833,333" in ms.formula or "45.8M" in ms.formula or "45.8" in ms.formula
+
+
+class TestMidpointLabelMatchesMidpointValue:
+    """A step labelled 'midpoint' must carry the midpoint value — not the pessimistic one."""
+
+    def test_midpoint_step_matches_headline_after_enforcement(self):
+        from app.services.alignment_service import _enforce_market_consistency
+        report, ms = _make_ms(tam=20_000_000)    # pessimistic start
+        _enforce_market_consistency(report, _make_deriv_ns(tam=45_833_333))
+        for step in ms.steps:
+            if "midpoint" in step.label.lower():
+                assert step.value == pytest.approx(ms.total_addressable_market_usd, rel=0.001), (
+                    f"Step labelled 'midpoint' shows {step.value:,.0f}, "
+                    f"headline is {ms.total_addressable_market_usd:,.0f} — must match"
+                )
+
+    def test_b01_specific_bug_fixed(self):
+        """The exact B-01 bug: step says 'midpoint', value was 20M (pessimistic)."""
+        from app.services.alignment_service import _enforce_market_consistency
+        from app.services.buyer_model import academic_neurotech_lab_buyer
+        bm = academic_neurotech_lab_buyer()
+        pessimistic = bm.buyer_population_lo * bm.annualised_spend_lo()  # ~$20M
+
+        report, ms = _make_ms(tam=pessimistic)
+        _enforce_market_consistency(report, _make_deriv_ns())
+        for step in ms.steps:
+            if "midpoint" in step.label.lower() and "addressable" in step.label.lower():
+                assert step.value != pytest.approx(pessimistic, rel=0.01), (
+                    "B-01 bug not fixed: 'midpoint' TAM step still shows $20M (pessimistic)"
+                )
+
+
+class TestStepLabelDedup:
+    """B-10: 'Step 1 - Step 1 - …' duplicate prefix must be stripped by enforcement."""
+
+    def _dedup(self, label: str) -> str:
+        from app.services.alignment_service import _enforce_market_consistency
+        step = SimpleNamespace(label=label, value=0.0, unit="")
+        ms = SimpleNamespace(
+            steps=[step],
+            total_addressable_market_usd=45_000_000.0,
+            serviceable_market_usd=13_500_000.0,
+            formula="", methodology_note="",
+        )
+        _enforce_market_consistency(SimpleNamespace(market_sizing=ms), _make_deriv_ns())
+        return step.label
+
+    def test_hyphen_duplicate_removed(self):
+        result = self._dedup("Step 1 - Step 1 - Eligible buyer population")
+        assert result.count("Step 1") <= 1, f"Duplicate not removed: {result!r}"
+
+    def test_em_dash_duplicate_removed(self):
+        result = self._dedup("Step 3 — Step 3 — Total Addressable Market")
+        assert result.count("Step 3") <= 1
+
+    def test_en_dash_duplicate_removed(self):
+        result = self._dedup("Step 2 – Step 2 – Annualised spend per lab")
+        assert result.count("Step 2") <= 1
+
+    def test_clean_label_not_mangled(self):
+        result = self._dedup("Step 1 — Eligible buyer population")
+        assert "Eligible buyer population" in result
+
+    def test_non_step_label_unchanged(self):
+        result = self._dedup("Eligible buyer population")
+        assert result == "Eligible buyer population"

@@ -2839,6 +2839,27 @@ def _enforce_market_consistency(report, deriv) -> None:
             f"SOM = SAM × {cap}% (5-yr horizon capture) = ${som:,.0f} ({_fmt(som)}). "
             f"US, annual; figures from the deterministic bottom-up derivation."
         )
+
+        # B-01: propagate the code-computed TAM/SAM/SOM into every matching step so
+        # the step table never disagrees with the headline (B-01: LLM sometimes sets the
+        # TAM step to the pessimistic endpoint while the label says "midpoint").
+        # B-10: strip duplicate step-number prefixes ("Step 1 - Step 1 - …").
+        import re as _re_b01
+        _dedup = _re_b01.compile(r"^Step\s+(\d+)\s*[-–—]\s*Step\s+\1\s*[-–—]\s*", _re_b01.I)
+        for step in (getattr(ms, "steps", None) or []):
+            # Dedup label first so the keyword check below sees clean text
+            raw_lbl = getattr(step, "label", "") or ""
+            clean_lbl = _dedup.sub("", raw_lbl).strip(" –—-")
+            if clean_lbl != raw_lbl:
+                step.label = clean_lbl
+            lbl_lo = step.label.lower()
+            # Overwrite step value so step ↔ headline agree
+            if "total addressable" in lbl_lo or (" tam" in lbl_lo and "sam" not in lbl_lo):
+                step.value = float(tam)
+            elif "serviceable addressable" in lbl_lo or ("sam" in lbl_lo and "som" not in lbl_lo):
+                step.value = float(sam)
+            elif "obtainable" in lbl_lo or "som" in lbl_lo:
+                step.value = float(som)
     except Exception as e:
         logger.warning("market consistency enforcement skipped: %s", e)
 
