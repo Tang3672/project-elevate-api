@@ -1778,7 +1778,8 @@ def _derive_research_tool_formula(
         confidence_note=(
             f"Lab count from NIH RePORTER queries (unverified); spend band from primary PI interviews "
             f"(should be expanded with n≥30 structured interviews). "
-            f"Sensitivity range: {_fmt(pop_lo * sp_lo * 0.5)}–{_fmt(pop_hi * sp_hi * 1.5)}."
+            f"Parameter range: {_fmt(pop_lo * sp_lo)}–{_fmt(pop_hi * sp_hi)}; "
+            f"midpoint ({_fmt(tam)}) used as planning base."
         ),
         primary_citations=[
             {"ref": "NIH RePORTER", "title": "NIH-funded research grants by topic", "url": "https://reporter.nih.gov/"},
