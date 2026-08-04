@@ -369,9 +369,15 @@ UNIVERSAL_STRATEGIES_DEVICE = [
 
 
 def _universal_for(sub_expert_id: str) -> list:
-    """Pick the modality-appropriate universal strategy set — device/SaMD/diagnostic get
-    the device playbook, everything else (drugs/biologics/gene/vaccine) gets the drug one."""
+    """Pick the modality-appropriate universal strategy set.
+
+    Research tools never inherit the drug or device playbook — padding a
+    research-tool report with Vertex/AbbVie drug strategies is the exact
+    failure this gate exists to prevent.
+    """
     sid = (sub_expert_id or "").lower()
+    if sid.startswith(("research_tool", "research_infrastructure")):
+        return []   # No universal supplements — only domain-specific entries apply
     if sid.startswith(("device_", "diagnostic_", "digital_")):
         return UNIVERSAL_STRATEGIES_DEVICE
     return UNIVERSAL_STRATEGIES
@@ -379,16 +385,16 @@ def _universal_for(sub_expert_id: str) -> list:
 
 def get_strategies_for_domain(sub_expert_id: str, max_strategies: int = 4) -> list:
     """
-    Returns domain-specific strategies first, then modality-appropriate universal
-    strategies as supplements (device/SaMD never inherit the drug playbook).
+    Returns domain-specific strategies for the given archetype.
+
+    No minimum-count constraint: two accurate strategies beat four where two
+    are fabricated. Never pad with strategies from a different modality.
     """
     domain = DOMAIN_SPECIFIC_STRATEGIES.get(sub_expert_id, [])
-
     if len(domain) >= max_strategies:
         return domain[:max_strategies]
 
-    # Fill remaining slots with the modality-correct universal strategies.
-    universal = _universal_for(sub_expert_id)[:max_strategies]
+    universal = _universal_for(sub_expert_id)
     combined = domain + universal
     return combined[:max_strategies]
 

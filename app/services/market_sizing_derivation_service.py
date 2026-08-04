@@ -1634,16 +1634,20 @@ def _derive_research_tool_formula(
         pop_hi  = bm.buyer_population_hi
         sp_lo   = bm.annualised_spend_lo()
         sp_hi   = bm.annualised_spend_hi()
-        tam     = ms.tam_lo_usd   # conservative; report uses the range
-        sam     = ms.sam_lo_usd
-        som     = ms.som_lo_usd
+        # Use midpoint values (not lo) as the headline — avoids labeling the
+        # conservative endpoint as the base case.
+        pop_mid = (bm.buyer_population_lo + bm.buyer_population_hi) / 2
+        sp_mid  = (bm.annualised_spend_lo() + bm.annualised_spend_hi()) / 2
+        tam     = pop_mid * sp_mid          # midpoint TAM (e.g. 5,500 × $8,333 ≈ $45.8M)
+        sam     = tam * ms.sam_fraction
+        som     = sam * ms.som_fraction
         pop_src = bm.population_source
         sp_src  = bm.spend_source
     except Exception as _e:
         logger.warning("buyer_model import failed in derivation — using hardcoded defaults: %s", _e)
         pop_lo, pop_hi = 3_000, 8_000
-        sp_lo,  sp_hi  = 6_667, 10_000   # $20k-$30k / 3yr cycle
-        tam  = pop_lo * sp_lo             # ~$20M
+        sp_lo,  sp_hi  = 6_667, 10_000   # $20k-$30k / 3yr cycle annualised
+        tam  = ((pop_lo + pop_hi) / 2) * ((sp_lo + sp_hi) / 2)   # midpoint
         sam  = tam * 0.30
         som  = sam * 0.15
         pop_src = "NIH RePORTER — estimate pending verification"
@@ -1668,7 +1672,7 @@ def _derive_research_tool_formula(
             ),
             data_source=pop_src,
             assumptions=[
-                "Denominator is NIH-funded labs, not US hospitals (H-07 fix)",
+                "Denominator is NIH-funded labs, not US hospitals",
                 "Only labs running multi-day instrumented experiments are eligible",
             ],
         ),
@@ -1686,7 +1690,7 @@ def _derive_research_tool_formula(
                 f"Annualised: divide by 3 → ${sp_lo:,.0f}–${sp_hi:,.0f}/yr. "
                 f"Source: {sp_src}. "
                 f"NOTE: if the product's asking price exceeds the observed spend ceiling, "
-                f"flag the gap per H-07 serviceable-buyer reconciliation before proceeding."
+                f"flag the gap in a serviceable-buyer reconciliation section before proceeding."
             ),
             data_source=sp_src,
             assumptions=[
@@ -1696,28 +1700,32 @@ def _derive_research_tool_formula(
         ),
         DerivationStep(
             step_num=3,
-            title="Step 3 — Total Addressable Market (TAM)",
-            formula=f"TAM = {pop_lo:,} labs × ${sp_lo:,.0f}/yr = {_fmt(pop_lo * sp_lo)} (lo) | "
-                    f"{pop_hi:,} × ${sp_hi:,.0f} = {_fmt(pop_hi * sp_hi)} (hi)",
+            title="Step 3 — Total Addressable Market (TAM — midpoint estimate)",
+            formula=(
+                f"Pessimistic: {pop_lo:,} × ${sp_lo:,.0f} = {_fmt(pop_lo * sp_lo)} | "
+                f"Midpoint: {int((pop_lo+pop_hi)/2):,} × ${int((sp_lo+sp_hi)/2):,} = {_fmt(tam)} | "
+                f"Optimistic: {pop_hi:,} × ${sp_hi:,.0f} = {_fmt(pop_hi * sp_hi)}"
+            ),
             value=float(tam),
             unit="USD",
-            source_paper="Bottom-up buyer model (H-07 formula)",
+            source_paper="Bottom-up buyer model",
             source_url="",
             explanation=(
-                f"TAM = buyer_population × annualised_spend. Range: "
-                f"{_fmt(pop_lo * sp_lo)}–{_fmt(pop_hi * sp_hi)}. "
-                f"Conservative estimate used as planning floor."
+                f"TAM = buyer_population × annualised_spend. "
+                f"Range: {_fmt(pop_lo * sp_lo)} (pessimistic) to {_fmt(pop_hi * sp_hi)} (optimistic). "
+                f"Midpoint {_fmt(tam)} used as the planning base. "
+                f"TAM is a theoretical ceiling (100% market capture); SAM applies reachability gates."
             ),
             data_source="Buyer model arithmetic",
             assumptions=["100% market capture (theoretical ceiling)"],
         ),
         DerivationStep(
             step_num=4,
-            title="Step 4 — Serviceable Addressable Market (SAM, 30% of TAM)",
-            formula=f"SAM = TAM × 30% = {_fmt(sam)}",
+            title="Step 4 — Serviceable Addressable Market (SAM = 30% of TAM)",
+            formula=f"SAM = {_fmt(tam)} × 30% = {_fmt(sam)}",
             value=float(sam),
             unit="USD",
-            source_paper="Expert estimate — labs likely to switch from DIY/status-quo within 5 yrs",
+            source_paper="Expert estimate — early-adopter labs likely to switch from status quo within 5 yrs",
             source_url="",
             explanation=(
                 "Primary competition is status quo (manual SD cards, lab-built scripts). "
@@ -1730,11 +1738,11 @@ def _derive_research_tool_formula(
         ),
         DerivationStep(
             step_num=5,
-            title="Step 5 — Serviceable Obtainable Market (SOM, 15% of SAM over 5 yrs)",
-            formula=f"SOM = SAM × 15% = {_fmt(som)}",
+            title="Step 5 — Serviceable Obtainable Market (SOM = 15% of SAM, 5-yr horizon)",
+            formula=f"SOM = {_fmt(sam)} × 15% = {_fmt(som)}",
             value=float(som),
             unit="USD",
-            source_paper="Conservative 5-year capture, consistent with early-stage research tool launches",
+            source_paper="Expert estimate — early-stage research tool launch benchmarks",
             source_url="",
             explanation=(
                 "15% SAM penetration over 5 years assumes: (1) 12–18 month sales cycle per lab, "
@@ -1750,31 +1758,31 @@ def _derive_research_tool_formula(
         idea=idea,
         archetype="research_tool_non_clinical",
         archetype_label="Research Tool / Non-Clinical Data Infrastructure (Buyer Model)",
-        formula_name="Bottom-Up PI Buyer Model (H-07 compliant)",
+        formula_name="Bottom-Up PI Buyer Model",
         formula_overview=(
             f"TAM = {pop_lo:,}–{pop_hi:,} NIH-funded labs × "
             f"${sp_lo:,.0f}–${sp_hi:,.0f}/yr annualised spend = "
-            f"{_fmt(pop_lo * sp_lo)}–{_fmt(pop_hi * sp_hi)}"
+            f"{_fmt(pop_lo * sp_lo)}–{_fmt(pop_hi * sp_hi)} (midpoint {_fmt(tam)})"
         ),
         steps=steps,
         us_tam_usd=tam, us_sam_usd=sam, us_som_usd=som,
-        tam_fmt=f"{_fmt(pop_lo * sp_lo)}–{_fmt(pop_hi * sp_hi)}",
+        tam_fmt=_fmt(tam),
         sam_fmt=_fmt(sam),
         som_fmt=_fmt(som),
         key_assumptions=[
-            f"Buyer = academic PI on grant cycle (NOT hospital enterprise)",
+            f"Buyer = academic PI on grant cycle (not hospital enterprise)",
             f"Lab population: {pop_lo:,}–{pop_hi:,} eligible labs (NIH RePORTER)",
             f"Annualised spend: ${sp_lo:,.0f}–${sp_hi:,.0f}/lab/yr (primary research)",
             "SAM = 30% early adopters; SOM = 15% SAM over 5 yrs",
         ],
         confidence_note=(
-            f"Lab count from NIH RePORTER queries (unverified); spend band from n=10 PI interviews. "
-            f"Both inputs should be refined with a larger primary research sample. "
-            f"Sensitivity range under pessimistic/optimistic assumptions: {_fmt(pop_lo * sp_lo * 0.5)}–{_fmt(pop_hi * sp_hi * 1.5)}."
+            f"Lab count from NIH RePORTER queries (unverified); spend band from primary PI interviews "
+            f"(should be expanded with n≥30 structured interviews). "
+            f"Sensitivity range: {_fmt(pop_lo * sp_lo * 0.5)}–{_fmt(pop_hi * sp_hi * 1.5)}."
         ),
         primary_citations=[
             {"ref": "NIH RePORTER", "title": "NIH-funded research grants by topic", "url": "https://reporter.nih.gov/"},
-            {"ref": sp_src, "title": "PI spend band (primary research)", "url": ""},
+            {"ref": "Primary PI interviews", "title": "PI spend band (primary research)", "url": ""},
         ],
     )
 

@@ -570,15 +570,26 @@ async def run_report_verification(report) -> None:
                 _n_fixed = len(_errs) - len(_remaining)
                 _val = dict(_val)
                 _val["errors"] = _remaining
-                _val["status"] = "ERROR" if _remaining else ("FLAG" if _val.get("warnings") else "PASS")
+                # Never claim "resolved" — only "attempted". True resolution requires
+                # re-verification which we don't run here (would add 30+ s).
                 _val["self_corrected"] = _n_fixed
-                _val["summary"] = (
-                    f"✓ Auto-corrected {_n_fixed} verifier-flagged issue(s)."
-                    + (f" {len(_remaining)} could not be auto-corrected — review flagged." if _remaining
-                       else " All verifier issues resolved."))
+                if _remaining:
+                    _val["status"] = "ERROR"
+                    _val["summary"] = (
+                        f"Attempted correction on {_n_fixed} issue(s); "
+                        f"{len(_remaining)} flagged issue(s) remain — review required."
+                    )
+                else:
+                    # All errors had corrections applied, but we can't confirm they
+                    # worked without re-running the verifier. Mark as FLAG not PASS.
+                    _val["status"] = "FLAG"
+                    _val["summary"] = (
+                        f"Corrections applied to {_n_fixed} flagged issue(s). "
+                        f"Re-run the report to confirm resolution."
+                    )
                 report.validation = _val
-                logger.info("Self-correction: fixed %d/%d errors -> %s",
-                            _n_fixed, len(_errs), _val["status"])
+                logger.info("Self-correction: applied corrections to %d/%d errors",
+                            _n_fixed, len(_errs))
     except Exception as _cor_e:
         logger.warning("Self-correction failed (non-fatal): %s", _cor_e)
 
@@ -1786,6 +1797,30 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
     except Exception as _h08_e:
         logger.warning("H-08/B-02 market math cleanup failed (non-fatal): %s", _h08_e)
 
+    # Spec-identifier scrubber — strip any internal issue IDs that leaked into output.
+    # These are implementation references that must never appear in user-facing text.
+    try:
+        import re as _re_spec
+        _SPEC_ID_RE = _re_spec.compile(
+            r"\b(?:H|B|F|S)-\d{2}\b"           # H-07, B-01, S-06, F-03, etc.
+            r"|spec\s+v\d+"                      # "spec v4", "spec v3"
+            r"|\(H-\d{2}\s+(?:fix|formula|compliant)\)"   # "(H-07 formula)"
+            r"|\(B-\d{2}\s+\w+\)",               # "(B-01 rule)"
+            _re_spec.I,
+        )
+        _SPEC_TEXT_FIELDS = (
+            "executive_summary", "recommended_next_steps",
+            "confidence_note", "methodology_note",
+        )
+        for _sf in _SPEC_TEXT_FIELDS:
+            _sv = getattr(report, _sf, None)
+            if isinstance(_sv, str) and _SPEC_ID_RE.search(_sv):
+                _cleaned = _SPEC_ID_RE.sub("", _sv).strip()
+                setattr(report, _sf, _cleaned)
+                logger.info("spec-id scrubber: removed spec identifiers from '%s'", _sf)
+    except Exception as _spec_e:
+        logger.warning("spec-id scrubber failed (non-fatal): %s", _spec_e)
+
     # Part E: Stamp the assumption ledger on the report from the market derivation.
     if deriv is not None:
         try:
@@ -2771,13 +2806,15 @@ def _enforce_market_consistency(report, deriv) -> None:
         # hospital site, a diagnostic per test, a device per procedure — NOT per patient.
         _arch = (getattr(deriv, "archetype", "") or "").lower()
         _tam_basis = {
-            "software_samd":          "eligible hospital sites × annual SaaS license",
-            "in_vitro_diagnostic":    "annual test volume × price per test",
-            "medical_device_surgical":"annual procedures × device revenue per procedure",
-            "medical_device_capital": "installed base × equipment ASP",
-            "combination":            "blended device + software/diagnostic revenue streams",
-            "gene_cell_therapy":      "annual treated cohort × one-time price",
-            "vaccine":                "population at risk × immunization rate × price",
+            "research_tool_non_clinical":  "NIH-funded labs × annualised spend per lab",
+            "research_infrastructure_saas":"eligible research institutions × annual site-license fee",
+            "software_samd":               "eligible hospital sites × annual SaaS license",
+            "in_vitro_diagnostic":         "annual test volume × price per test",
+            "medical_device_surgical":     "annual procedures × device revenue per procedure",
+            "medical_device_capital":      "installed base × equipment ASP",
+            "combination":                 "blended device + software/diagnostic revenue streams",
+            "gene_cell_therapy":           "annual treated cohort × one-time price",
+            "vaccine":                     "population at risk × immunization rate × price",
         }.get(_arch, "eligible patients × annual price")
 
         ms.total_addressable_market_usd = float(tam)
