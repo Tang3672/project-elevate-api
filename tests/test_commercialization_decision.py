@@ -136,3 +136,64 @@ def test_gather_tolerates_missing_and_exception_objects():
     sig = gather_signals(product_type="other")
     out = score_commercialization(sig)
     assert set(out["commercialization_scores"]) == _SCORE_KEYS
+
+
+# ── B-08 / G-02 — N/A dimensions excluded from composite ──────────────────────
+
+def test_research_tool_modality_classification():
+    assert _modality("research_tool_non_clinical", "") == "research_tool"
+    assert _modality("other", "research_tool_non_clinical") == "research_tool"
+    assert _modality("lab software", "") == "research_tool"
+
+
+def test_no_na_dimension_in_composite():
+    """
+    B-08 / G-02: regulatory_feasibility and reimbursement_feasibility must be
+    None (not scored) for research tools, and must not enter the composite.
+
+    Proof: with approval_prob=0 a drug's regulatory score is 0, dragging its
+    composite down by 0.18 × 0 = 0.  A research tool with the same signals must
+    score *higher* overall because that zero-weight term is excluded, not included.
+    """
+    signals = {"approval_prob": 0.0, "moat": 0.7, "som_usd": 5e7, "trl": 4}
+
+    rt_out  = score_commercialization({**signals, "modality": "research_tool"})
+    drg_out = score_commercialization({**signals, "modality": "small_molecule"})
+
+    rt_scores  = rt_out["commercialization_scores"]
+    drg_scores = drg_out["commercialization_scores"]
+
+    # N/A dimensions are None for research tools
+    assert rt_scores["regulatory_feasibility"] is None, \
+        "regulatory_feasibility must be None for research tools"
+    assert rt_scores["reimbursement_feasibility"] is None, \
+        "reimbursement_feasibility must be None for research tools"
+
+    # overall_priority is still a valid float
+    overall = rt_scores["overall_priority"]
+    assert isinstance(overall, float) and 0.0 <= overall <= 1.0
+
+    # When approval_prob=0, drug regulatory = 0 (its worst possible).
+    # Because that 0-score is included at 0.18 weight, the drug composite is lower.
+    # The research tool excludes it, so its composite must be higher.
+    assert overall > drg_scores["overall_priority"], (
+        f"Research tool overall ({overall}) should exceed drug overall "
+        f"({drg_scores['overall_priority']}) when approval_prob=0 and regulatory is N/A"
+    )
+
+
+def test_non_research_tool_modalities_still_score_both_dims():
+    """Verify the N/A logic does not accidentally fire for regulated modalities."""
+    for mod in ("small_molecule", "biologic", "device", "diagnostic", "digital", "other"):
+        out = score_commercialization({"modality": mod})
+        s = out["commercialization_scores"]
+        assert s["regulatory_feasibility"] is not None, \
+            f"{mod}: regulatory_feasibility must not be None"
+        assert s["reimbursement_feasibility"] is not None, \
+            f"{mod}: reimbursement_feasibility must not be None"
+
+
+def test_research_tool_recommendation_does_not_crash():
+    """_recommendation must not crash when reimbursement_feasibility is None."""
+    out = score_commercialization({"modality": "research_tool", "sbir_p1_ready": True, "trl": 3})
+    assert isinstance(out["recommendation"], str) and len(out["recommendation"]) > 10
