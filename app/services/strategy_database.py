@@ -395,10 +395,27 @@ def get_strategies_for_domain(sub_expert_id: str, max_strategies: int = 4) -> li
     return domain[:max_strategies]
 
 
+_TYPED_ARCHETYPES = {"research_tool_non_clinical", "research_infrastructure_saas"}
+
+
 def format_strategies_for_report(sub_expert_id: str) -> list:
     """
     Format strategies as list of dicts for report strategic_playbook field.
+
+    E.1: research_tool and research_infrastructure archetypes are routed through
+    the typed Strategy library (strategy_model.py) so the output includes typed
+    gating fields (id, archetypes, domains, buyer_personas, apply_template).
+    All other archetypes continue to use the existing dict lookup.
     """
+    if (sub_expert_id or "").lower() in _TYPED_ARCHETYPES:
+        from app.services.strategy_model import format_typed_strategies_for_report
+        return format_typed_strategies_for_report(
+            archetype=sub_expert_id,
+            domain="LIFE_SCIENCES_RESEARCH",
+            context={},
+            max_strategies=4,
+        )
+
     strategies = get_strategies_for_domain(sub_expert_id, max_strategies=4)
     return [
         {
