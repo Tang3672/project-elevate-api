@@ -273,6 +273,7 @@ class PIReport(BaseModel):
     segmentation_tree:      Optional[dict] = None   # D.1: full SegmentNode tree as dict
     triangulation:          Optional[dict] = None   # D.3: three methods + reconciliation
     sensitivity:            Optional[list] = None   # D.7: ranked sensitivity parameters
+    axis_decisions:         Optional[dict] = None   # C.1/C.2: selected + rejected axis decisions with reasons
 
 
 # ── Legacy AlignmentReport (kept for backward compat) ─────────────────────────

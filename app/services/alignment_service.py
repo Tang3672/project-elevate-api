@@ -437,6 +437,14 @@ async def generate_pi_report(
     report.run_manifest    = _run_manifest
     report.domain          = _resolved_domain
 
+    # C.1/C.2: attach axis selection/rejection decisions
+    try:
+        from app.market.axis_library import select_axes, format_axis_decisions
+        _axis_decisions = select_axes(_resolved_domain, report.expert_domain or "")
+        report.axis_decisions = format_axis_decisions(_axis_decisions)
+    except Exception as _axis_e:
+        logger.warning("Axis selection failed (non-fatal): %s", _axis_e)
+
     if skip_verification:
         # Verification (validation + trust + self-correction) is run in the
         # background AFTER the report is delivered, so the user sees the report

@@ -273,6 +273,64 @@ def _render_market_sizing(ms: dict) -> str:
 </div>"""
 
 
+def _render_axis_decisions(axis_decisions: dict) -> str:
+    """Render C.1/C.2 segmentation axis selection/rejection table.
+
+    Outputs two blocks:
+    - Selected axes (used to build the market funnel)
+    - Considered and excluded axes (with rejection reasons)
+    """
+    if not axis_decisions:
+        return ""
+    selected = axis_decisions.get("selected", [])
+    rejected = axis_decisions.get("rejected", [])
+    if not selected and not rejected:
+        return ""
+
+    sel_rows = ""
+    for ax in selected:
+        lift = ax.get("est_lift")
+        lift_str = f"{lift:.0%}" if lift else "—"
+        sel_rows += f"""<tr>
+          <td>{_e(ax.get("label",""))}</td>
+          <td><span class="family-tag">{_e(ax.get("family","").replace("_"," "))}</span></td>
+          <td class="num">{lift_str}</td>
+        </tr>"""
+
+    rej_rows = ""
+    for ax in rejected:
+        if not ax.get("reason"):
+            continue
+        rej_rows += f"""<tr>
+          <td>{_e(ax.get("label",""))}</td>
+          <td><span class="family-tag">{_e(ax.get("family","").replace("_"," "))}</span></td>
+          <td class="note">{_e(ax.get("reason",""))}</td>
+        </tr>"""
+
+    sel_block = f"""
+<h3>Segmentation axes selected ({len(selected)})</h3>
+<table class="data-table">
+  <thead><tr><th>Axis</th><th>Family</th><th class="num">Typical variance explained</th></tr></thead>
+  <tbody>{sel_rows}</tbody>
+</table>""" if sel_rows else ""
+
+    rej_block = f"""
+<h3>Considered and excluded ({len([r for r in rejected if r.get("reason")])})</h3>
+<table class="data-table">
+  <thead><tr><th>Axis</th><th>Family</th><th>Reason excluded</th></tr></thead>
+  <tbody>{rej_rows}</tbody>
+</table>""" if rej_rows else ""
+
+    return f"""
+<div class="section" id="s-axis-decisions">
+  <h2>Segmentation Methodology</h2>
+  <p class="methodology">The following axes were evaluated for this product's buyer model.
+  Axes are selected based on the buyer type, product domain, and available data sources.</p>
+  {sel_block}
+  {rej_block}
+</div>"""
+
+
 def _render_regulatory_pathway(rp: dict) -> str:
     if not rp:
         return ""
@@ -1002,6 +1060,9 @@ def render_report_html(
     # Market sizing (F-08 tables)
     ms_html = _render_market_sizing(report.get("market_sizing") or {})
 
+    # C.1/C.2: axis selection/rejection table
+    axis_html = _render_axis_decisions(report.get("axis_decisions") or {})
+
     # Regulatory pathway — suppress for LIFE_SCIENCES_RESEARCH domain (Part C)
     _domain = (report.get("domain") or "").upper()
     _is_research_domain = _domain == "LIFE_SCIENCES_RESEARCH"
@@ -1206,6 +1267,7 @@ def render_report_html(
   {exec_html}
   {evid_html}
   {ms_html}
+  {axis_html}
   {rp_html}
   {ma_html}
   {ci_html}
