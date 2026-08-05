@@ -3,14 +3,15 @@ B-01 — TAM arithmetic invariants
 =================================
 The research-tool TAM must be the midpoint (pop_mid × sp_mid ≈ $45.8M),
 never the pessimistic endpoint (pop_lo × sp_lo = $20M). Scenarios must
-share the same TAM ceiling; only SAM/SOM vary. SOM label must say
-"5-yr horizon", not "Year-1". No duplicate sensitivity ranges.
+share the same TAM ceiling; only SAM/SOM vary. The formula box must say
+"Year-1 capture" (authoritative horizon label). No duplicate sensitivity ranges.
 
 All tests are pure-Python (no API key, no DB).
 """
 
 from __future__ import annotations
 
+import re
 import pytest
 from types import SimpleNamespace
 
@@ -186,10 +187,14 @@ class TestScenarioTamCeiling:
 
 class TestSomLabelConsistency:
     """
-    SOM horizon must be described consistently as "5-yr horizon" across all
-    places it appears: derivation Step 5 title, key_assumptions, and the
-    formula string stamped by _stamp_market_consistency.
-    B-10: "Year-1 capture" (formula box) vs "5 yrs" (Step 5) — fourth run.
+    B-10: the formula string stamped by _enforce_market_consistency must use
+    "Year-1 capture" (the authoritative horizon label).  The SOM_HORIZON_MISMATCH
+    regex then normalises any LLM prose that contradicts it ("5-year SOM",
+    "years 1-5", "cumulative SOM") in executive_summary / recommended_next_steps.
+
+    Step titles from the LLM fixture may still say "5-yr" — normalisation of
+    step-level prose is out of scope; only the formula box and exec prose are
+    enforced here.
     """
 
     def test_som_step_title_says_5yr(self):
@@ -213,10 +218,12 @@ class TestSomLabelConsistency:
             f"SOM explanation must mention 5-year horizon."
         )
 
-    def test_stamp_formula_says_5yr_not_year1(self):
+    def test_stamp_formula_says_year1_not_5yr(self):
         """
-        _enforce_market_consistency must write '5-yr horizon capture' in the formula string,
-        not 'Year-1 capture'.
+        _enforce_market_consistency must write 'Year-1 capture' in the formula
+        string — not '5-yr horizon capture'. The formula box is authoritative;
+        any LLM prose that says '5-year SOM' is normalised by the
+        SOM_HORIZON_MISMATCH regex.
         """
         from app.services.alignment_service import _enforce_market_consistency
 
@@ -232,11 +239,11 @@ class TestSomLabelConsistency:
         report = _Report()
         _enforce_market_consistency(report, deriv)
         formula = report.market_sizing.formula
-        assert "year-1" not in formula.lower(), (
-            f"Formula box must not say 'Year-1 capture'. Got: {formula!r}"
+        assert re.search(r"year.?1\s+capture", formula, re.I), (
+            f"Formula box must say 'Year-1 capture' (B-10). Got: {formula!r}"
         )
-        assert "5-yr" in formula.lower() or "5 yr" in formula.lower() or "5 year" in formula.lower(), (
-            f"Formula box must reference 5-yr horizon. Got: {formula!r}"
+        assert "5-yr horizon" not in formula.lower(), (
+            f"Formula box must not say '5-yr horizon capture'. Got: {formula!r}"
         )
 
 

@@ -2840,7 +2840,7 @@ def _enforce_market_consistency(report, deriv) -> None:
         ms.formula = (
             f"TAM = ${tam:,.0f} ({_fmt(tam)}, {_tam_basis}). "
             f"SAM = TAM × {pen}% reachable penetration = ${sam:,.0f} ({_fmt(sam)}). "
-            f"SOM = SAM × {cap}% (5-yr horizon capture) = ${som:,.0f} ({_fmt(som)}). "
+            f"SOM = SAM × {cap}% (Year-1 capture) = ${som:,.0f} ({_fmt(som)}). "
             f"US, annual; figures from the deterministic bottom-up derivation."
         )
 
