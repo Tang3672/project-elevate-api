@@ -296,8 +296,11 @@ _DEFAULT_STRATEGIES = [
     },
 ]
 
+# B-04: non-clinical archetypes must never inherit clinical _DEFAULT_STRATEGIES.
+# Their strategies come from strategy_database.format_strategies_for_report.
+_NON_CLINICAL_ARCHETYPES = frozenset({"research_tool_non_clinical", "research_infrastructure_saas"})
 for domain in DOMAIN_SEARCH_TERMS:
-    if domain not in DOMAIN_STRATEGIES:
+    if domain not in DOMAIN_STRATEGIES and domain not in _NON_CLINICAL_ARCHETYPES:
         DOMAIN_STRATEGIES[domain] = _DEFAULT_STRATEGIES
 
 
@@ -511,13 +514,17 @@ async def _gather_research_tool_intel(disease_name: str, sub_expert_id: str) -> 
     """
     For non-clinical research tool archetypes: skip ClinicalTrials.gov and FDA
     (wrong corpora), return the static comparator list with an honest explanation.
+
+    B-04: strategies come from strategy_database (archetype-specific), never
+    from _DEFAULT_STRATEGIES (clinical FDA designations).
     """
+    from app.services.strategy_database import format_strategies_for_report
     archetype_note = _HONEST_EMPTY_STATE.get("research_tool_non_clinical", "")
     return {
         "competitor_trials":    {"trials": [], "total_found": 0, "corpus_note": archetype_note},
         "fda_precedents":       {"approvals": [], "corpus_note": archetype_note},
         "research_tool_comparators": _RESEARCH_TOOL_COMPARATORS,
-        "strategic_playbook":   _DEFAULT_STRATEGIES,
+        "strategic_playbook":   format_strategies_for_report(sub_expert_id),
         "honest_empty_state":   archetype_note,
     }
 
@@ -583,7 +590,10 @@ async def gather_competitive_intelligence(
         except Exception as _rg_e:
             logger.warning("H-04 relevance gate failed (non-fatal): %s", _rg_e)
 
-    strategies = DOMAIN_STRATEGIES.get(sub_expert_id, _DEFAULT_STRATEGIES)
+    # B-04: always resolve strategies through strategy_database (archetype-gated,
+    # no minimum-count padding) rather than falling back to _DEFAULT_STRATEGIES.
+    from app.services.strategy_database import format_strategies_for_report
+    strategies = format_strategies_for_report(sub_expert_id)
 
     result = {
         "competitor_trials":  trials_data,

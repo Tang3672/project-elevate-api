@@ -387,16 +387,12 @@ def get_strategies_for_domain(sub_expert_id: str, max_strategies: int = 4) -> li
     """
     Returns domain-specific strategies for the given archetype.
 
-    No minimum-count constraint: two accurate strategies beat four where two
-    are fabricated. Never pad with strategies from a different modality.
+    B-04: No minimum-count — return however many accurate domain-specific
+    strategies exist, capped at max_strategies. Never pad with universals to
+    reach a count target; two accurate strategies beat four with filler.
     """
     domain = DOMAIN_SPECIFIC_STRATEGIES.get(sub_expert_id, [])
-    if len(domain) >= max_strategies:
-        return domain[:max_strategies]
-
-    universal = _universal_for(sub_expert_id)
-    combined = domain + universal
-    return combined[:max_strategies]
+    return domain[:max_strategies]
 
 
 def format_strategies_for_report(sub_expert_id: str) -> list:

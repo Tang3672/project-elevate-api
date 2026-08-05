@@ -1137,12 +1137,14 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
             strategic_context = format_intelligence_for_expert(strategic_intel, disease_name)
             researcher_ctx = researcher_ctx + strategic_context
         else:
-            # Always inject at least the domain strategies even if full intel fails
-            from app.services.competitive_intelligence_service import DOMAIN_STRATEGIES, _DEFAULT_STRATEGIES, format_intelligence_for_expert
+            # B-04: fallback uses strategy_database (archetype-gated, no clinical
+            # defaults for research_tool/research_infrastructure archetypes)
+            from app.services.strategy_database import format_strategies_for_report
+            from app.services.competitive_intelligence_service import format_intelligence_for_expert
             fallback_intel = {
                 'competitor_trials': {'trials': [], 'total_found': 0},
                 'fda_precedents': {'approvals': []},
-                'strategic_playbook': DOMAIN_STRATEGIES.get(sub_expert_id, _DEFAULT_STRATEGIES),
+                'strategic_playbook': format_strategies_for_report(sub_expert_id),
             }
             researcher_ctx = researcher_ctx + format_intelligence_for_expert(fallback_intel, disease_name)
 
