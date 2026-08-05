@@ -37,61 +37,98 @@ _RESEARCH_TOOL_ARCHETYPES: frozenset[str] = frozenset({
 # For non-clinical research tools, ClinicalTrials.gov and FDA drugs@FDA are the
 # wrong corpora.  Return a canned list of genuine functional comparators instead.
 _RESEARCH_TOOL_COMPARATORS: list[dict] = [
+    # B-05: each entry carries the unified Competitor schema fields so no
+    # renderer (Python or JS) encounters a missing key.
     {
-        "name":         "ActiGraph (Actigraph LLC)",
-        "category":     "Commercial research wearable logger",
-        "description":  "Industry-standard wearable motion sensing and movement data logger used in NIH-funded trials. "
-                        "GT9X Link and CentrePoint platform. Dominant in clinical research; weak at custom firmware.",
-        "url":          "https://actigraphcorp.com",
-        "incumbent":    True,
+        "name":            "ActiGraph (Actigraph LLC)",
+        "category":        "direct",
+        "description":     "Industry-standard wearable motion sensing and movement data logger used in NIH-funded trials. "
+                           "GT9X Link and CentrePoint platform. Dominant in clinical research; weak at custom firmware.",
+        "overlap":         "Wearable sensor data logging and cloud sync for academic research studies",
+        "where_you_win":   "Open data format, custom firmware support, lower per-device cost",
+        "where_you_lose":  "ActiGraph is the reference device in most NIH grant budgets — reviewers expect it by name",
+        "switching_cost":  "High — existing study datasets, IRB-approved protocols, and trained lab staff are all ActiGraph-native",
+        "price_point":     "$500–1,500/device + CentrePoint subscription",
+        "url":             "https://actigraphcorp.com",
+        "incumbent":       True,
     },
     {
-        "name":         "Empatica EmbracePlus (research tier)",
-        "category":     "Research wearable + cloud data pipeline",
-        "description":  "FDA-cleared as medical but also sold to academic researchers under a research-tier license. "
-                        "Strong in CNS/epilepsy research. REST API for data export.",
-        "url":          "https://www.empatica.com/embraceplus/",
-        "incumbent":    False,
+        "name":            "Empatica EmbracePlus (research tier)",
+        "category":        "direct",
+        "description":     "FDA-cleared as medical but also sold to academic researchers under a research-tier license. "
+                           "Strong in CNS/epilepsy research. REST API for data export.",
+        "overlap":         "Wearable physiological data capture and cloud pipeline for research labs",
+        "where_you_win":   "Long-duration low-power design; researcher-configurable sampling rates",
+        "where_you_lose":  "Pre-built clinical compliance package and established CNS/epilepsy research network",
+        "switching_cost":  "Medium — REST API is exportable, but epilepsy study protocols are Empatica-specific",
+        "price_point":     "$2,000+/device + cloud plan",
+        "url":             "https://www.empatica.com/embraceplus/",
+        "incumbent":       False,
     },
     {
-        "name":         "Movisens Move4 / EcgMove4",
-        "category":     "Research sensor + movisensXS software",
-        "description":  "German research-grade wearable sensor platform for ambulatory monitoring. "
-                        "Strong in European academic research networks. Per-device one-time license.",
-        "url":          "https://www.movisens.com",
-        "incumbent":    False,
+        "name":            "Movisens Move4 / EcgMove4",
+        "category":        "direct",
+        "description":     "German research-grade wearable sensor platform for ambulatory monitoring. "
+                           "Strong in European academic research networks. Per-device one-time license.",
+        "overlap":         "Research-grade ambulatory monitoring hardware and software suite",
+        "where_you_win":   "Open protocol support; lower ongoing vendor lock-in than subscription platforms",
+        "where_you_lose":  "Established European academic research network; per-device perpetual license model preferred in EU grant budgets",
+        "switching_cost":  "Medium — data format conversion required; no cloud dependency reduces lock-in",
+        "price_point":     "€1,500–3,000/device one-time",
+        "url":             "https://www.movisens.com",
+        "incumbent":       False,
     },
     {
-        "name":         "Golioth IoT platform",
-        "category":     "Cloud infrastructure for embedded device fleets",
-        "description":  "Firmware OTA + device telemetry platform for custom embedded devices. "
-                        "Competes on device-fleet management for labs that build their own hardware.",
-        "url":          "https://golioth.io",
-        "incumbent":    False,
+        "name":            "Golioth IoT platform",
+        "category":        "upstream_platform",
+        "description":     "Firmware OTA + device telemetry platform for custom embedded devices. "
+                           "Competes on device-fleet management for labs that build their own hardware.",
+        "overlap":         "Cloud device fleet management and telemetry for embedded research hardware",
+        "where_you_win":   "Research-specific data schema; PI-friendly dashboard without embedded engineering overhead",
+        "where_you_lose":  "Mature embedded OTA and CI/CD pipeline; strong embedded engineering community",
+        "switching_cost":  "Low — API-based, firmware-agnostic; switching is an SDK swap",
+        "price_point":     "Usage-based (free tier available)",
+        "url":             "https://golioth.io",
+        "incumbent":       False,
     },
     {
-        "name":         "Blues Wireless (Notecard)",
-        "category":     "Low-power cellular data logging module",
-        "description":  "Cellular IoT module with pre-paid global data for sensor telemetry. "
-                        "Competes when the lab needs offline → cloud data transport without WiFi.",
-        "url":          "https://blues.com",
-        "incumbent":    False,
+        "name":            "Blues Wireless (Notecard)",
+        "category":        "adjacent_general",
+        "description":     "Cellular IoT module with pre-paid global data for sensor telemetry. "
+                           "Competes when the lab needs offline → cloud data transport without WiFi.",
+        "overlap":         "Offline-to-cloud data transport for sensor hardware in WiFi-limited environments",
+        "where_you_win":   "WiFi-available campus labs (majority of NIH-funded labs); tighter research data schema",
+        "where_you_lose":  "Basement/remote-site labs needing cellular; Notecard is self-contained hardware",
+        "switching_cost":  "Low — module is interchangeable; no software ecosystem dependency",
+        "price_point":     "$49/Notecard + cellular data plan",
+        "url":             "https://blues.com",
+        "incumbent":       False,
     },
     {
-        "name":         "Memfault",
-        "category":     "Embedded device monitoring & crash analytics",
-        "description":  "Device observability platform: crash reporting, OTA, and metrics for embedded devices. "
-                        "Competes on lab-built device fleets that need telemetry without a data scientist.",
-        "url":          "https://memfault.com",
-        "incumbent":    False,
+        "name":            "Memfault",
+        "category":        "adjacent_general",
+        "description":     "Device observability platform: crash reporting, OTA, and metrics for embedded devices. "
+                           "Competes on lab-built device fleets that need telemetry without a data scientist.",
+        "overlap":         "Device telemetry and observability for lab-built embedded hardware fleets",
+        "where_you_win":   "Research-native metrics (experiment-session framing, PI dashboards); no firmware engineering required",
+        "where_you_lose":  "Crash analytics, symbol file debugging, and OTA maturity for commercial firmware teams",
+        "switching_cost":  "Low — SDK-based integration; switching is a library replacement",
+        "price_point":     "Usage-based",
+        "url":             "https://memfault.com",
+        "incumbent":       False,
     },
     {
-        "name":         "DIY / Status quo (SD-card + lab scripts)",
-        "category":     "Status quo — no commercial product",
-        "description":  "Most academic neurotech labs write custom Python/MATLAB scripts and store data on SD cards "
-                        "or lab-managed servers. Zero direct cost; high researcher time cost. The dominant incumbent.",
-        "url":          "",
-        "incumbent":    True,
+        "name":            "DIY / Status quo (SD-card + lab scripts)",
+        "category":        "status_quo",
+        "description":     "Most academic neurotech labs write custom Python/MATLAB scripts and store data on SD cards "
+                           "or lab-managed servers. Zero direct cost; high researcher time cost. The dominant incumbent.",
+        "overlap":         "All data logging and local storage that a new tool would replace",
+        "where_you_win":   "Turn-key sync, cloud access, session replay, multi-lab sharing — none of which DIY provides",
+        "where_you_lose":  "Zero direct cost; complete control; no vendor dependency; every PI already has it",
+        "switching_cost":  "High — all existing lab workflows, scripts, and training are built around the status quo; switching requires retraining every lab member",
+        "price_point":     "$0 direct cost",
+        "url":             "",
+        "incumbent":       True,
     },
 ]
 

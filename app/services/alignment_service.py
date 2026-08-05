@@ -469,9 +469,10 @@ async def attach_competitive_landscape(report) -> None:
             _RESEARCH_TOOL_ARCHETYPES,
             _RESEARCH_TOOL_COMPARATORS,
         )
+        from app.services.competitor_schema import normalize_landscape
         _sub_id = getattr(report, "expert_domain", "") or ""
         if _sub_id in _RESEARCH_TOOL_ARCHETYPES:
-            report.competitive_landscape = {
+            report.competitive_landscape = normalize_landscape({
                 "available": True,
                 "competitors": _RESEARCH_TOOL_COMPARATORS,
                 "corpus": "research_tool_functional",
@@ -481,7 +482,7 @@ async def attach_competitive_landscape(report) -> None:
                     "non-clinical research infrastructure — those databases index regulated "
                     "clinical products and returned unrelated results."
                 ),
-            }
+            })
             return
 
         from app.services.competitor_sweep_service import sweep_competitors, to_dict
@@ -498,7 +499,8 @@ async def attach_competitive_landscape(report) -> None:
                 disease_name=disease, indication_keywords=kw,
                 therapeutic_area=ta, product_type=pt)),
             timeout=25.0)
-        report.competitive_landscape = to_dict(landscape)
+        # B-05: normalize so every field is present; no JS `undefined` from missing keys
+        report.competitive_landscape = normalize_landscape(to_dict(landscape))
     except Exception as e:
         logger.warning("attach_competitive_landscape failed (non-fatal): %s", e)
         report.competitive_landscape = {"available": False, "competitors": [],

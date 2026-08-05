@@ -363,18 +363,55 @@ def _render_market_access(ma: dict) -> str:
 def _render_competitive_landscape(ci: dict) -> str:
     if not ci:
         return ""
-    rt = ci.get("research_tool_comparators", ci.get("comparators", []))
+    from app.services.competitor_schema import normalize_landscape
+
+    # B-05: normalize to unified schema — resolves key aliases and fills missing fields
+    ci = normalize_landscape(ci)
+    competitors = ci.get("competitors", [])
     trials = (ci.get("competitor_trials") or {}).get("trials", [])
     honest_empty = _e(ci.get("honest_empty_state", ""))
 
+    # Detect corpus: research-tool landscape has no stage/company fields
+    is_research_tool = ci.get("corpus", "").startswith("research_tool") or (
+        competitors and not competitors[0].get("company")
+    )
+
     comp_rows = ""
-    for c in rt:
-        comp_rows += f"""<tr>
-          <td><strong>{_e(c.get("name",""))}</strong></td>
-          <td>{_e(c.get("category",""))}</td>
-          <td>{_e(c.get("key_differentiator","") or c.get("description",""))}</td>
-          <td>{"Incumbent" if c.get("incumbent") else "Challenger"}</td>
-        </tr>"""
+    if is_research_tool:
+        for c in competitors:
+            role = "Incumbent" if c.get("incumbent") else "Challenger"
+            key_diff = _e(
+                c.get("overlap") or c.get("key_differentiator") or c.get("description") or ""
+            )
+            win = _e(c.get("where_you_win") or "")
+            lose = _e(c.get("where_you_lose") or "")
+            switch = _e(c.get("switching_cost") or "")
+            price = _e(c.get("price_point") or "")
+            comp_rows += f"""<tr>
+              <td><strong>{_e(c.get("name",""))}</strong><br>
+                  <span class="sec-note">{_e(c.get("category",""))}</span></td>
+              <td>{key_diff}</td>
+              <td class="pos">{win}</td>
+              <td class="neg">{lose}</td>
+              <td>{switch}</td>
+              <td>{price}</td>
+              <td>{role}</td>
+            </tr>"""
+        header = "<tr><th>Product</th><th>Overlap</th><th>Where You Win</th><th>Where You Lose</th><th>Switching Cost</th><th>Price</th><th>Role</th></tr>"
+    else:
+        for c in competitors:
+            adv = "; ".join(c.get("advantages") or [])
+            vuln = "; ".join(c.get("vulnerabilities") or [])
+            comp_rows += f"""<tr>
+              <td><strong>{_e(c.get("name",""))}</strong>
+                  {f"({_e(c.get('brand_name',''))})" if c.get("brand_name") else ""}</td>
+              <td>{_e(c.get("company",""))}</td>
+              <td>{_e(c.get("stage",""))}</td>
+              <td>{_e(c.get("route",""))}</td>
+              <td>{_e(adv)}</td>
+              <td>{_e(vuln)}</td>
+            </tr>"""
+        header = "<tr><th>Product</th><th>Company</th><th>Stage</th><th>Route</th><th>Advantages</th><th>Vulnerabilities</th></tr>"
 
     trial_rows = ""
     for t in trials[:8]:
@@ -389,7 +426,7 @@ def _render_competitive_landscape(ci: dict) -> str:
 <div class="section" id="s-competitive">
   <h2><span class="sec-num">6</span> Competitive Landscape</h2>
   {f'<p class="honest-empty">{honest_empty}</p>' if honest_empty else ""}
-  {f'<table class="data-table"><thead><tr><th>Product</th><th>Category</th><th>Key Differentiator</th><th>Role</th></tr></thead><tbody>{comp_rows}</tbody></table>' if comp_rows else ""}
+  {f'<table class="data-table"><thead>{header}</thead><tbody>{comp_rows}</tbody></table>' if comp_rows else ""}
   {f'<h3>Active Clinical Trials</h3><table class="data-table"><thead><tr><th>NCT ID</th><th>Title</th><th>Status</th><th>Sponsor</th></tr></thead><tbody>{trial_rows}</tbody></table>' if trial_rows else ""}
 </div>"""
 
