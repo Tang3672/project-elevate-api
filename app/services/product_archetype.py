@@ -104,6 +104,9 @@ _CLINICAL_REGULATED_VOCAB: FrozenSet[str] = frozenset({
     "clinical indication", "510k", "fda clearance", "fda-cleared",
     "ifu label", "labeling claim", "510 k", "class ii device",
     "510 (k)", "premarket notification",
+    # C-04: vocabulary that appeared in v5 agronomy/research-tool reports
+    "therapeutic area", "disease-relevant", "payer uptake",
+    "guideline inclusion", "initial label", "iqvia forecast",
 })
 
 # Vocab that should NEVER appear in a drug/small-molecule report

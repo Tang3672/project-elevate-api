@@ -247,7 +247,7 @@ def academic_neurotech_lab_buyer(
     population_hi: int = 8_000,
     population_denominator: str = "NIH-funded neuroscience/neurotech labs running instrumented experiments",
     population_source: str = "NIH RePORTER query — estimate pending verification",
-    spend_source: str = "Primary research — operator should supply observed spend from PI interviews ⚠",
+    spend_source: str = "Assumed — no observed spend data; appears in sensitivity analysis",
 ) -> BuyerModel:
     """
     Default buyer model for neurotech/lab-data-logging tools.

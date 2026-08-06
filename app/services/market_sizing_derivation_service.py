@@ -1651,7 +1651,7 @@ def _derive_research_tool_formula(
         sam  = tam * 0.30
         som  = sam * 0.15
         pop_src = "NIH RePORTER — estimate pending verification"
-        sp_src  = "Assumed — operator should supply observed spend from primary research ⚠"
+        sp_src  = "Assumed — no observed spend data; appears in sensitivity analysis"
 
     steps = [
         DerivationStep(

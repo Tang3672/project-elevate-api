@@ -88,7 +88,7 @@ FRAC_BUDGET_AUTH:   float = 0.47  # labs with purchasing authority (cadence-adju
 # Fallback NIH-funded fraction if RePORTER API is unavailable
 FRAC_NIH_FUNDED_FALLBACK: float = 0.62
 
-# Price-tier mix among addressable labs — assumed ⚠; operator should supply from their pipeline.
+# Price-tier mix among addressable labs — assumed ⚠; no primary source; appears in sensitivity ranking.
 MIX_ACADEMIC:      float = 0.80
 MIX_CORE_FACILITY: float = 0.15
 MIX_SITE_LICENSE:  float = 0.05
@@ -718,7 +718,7 @@ async def build_life_sciences_research_tree(
                 f"not_custom_solved × {FRAC_BUDGET_AUTH:.0%} "
                 "(PI budget authority rate × annual procurement-cycle overlap — assumed ⚠)"
             ),
-            source="Assumed — operator should supply from pipeline or primary research ⚠",
+            source="Assumed — no primary source; appears in sensitivity analysis",
             low=not_custom_labs * 0.35,
             high=not_custom_labs * 0.62,
             confidence=0.55,
@@ -733,9 +733,9 @@ async def build_life_sciences_research_tree(
             method="derived",
             formula=(
                 f"budget_authority_labs × {MIX_ACADEMIC:.0%} "
-                "(tier mix — assumed ⚠; operator should supply from pipeline data)"
+                "(tier mix — assumed ⚠; no primary source)"
             ),
-            source="Assumed — operator should supply observed price-tier mix ⚠",
+            source="Assumed — no primary source; appears in sensitivity analysis",
             low=addressable_labs * 0.65,
             high=addressable_labs * 0.90,
             confidence=0.60,
@@ -751,9 +751,9 @@ async def build_life_sciences_research_tree(
             method="derived",
             formula=(
                 f"budget_authority_labs × {MIX_CORE_FACILITY:.0%} "
-                "(tier mix — assumed ⚠; operator should supply from pipeline data)"
+                "(tier mix — assumed ⚠; no primary source)"
             ),
-            source="Assumed — operator should supply observed price-tier mix ⚠",
+            source="Assumed — no primary source; appears in sensitivity analysis",
             low=addressable_labs * 0.08,
             high=addressable_labs * 0.22,
             confidence=0.55,
@@ -769,9 +769,9 @@ async def build_life_sciences_research_tree(
             method="derived",
             formula=(
                 f"budget_authority_labs × {MIX_SITE_LICENSE:.0%} "
-                "(tier mix — assumed ⚠; operator should supply from pipeline data)"
+                "(tier mix — assumed ⚠; no primary source)"
             ),
-            source="Assumed — operator should supply observed price-tier mix ⚠",
+            source="Assumed — no primary source; appears in sensitivity analysis",
             low=addressable_labs * 0.02,
             high=addressable_labs * 0.10,
             confidence=0.50,
