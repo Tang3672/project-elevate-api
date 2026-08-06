@@ -200,15 +200,6 @@ def test_strategies_differ_by_domain():
     )
 
 
-@pytest.mark.xfail(
-    reason=(
-        "research_infrastructure_saas is shared by academic lab tools (where R01 "
-        "renewal timing is relevant) and commercial hardware like soil sensors (where "
-        "it is not). Fix requires a domain dimension on Strategy or a more granular "
-        "archetype that separates LS-academic SaaS from commercial IoT. See spec v5 F-3."
-    ),
-    strict=False,
-)
 def test_no_nih_r01_strategy_for_soil_sensor():
     """A soil-moisture sensor should not receive 'R01 renewal cycle timing' strategies."""
     from app.services.strategy_model import TYPED_STRATEGY_LIBRARY

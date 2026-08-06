@@ -354,14 +354,28 @@ async def generate_pi_report(
         from app.services.strategy_database import format_strategies_for_report
         _sub_id = getattr(expert, "sub_expert_id", getattr(expert, "domain_id", "drug_amr"))
         # DOMAIN GATE (v3 spec §4 fix): if domain is LIFE_SCIENCES_RESEARCH, the router
-        # may have selected a clinical expert (e.g. digital_rpm). Force the playbook to
-        # the research archetype regardless of which expert was selected.
+        # may have selected a clinical expert (e.g. digital_rpm). Preserve the actual
+        # typed research archetype when the router got it right; otherwise force to the
+        # safe research fallback. F-3: this preserves research_tool_non_clinical vs
+        # research_infrastructure_saas distinction so each gets its correct strategy set.
+        _TYPED_LS_ARCHETYPES = frozenset({"research_tool_non_clinical", "research_infrastructure_saas"})
         if _resolved_domain == "LIFE_SCIENCES_RESEARCH":
-            _sub_id = "research_infrastructure_saas"
-            logger.info("Strategic playbook: domain=LIFE_SCIENCES_RESEARCH → forced to research_infrastructure_saas")
+            _actual = (router_result.sub_expert_id or "").lower()
+            if _actual in _TYPED_LS_ARCHETYPES:
+                _sub_id = _actual
+            else:
+                _sub_id = "research_infrastructure_saas"
+                logger.info("Strategic playbook: domain=LIFE_SCIENCES_RESEARCH → forced to research_infrastructure_saas")
         else:
             logger.info(f"Strategic playbook: sub_expert_id={_sub_id}")
-        playbook = format_strategies_for_report(_sub_id)
+        # F-3: gate strategy domain so non-LS products don't receive LS-specific strategies.
+        # "other" therapeutic area signals a non-life-sciences product (e.g. agronomy, IoT).
+        _NON_LS_DOMAINS = frozenset({"other", "agriculture", "food", "environmental", "energy", "materials"})
+        _strategy_domain = (
+            "OTHER" if (disease_domain or "").lower() in _NON_LS_DOMAINS
+            else "LIFE_SCIENCES_RESEARCH"
+        )
+        playbook = format_strategies_for_report(_sub_id, domain=_strategy_domain)
         if not playbook:
             fallback_map = {
                 # Expert domain IDs from expert_profiles_v2
