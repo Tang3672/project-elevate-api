@@ -154,24 +154,33 @@ class TestSelectTypePlaceholder:
         )
 
 
-class TestSetExTypeOrder:
+class TestSetExTypeButtonMatching:
+    """setEx() now finds buttons by onclick attribute value rather than a
+    hardcoded typeOrder index array — verify the mechanism works."""
 
-    def _type_order_block(self) -> str:
+    def _setex_src(self) -> str:
         src = _app_html()
-        m = re.search(r"const typeOrder\s*=\s*\[(.*?)\];", src, re.DOTALL)
-        assert m, "Could not find typeOrder array in setEx()"
+        m = re.search(r"function setEx\(i\)\s*\{(.*?)\n\}", src, re.DOTALL)
+        assert m, "Could not find setEx() function in app.html"
         return m.group(1)
 
-    def test_research_tool_in_type_order(self):
-        block = self._type_order_block()
-        assert "research_tool_non_clinical" in block, (
-            "setEx() typeOrder must include 'research_tool_non_clinical' "
-            "so the correct button activates when a research tool example is loaded"
+    def test_setex_matches_by_onclick(self):
+        src = self._setex_src()
+        assert "getAttribute('onclick')" in src or "getAttribute(\"onclick\")" in src, (
+            "setEx() must find type buttons by their onclick attribute value, "
+            "not by a hardcoded typeOrder index array"
         )
 
-    def test_type_order_has_nine_entries(self):
-        block = self._type_order_block()
-        entries = re.findall(r"'[^']+'", block)
-        assert len(entries) == 9, (
-            f"typeOrder should have 9 entries (8 clinical + 1 research tool); found {len(entries)}"
+    def test_research_tool_button_onclick_present(self):
+        src = _app_html()
+        assert "selectType('research_tool_non_clinical'" in src, (
+            "A type button with selectType('research_tool_non_clinical'...) must exist "
+            "so setEx() can activate it for research tool examples"
+        )
+
+    def test_research_infrastructure_button_present(self):
+        src = _app_html()
+        assert "selectType('research_infrastructure_saas'" in src, (
+            "A type button for research_infrastructure_saas must exist in the type grid "
+            "as a first-class Research domain option"
         )
