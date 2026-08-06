@@ -475,20 +475,21 @@ async def attach_competitive_landscape(report) -> None:
         # because the databases index regulated clinical products, not lab equipment.
         from app.services.competitive_intelligence_service import (
             _RESEARCH_TOOL_ARCHETYPES,
-            _RESEARCH_TOOL_COMPARATORS,
+            _extract_research_tool_comparators,
         )
         from app.services.competitor_schema import normalize_landscape
         _sub_id = getattr(report, "expert_domain", "") or ""
         if _sub_id in _RESEARCH_TOOL_ARCHETYPES:
+            _idea = getattr(report, "idea_submitted", "") or ""
+            _comparators = await _extract_research_tool_comparators(_idea, _sub_id)
             report.competitive_landscape = normalize_landscape({
                 "available": True,
-                "competitors": _RESEARCH_TOOL_COMPARATORS,
+                "competitors": _comparators,
                 "corpus": "research_tool_functional",
                 "note": (
-                    "Comparators are functional analogues in the academic research-tool market. "
-                    "FDA drugs@FDA and ClinicalTrials.gov are not the correct corpus for "
-                    "non-clinical research infrastructure — those databases index regulated "
-                    "clinical products and returned unrelated results."
+                    "Comparators extracted from product description and domain context. "
+                    "FDA drugs@FDA and ClinicalTrials.gov index regulated clinical products "
+                    "and are not the correct corpus for non-clinical research infrastructure."
                 ),
             })
             return

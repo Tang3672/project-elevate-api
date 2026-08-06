@@ -199,50 +199,6 @@ class TestValidateCompetitorEntry:
         assert any("incumbent" in v for v in violations)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# Static _RESEARCH_TOOL_COMPARATORS satisfy the schema
-# ══════════════════════════════════════════════════════════════════════════════
-
-class TestStaticComparatorsSatisfySchema:
-
-    def test_all_research_tool_comparators_pass_schema(self):
-        from app.services.competitive_intelligence_service import _RESEARCH_TOOL_COMPARATORS
-        violations: list[str] = []
-        for entry in _RESEARCH_TOOL_COMPARATORS:
-            violations.extend(_validate(entry, "research_tool_non_clinical"))
-        assert not violations, (
-            "Static _RESEARCH_TOOL_COMPARATORS have schema violations:\n"
-            + "\n".join(violations)
-        )
-
-    def test_research_tool_comparators_have_no_stage_field(self):
-        from app.services.competitive_intelligence_service import _RESEARCH_TOOL_COMPARATORS
-        bad = [c for c in _RESEARCH_TOOL_COMPARATORS if "stage" in c]
-        assert not bad, (
-            f"_RESEARCH_TOOL_COMPARATORS entries must not have 'stage' field: {bad!r}"
-        )
-
-    def test_research_tool_comparators_have_no_company_field(self):
-        from app.services.competitive_intelligence_service import _RESEARCH_TOOL_COMPARATORS
-        bad = [c for c in _RESEARCH_TOOL_COMPARATORS if "company" in c]
-        assert not bad, (
-            f"_RESEARCH_TOOL_COMPARATORS entries must not have 'company' field: {bad!r}"
-        )
-
-    def test_research_tool_comparators_all_have_name(self):
-        from app.services.competitive_intelligence_service import _RESEARCH_TOOL_COMPARATORS
-        for entry in _RESEARCH_TOOL_COMPARATORS:
-            assert entry.get("name"), f"All comparators must have a name: {entry!r}"
-
-    def test_status_quo_is_present(self):
-        """Status quo / DIY must always be in the research-tool list (B-07 competitor rule)."""
-        from app.services.competitive_intelligence_service import _RESEARCH_TOOL_COMPARATORS
-        names = " ".join(c.get("name", "").lower() for c in _RESEARCH_TOOL_COMPARATORS)
-        assert "diy" in names or "status quo" in names or "sd card" in names or "sd-card" in names, (
-            "Status-quo / DIY must be included as a first-class comparator in "
-            "_RESEARCH_TOOL_COMPARATORS"
-        )
-
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PDF renderer — no "undefined" with sparse entries

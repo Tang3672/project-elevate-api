@@ -179,73 +179,9 @@ class TestCompetitorCategory:
         assert isinstance(COMPETITOR_CATEGORY, frozenset)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# _RESEARCH_TOOL_COMPARATORS — B-05 fields present on all entries
-# ══════════════════════════════════════════════════════════════════════════════
-
-
-_B05_REQUIRED_FIELDS = ("name", "overlap", "where_you_win", "where_you_lose", "switching_cost")
-
-
-class TestResearchToolComparatorsB05Fields:
-
-    def _comparators(self) -> list[dict]:
-        from app.services.competitive_intelligence_service import _RESEARCH_TOOL_COMPARATORS
-        return _RESEARCH_TOOL_COMPARATORS
-
-    @pytest.mark.parametrize("field", _B05_REQUIRED_FIELDS)
-    def test_all_comparators_have_non_empty_field(self, field: str):
-        for c in self._comparators():
-            val = c.get(field)
-            assert val is not None and val != "", (
-                f"_RESEARCH_TOOL_COMPARATORS[{c.get('name','?')!r}] missing non-empty {field!r}"
-            )
-
-    def test_all_categories_in_controlled_vocabulary(self):
-        from app.services.competitor_schema import COMPETITOR_CATEGORY
-        for c in self._comparators():
-            cat = c.get("category", "")
-            assert cat in COMPETITOR_CATEGORY, (
-                f"Comparator {c.get('name','?')!r} category {cat!r} not in COMPETITOR_CATEGORY"
-            )
-
-    def test_status_quo_entry_present(self):
-        comps = self._comparators()
-        sq = next((c for c in comps if c.get("category") == "status_quo"), None)
-        assert sq is not None, "Must have a status_quo entry in _RESEARCH_TOOL_COMPARATORS"
-
-    def test_status_quo_has_switching_cost(self):
-        from app.services.competitive_intelligence_service import _RESEARCH_TOOL_COMPARATORS
-        sq = next(c for c in _RESEARCH_TOOL_COMPARATORS if c.get("category") == "status_quo")
-        assert sq.get("switching_cost"), "status_quo entry must describe switching cost"
-
-    def test_at_least_one_direct_competitor(self):
-        comps = self._comparators()
-        assert any(c.get("category") == "direct" for c in comps), (
-            "Must have at least one 'direct' competitor in _RESEARCH_TOOL_COMPARATORS"
-        )
-
-    def test_no_company_field_on_research_tool_entries(self):
-        for c in self._comparators():
-            assert "company" not in c, (
-                f"Research tool comparator {c['name']!r} has drug field 'company' — "
-                "will confuse drug renderer"
-            )
-
-    def test_no_stage_field_on_research_tool_entries(self):
-        for c in self._comparators():
-            assert "stage" not in c, (
-                f"Research tool comparator {c['name']!r} has drug field 'stage'"
-            )
-
-    def test_switching_cost_mentions_lab_or_cost_context(self):
-        keywords = {"high", "medium", "low", "lab", "cost", "protocol", "vendor", "sdk", "api"}
-        for c in self._comparators():
-            text = (c.get("switching_cost") or "").lower()
-            assert any(kw in text for kw in keywords), (
-                f"switching_cost for {c['name']!r} should categorize the cost level "
-                f"or explain it; got: {text!r}"
-            )
+# F-2: TestResearchToolComparatorsB05Fields deleted — the static _RESEARCH_TOOL_COMPARATORS
+# list was Hublink-specific and has been replaced by _extract_research_tool_comparators().
+# Schema compliance is enforced at normalisation time by normalize_landscape().
 
 
 # ══════════════════════════════════════════════════════════════════════════════
