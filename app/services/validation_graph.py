@@ -153,9 +153,14 @@ async def math_verifier_node(state: PIReportState) -> dict:
     """Independently re-derives all market sizing calculations."""
     logger.info("Math verifier running")
     try:
+        from app.services.math_consistency_guard import check_market_arithmetic
+
         ms = state["report"].get("market_sizing", {})
         if not ms:
             return {"math_flags": [], "math_error": None}
+
+        # B-02: deterministic arithmetic check — immune to LLM "resolved" hallucination
+        deterministic_flags = check_market_arithmetic(ms)
 
         user_input = json.dumps({
             "stated_TAM": ms.get("total_addressable_market_usd"),
@@ -167,8 +172,12 @@ async def math_verifier_node(state: PIReportState) -> dict:
         }, indent=2)
 
         raw = await _call_claude(MATH_VERIFIER_SYSTEM, f"Verify these calculations:\n{user_input}")
-        flags = _parse_flags(raw, "Math Verifier")
-        logger.info(f"Math verifier: {len(flags)} flags")
+        llm_flags = _parse_flags(raw, "Math Verifier")
+        flags = deterministic_flags + llm_flags
+        logger.info(
+            f"Math verifier: {len(flags)} flags "
+            f"({len(deterministic_flags)} deterministic, {len(llm_flags)} LLM)"
+        )
         return {"math_flags": flags, "math_error": None}
     except Exception as e:
         logger.error(f"Math verifier failed: {e}")
@@ -204,10 +213,16 @@ async def source_verifier_node(state: PIReportState) -> dict:
     """Checks all source citations for validity and plausibility."""
     logger.info("Source verifier running")
     try:
+        from app.services.source_type_guard import (
+            check_source_type_bindings,
+            check_price_segment_consistency,
+        )
+
         report = state["report"]
         di = report.get("disease_intelligence", {})
         ms = report.get("market_sizing", {})
         rp = report.get("regulatory_pathway", {})
+        ma = report.get("market_access", {})
 
         sources_to_check = []
 
@@ -238,14 +253,25 @@ async def source_verifier_node(state: PIReportState) -> dict:
                     "claim": d.get("benefit")
                 })
 
+        # B-03: deterministic source-type binding check (no LLM needed)
+        deterministic_flags = check_source_type_bindings(sources_to_check)
+        deterministic_flags += check_price_segment_consistency(
+            ma.get("buyer_segments", []),
+            state.get("product_type", ""),
+        )
+
         if not sources_to_check:
-            return {"source_flags": [], "source_error": None}
+            return {"source_flags": deterministic_flags, "source_error": None}
 
         user_input = json.dumps(sources_to_check[:15], indent=2)  # Cap at 15 sources
         raw = await _call_claude(SOURCE_VERIFIER_SYSTEM,
                                   f"Verify these {len(sources_to_check)} source citations:\n{user_input}")
-        flags = _parse_flags(raw, "Source Verifier")
-        logger.info(f"Source verifier: {len(flags)} flags")
+        llm_flags = _parse_flags(raw, "Source Verifier")
+        flags = deterministic_flags + llm_flags
+        logger.info(
+            f"Source verifier: {len(flags)} flags "
+            f"({len(deterministic_flags)} deterministic, {len(llm_flags)} LLM)"
+        )
         return {"source_flags": flags, "source_error": None}
     except Exception as e:
         logger.error(f"Source verifier failed: {e}")
@@ -514,6 +540,16 @@ async def parallel_verifier_node(state: PIReportState) -> dict:
 
 # ── ARBITRATOR: Synthesizes all findings ─────────────────────────────────────
 
+def _is_blocking_error(flag: dict) -> bool:
+    """
+    A MATH-category ERROR blocks PDF export because an arithmetic inconsistency
+    in market sizing produces a factually wrong artifact that must not be shared.
+    Other ERRORs (source quality, regulatory concerns) are serious but not
+    automatically blocking — the user can still export with a visible warning.
+    """
+    return flag.get("severity") == "ERROR" and flag.get("category") == "MATH"
+
+
 def arbitrator_node(state: PIReportState) -> dict:
     """Combines all flags and determines final verdict."""
     all_flags = (
@@ -524,28 +560,36 @@ def arbitrator_node(state: PIReportState) -> dict:
         state.get("factual_flags", [])
     )
 
-    errors   = [f for f in all_flags if f.get("severity") == "ERROR"]
+    blocking = [f for f in all_flags if _is_blocking_error(f)]
+    errors   = [f for f in all_flags if f.get("severity") == "ERROR" and not _is_blocking_error(f)]
     warnings = [f for f in all_flags if f.get("severity") == "WARNING"]
     notes    = [f for f in all_flags if f.get("severity") == "NOTE"]
 
-    if errors:
-        passed = False
+    if blocking:
+        # BLOCKING: arithmetic errors make the report factually wrong — no export.
+        passed  = False
+        verdict = "BLOCKING"
+    elif errors:
+        passed  = False
         verdict = "ERROR"
     elif warnings:
-        passed = True  # Still deliver but flag
+        passed  = True   # deliver but flag
         verdict = "FLAG"
     elif notes:
-        passed = True
+        passed  = True
         verdict = "REVIEW"
     else:
-        passed = True
+        passed  = True
         verdict = "PASS"
 
-    logger.info(f"Arbitrator: {len(errors)} errors, {len(warnings)} warnings, {len(notes)} notes -> {verdict}")
+    logger.info(
+        "Arbitrator: %d blocking, %d errors, %d warnings, %d notes -> %s",
+        len(blocking), len(errors), len(warnings), len(notes), verdict,
+    )
     return {
-        "all_flags": all_flags,
+        "all_flags":        all_flags,
         "validation_passed": passed,
-        "_verdict": verdict,
+        "_verdict":          verdict,
     }
 
 
@@ -558,11 +602,15 @@ def formatter_node(state: PIReportState) -> dict:
 
     # Recompute verdict from actual flags — don't rely on _verdict which LangGraph
     # may drop if the key isn't in PIReportState TypedDict.
-    errors   = [f for f in flags if f.get("severity") == "ERROR"]
+    blocking = [f for f in flags if _is_blocking_error(f)]
+    errors   = [f for f in flags if f.get("severity") == "ERROR" and not _is_blocking_error(f)]
     warnings = [f for f in flags if f.get("severity") == "WARNING"]
     notes    = [f for f in flags if f.get("severity") == "NOTE"]
 
-    if errors:
+    if blocking:
+        verdict = "BLOCKING"
+        passed  = False
+    elif errors:
         verdict = "ERROR"
         passed  = False
     elif warnings:
@@ -574,6 +622,8 @@ def formatter_node(state: PIReportState) -> dict:
     else:
         verdict = "PASS"
         passed  = True
+
+    export_blocked = verdict == "BLOCKING"
 
     # Group by agent for display
     by_agent = {}
@@ -588,10 +638,12 @@ def formatter_node(state: PIReportState) -> dict:
         if any(f.get("severity") in ("ERROR", "WARNING") for f in agent_flags)
     ]
 
+    all_errors = blocking + errors   # for display grouping
     report["validation"] = {
         "status":           verdict,
         "passed":           passed,
-        "errors":           errors,
+        "export_blocked":   export_blocked,
+        "errors":           all_errors,
         "warnings":         warnings,
         "notes":            notes,
         "total_flags":      len(flags),
@@ -605,9 +657,12 @@ def formatter_node(state: PIReportState) -> dict:
             if verdict == "PASS" else
             f"⚠ FLAG: {len(warnings)} warning(s) found by {', '.join(sorted(set(f.get('agent','') for f in warnings)))}. Report is usable but review flagged items."
             if verdict == "FLAG" else
-            f"✗ ERROR: {len(errors)} critical error(s) found by {', '.join(sorted(set(f.get('agent','') for f in errors)))}. Report contains inaccuracies that should be corrected."
-            if verdict == "ERROR" else
             f"ℹ REVIEW: {len(notes)} minor note(s) found — no errors or warnings."
+            if verdict == "REVIEW" else
+            f"✗ BLOCKING: {len(blocking)} arithmetic error(s) found — PDF export is blocked until the market model is corrected. "
+            f"Flagged by: {', '.join(sorted(set(f.get('agent','') for f in blocking)))}."
+            if verdict == "BLOCKING" else
+            f"✗ ERROR: {len(errors)} critical error(s) found by {', '.join(sorted(set(f.get('agent','') for f in errors)))}. Report contains inaccuracies that should be corrected."
         )
     }
 
@@ -875,6 +930,7 @@ async def validate_pi_report(report: dict, sub_expert_id: str = "drug_amr") -> d
         report["validation"] = {
             "status": "ERROR",
             "passed": True,
+            "export_blocked": False,
             "errors": [], "warnings": [], "notes": [],
             "total_flags": 0,
             "agents_run": [],

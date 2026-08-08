@@ -45,7 +45,7 @@ PRIORS: dict = {
             "low":        0.15,
             "high":       0.35,
             "confidence": 0.50,
-            "rationale":  "Assumed ⚠ — fraction of labs running instrumented studies ≥6 months; operator should supply from primary research",
+            "rationale":  "Assumed ⚠ — fraction of labs running instrumented studies ≥6 months; no primary source",
         },
         "low_bandwidth": {
             "fraction":   0.81,

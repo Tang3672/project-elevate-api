@@ -387,22 +387,38 @@ def get_strategies_for_domain(sub_expert_id: str, max_strategies: int = 4) -> li
     """
     Returns domain-specific strategies for the given archetype.
 
-    No minimum-count constraint: two accurate strategies beat four where two
-    are fabricated. Never pad with strategies from a different modality.
+    B-04: No minimum-count — return however many accurate domain-specific
+    strategies exist, capped at max_strategies. Never pad with universals to
+    reach a count target; two accurate strategies beat four with filler.
     """
     domain = DOMAIN_SPECIFIC_STRATEGIES.get(sub_expert_id, [])
-    if len(domain) >= max_strategies:
-        return domain[:max_strategies]
-
-    universal = _universal_for(sub_expert_id)
-    combined = domain + universal
-    return combined[:max_strategies]
+    return domain[:max_strategies]
 
 
-def format_strategies_for_report(sub_expert_id: str) -> list:
+_TYPED_ARCHETYPES = {"research_tool_non_clinical", "research_infrastructure_saas"}
+
+
+def format_strategies_for_report(sub_expert_id: str, domain: str = "LIFE_SCIENCES_RESEARCH") -> list:
     """
     Format strategies as list of dicts for report strategic_playbook field.
+
+    E.1: research_tool and research_infrastructure archetypes are routed through
+    the typed Strategy library (strategy_model.py) so the output includes typed
+    gating fields (id, archetypes, domains, buyer_personas, apply_template).
+    All other archetypes continue to use the existing dict lookup.
+
+    F-3: domain param gates typed strategies by product domain so non-LS products
+    (e.g. agronomy, IoT) don't receive LS-specific strategies (R01 timing, LabArchives).
     """
+    if (sub_expert_id or "").lower() in _TYPED_ARCHETYPES:
+        from app.services.strategy_model import format_typed_strategies_for_report
+        return format_typed_strategies_for_report(
+            archetype=sub_expert_id,
+            domain=domain,
+            context={},
+            max_strategies=4,
+        )
+
     strategies = get_strategies_for_domain(sub_expert_id, max_strategies=4)
     return [
         {
@@ -911,28 +927,10 @@ DOMAIN_SPECIFIC_STRATEGIES.update({
         },
     ],
 
-    "research_infrastructure_saas": [
-        {
-            "category": "Research SaaS — Institutional Site License",
-            "strategy": "Land in one department; expand via the research computing office — the IT buying unit is higher-value and faster than PI-by-PI expansion",
-            "example_company": "LabArchives",
-            "example_drug": "LabArchives Electronic Lab Notebook",
-            "what_they_did": "LabArchives shifted from individual PI sales ($10–30/user/month) to institutional site licenses ($20k–$100k/yr) by partnering with university IT and research computing offices rather than PIs. One institutional sale covers hundreds to thousands of users and is renewable on the institution's fiscal cycle, not the PI's grant cycle.",
-            "how_to_apply": "After initial traction (≥5 active labs, ≥3 testimonials), approach the VP Research or CIO with an institutional site-license proposal. Lead with compliance arguments — NSF data management plans, NIH data sharing policy — that matter to the institution beyond individual PIs. The compliance angle often unlocks a budget line that individual PI grant funds cannot.",
-            "source_url": "https://www.labarchives.com",
-            "applicability": "Research SaaS with data management, compliance, or collaboration use cases where institutional IT buyers also benefit, not only individual PIs.",
-        },
-        {
-            "category": "Grant Renewal Timing",
-            "strategy": "Time the enterprise sales pitch to align with R01 renewal cycles — a PI at the start of a new grant period has budget authority; a PI in the no-cost extension period does not",
-            "example_company": "Benchling",
-            "example_drug": "Benchling R&D Cloud (life science SaaS)",
-            "what_they_did": "Benchling's academic sales motion anchors to grant budget periods (typically 5-year R01 cycles). Outreach timed to the start of new award periods, when PIs have full discretion over equipment and software budget lines, converts at 3–5× the rate of outreach timed to the final year.",
-            "how_to_apply": "Build a data layer from NIH RePORTER: pull active awards with start dates, project end dates, and abstract text. Flag labs in year 1–2 of a new award for priority outreach. Suppress or reduce outreach frequency for labs in year 4–5. The sales cycle shrinks from months to weeks when the PI has current budget authority.",
-            "source_url": "https://reporter.nih.gov",
-            "applicability": "Research SaaS priced above $5k/yr per lab where the PI's grant budget is the purchase vehicle. Does not apply to sub-$1k tools bought from lab discretionary funds.",
-        },
-    ],
+    # F-3: frozen LS-specific dict pair deleted; these strategies are now served
+    # via the typed Strategy library (strategy_model.py) with explicit domain gating
+    # so non-LS products (agronomy, IoT) do not receive R01/LabArchives strategies.
+    "research_infrastructure_saas": [],
 
 })
 

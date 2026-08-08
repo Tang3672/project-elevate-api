@@ -26,6 +26,7 @@ from typing import Optional
 import httpx
 
 from app.services.embedding_service import embed_text
+from app.services.pubmed_service import filter_literature_citations as _filter_lit
 from app.db.demand_repository import search_similar_signals, get_signal_counts_by_source
 from app.db.needs_repository import find_similar_needs
 from app.models.alignment import (
@@ -353,14 +354,28 @@ async def generate_pi_report(
         from app.services.strategy_database import format_strategies_for_report
         _sub_id = getattr(expert, "sub_expert_id", getattr(expert, "domain_id", "drug_amr"))
         # DOMAIN GATE (v3 spec §4 fix): if domain is LIFE_SCIENCES_RESEARCH, the router
-        # may have selected a clinical expert (e.g. digital_rpm). Force the playbook to
-        # the research archetype regardless of which expert was selected.
+        # may have selected a clinical expert (e.g. digital_rpm). Preserve the actual
+        # typed research archetype when the router got it right; otherwise force to the
+        # safe research fallback. F-3: this preserves research_tool_non_clinical vs
+        # research_infrastructure_saas distinction so each gets its correct strategy set.
+        _TYPED_LS_ARCHETYPES = frozenset({"research_tool_non_clinical", "research_infrastructure_saas"})
         if _resolved_domain == "LIFE_SCIENCES_RESEARCH":
-            _sub_id = "research_infrastructure_saas"
-            logger.info("Strategic playbook: domain=LIFE_SCIENCES_RESEARCH → forced to research_infrastructure_saas")
+            _actual = (router_result.sub_expert_id or "").lower()
+            if _actual in _TYPED_LS_ARCHETYPES:
+                _sub_id = _actual
+            else:
+                _sub_id = "research_infrastructure_saas"
+                logger.info("Strategic playbook: domain=LIFE_SCIENCES_RESEARCH → forced to research_infrastructure_saas")
         else:
             logger.info(f"Strategic playbook: sub_expert_id={_sub_id}")
-        playbook = format_strategies_for_report(_sub_id)
+        # F-3: gate strategy domain so non-LS products don't receive LS-specific strategies.
+        # "other" therapeutic area signals a non-life-sciences product (e.g. agronomy, IoT).
+        _NON_LS_DOMAINS = frozenset({"other", "agriculture", "food", "environmental", "energy", "materials"})
+        _strategy_domain = (
+            "OTHER" if (disease_domain or "").lower() in _NON_LS_DOMAINS
+            else "LIFE_SCIENCES_RESEARCH"
+        )
+        playbook = format_strategies_for_report(_sub_id, domain=_strategy_domain)
         if not playbook:
             fallback_map = {
                 # Expert domain IDs from expert_profiles_v2
@@ -436,6 +451,14 @@ async def generate_pi_report(
     report.run_manifest    = _run_manifest
     report.domain          = _resolved_domain
 
+    # C.1/C.2: attach axis selection/rejection decisions
+    try:
+        from app.market.axis_library import select_axes, format_axis_decisions
+        _axis_decisions = select_axes(_resolved_domain, report.expert_domain or "")
+        report.axis_decisions = format_axis_decisions(_axis_decisions)
+    except Exception as _axis_e:
+        logger.warning("Axis selection failed (non-fatal): %s", _axis_e)
+
     if skip_verification:
         # Verification (validation + trust + self-correction) is run in the
         # background AFTER the report is delivered, so the user sees the report
@@ -466,21 +489,23 @@ async def attach_competitive_landscape(report) -> None:
         # because the databases index regulated clinical products, not lab equipment.
         from app.services.competitive_intelligence_service import (
             _RESEARCH_TOOL_ARCHETYPES,
-            _RESEARCH_TOOL_COMPARATORS,
+            _extract_research_tool_comparators,
         )
+        from app.services.competitor_schema import normalize_landscape
         _sub_id = getattr(report, "expert_domain", "") or ""
         if _sub_id in _RESEARCH_TOOL_ARCHETYPES:
-            report.competitive_landscape = {
+            _idea = getattr(report, "idea_submitted", "") or ""
+            _comparators = await _extract_research_tool_comparators(_idea, _sub_id)
+            report.competitive_landscape = normalize_landscape({
                 "available": True,
-                "competitors": _RESEARCH_TOOL_COMPARATORS,
+                "competitors": _comparators,
                 "corpus": "research_tool_functional",
                 "note": (
-                    "Comparators are functional analogues in the academic research-tool market. "
-                    "FDA drugs@FDA and ClinicalTrials.gov are not the correct corpus for "
-                    "non-clinical research infrastructure — those databases index regulated "
-                    "clinical products and returned unrelated results."
+                    "Comparators extracted from product description and domain context. "
+                    "FDA drugs@FDA and ClinicalTrials.gov index regulated clinical products "
+                    "and are not the correct corpus for non-clinical research infrastructure."
                 ),
-            }
+            })
             return
 
         from app.services.competitor_sweep_service import sweep_competitors, to_dict
@@ -497,7 +522,8 @@ async def attach_competitive_landscape(report) -> None:
                 disease_name=disease, indication_keywords=kw,
                 therapeutic_area=ta, product_type=pt)),
             timeout=25.0)
-        report.competitive_landscape = to_dict(landscape)
+        # B-05: normalize so every field is present; no JS `undefined` from missing keys
+        report.competitive_landscape = normalize_landscape(to_dict(landscape))
     except Exception as e:
         logger.warning("attach_competitive_landscape failed (non-fatal): %s", e)
         report.competitive_landscape = {"available": False, "competitors": [],
@@ -1136,12 +1162,14 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
             strategic_context = format_intelligence_for_expert(strategic_intel, disease_name)
             researcher_ctx = researcher_ctx + strategic_context
         else:
-            # Always inject at least the domain strategies even if full intel fails
-            from app.services.competitive_intelligence_service import DOMAIN_STRATEGIES, _DEFAULT_STRATEGIES, format_intelligence_for_expert
+            # B-04: fallback uses strategy_database (archetype-gated, no clinical
+            # defaults for research_tool/research_infrastructure archetypes)
+            from app.services.strategy_database import format_strategies_for_report
+            from app.services.competitive_intelligence_service import format_intelligence_for_expert
             fallback_intel = {
                 'competitor_trials': {'trials': [], 'total_found': 0},
                 'fda_precedents': {'approvals': []},
-                'strategic_playbook': DOMAIN_STRATEGIES.get(sub_expert_id, _DEFAULT_STRATEGIES),
+                'strategic_playbook': format_strategies_for_report(sub_expert_id),
             }
             researcher_ctx = researcher_ctx + format_intelligence_for_expert(fallback_intel, disease_name)
 
@@ -1443,7 +1471,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
         "'Sub-Expert Context', or any similar internal-system phrase is NOT a valid source and "
         "must not appear anywhere in the output. If a claim has no external citation, state it "
         "as a model estimate: 'Estimated range based on expert reasoning…' "
-        "B-07 SOURCE TYPE GUARD: match source type to claim type. "
+        "SOURCE TYPE GUARD: match source type to claim type. "
         "Rock Health tracks VC funding into digital health — do NOT cite it for product market size, "
         "revenue, or pricing claims. CMS MPFS Proposed Rule contains fee schedule rates, not market "
         "growth rates — do NOT cite it for CAGR or market growth claims. "
@@ -1458,7 +1486,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
         "and the TAM/SAM/SOM values using ONLY the bottom-up derivation provided above. Keep the "
         "formula field brief — the system renders the exact, verified arithmetic separately, so do "
         "not labor over precise multiplication in your text. "
-        "B-03 PRICE RULE: the price you use in market sizing MUST match the segment the product "
+        "PRICE RULE: the price you use in market sizing MUST match the segment the product "
         "actually sells into. For non-clinical research tools (academic PI buyer), use the "
         "observed spend band from the derivation — never enterprise SaaS pricing. "
         "For clinical products, use WAC or DRG-based pricing from the derivation. "
@@ -1468,7 +1496,8 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
         "context. Do not invent specific exclusivity year-counts or eligibility criteria. Standard "
         "facts you may rely on: NCE small-molecule exclusivity 5 yrs; biologic 12 yrs; Orphan Drug "
         "7 yrs; QIDP adds 5 yrs. If unsure, cite the comparable approved drug rather than asserting a number. "
-        "(11) CROSS-REPORT ISOLATION (H-03 — strictly enforced): this report is ISOLATED. "
+        # H-03: cross-report isolation rule — spec ID kept in comment, not in prompt text.
+        "(11) CROSS-REPORT ISOLATION (strictly enforced): this report is ISOLATED. "
         "Do NOT reference any prior report, prior Medlevate analysis, prior PI submission, or any "
         "previous analysis of a different product. Never write phrases like 'the PI's prior report', "
         "'a previous analysis estimated', 'as noted in the prior stroke diagnostic report', or any "
@@ -1480,7 +1509,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
                 # Explicitly ban mechanism score and approval probability authoring.
                 "\n\nEXPERT PANEL INTEGRATION RULES: "
                 "A Commercial Viability Expert sub-analysis ran before this synthesis. "
-                "CRITICAL — B-01 rule: this is a non-clinical research tool. "
+                "CRITICAL: this is a non-clinical research tool. "
                 "Do NOT write mechanism feasibility scores (e.g. '8.5/10'), "
                 "FDA approval probabilities, or clinical pathway recommendations — "
                 "those panels are not applicable and were not run. "
@@ -1808,16 +1837,28 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
             r"|\(B-\d{2}\s+\w+\)",               # "(B-01 rule)"
             _re_spec.I,
         )
-        _SPEC_TEXT_FIELDS = (
-            "executive_summary", "recommended_next_steps",
-            "confidence_note", "methodology_note",
+        _SPEC_STR_FIELDS = (
+            "executive_summary", "confidence_note", "methodology_note",
+            "positioning_statement", "guiding_question", "limitations",
         )
-        for _sf in _SPEC_TEXT_FIELDS:
+        _SPEC_LIST_FIELDS = (
+            "recommended_next_steps", "strategic_risks",
+        )
+        for _sf in _SPEC_STR_FIELDS:
             _sv = getattr(report, _sf, None)
             if isinstance(_sv, str) and _SPEC_ID_RE.search(_sv):
-                _cleaned = _SPEC_ID_RE.sub("", _sv).strip()
-                setattr(report, _sf, _cleaned)
+                setattr(report, _sf, _SPEC_ID_RE.sub("", _sv).strip())
                 logger.info("spec-id scrubber: removed spec identifiers from '%s'", _sf)
+        for _lf in _SPEC_LIST_FIELDS:
+            _lv = getattr(report, _lf, None)
+            if isinstance(_lv, list):
+                _cleaned_list = [
+                    _SPEC_ID_RE.sub("", s).strip() if isinstance(s, str) else s
+                    for s in _lv
+                ]
+                if _cleaned_list != _lv:
+                    setattr(report, _lf, _cleaned_list)
+                    logger.info("spec-id scrubber: removed spec identifiers from list '%s'", _lf)
     except Exception as _spec_e:
         logger.warning("spec-id scrubber failed (non-fatal): %s", _spec_e)
 
@@ -2040,7 +2081,7 @@ RIGHT: "According to the CDC Antimicrobial Resistance Threats Report (2019), car
 WRONG: "The QIDP pathway provides exclusivity benefits."
 RIGHT: "Under the GAIN Act of 2012 (21 U.S.C. 355f), QIDP designation confers an additional five years of market exclusivity and guarantees Priority Review with a six-month FDA target action date."
 
-For literature_citations entries, write the relevance field as a full sentence explaining exactly what the paper found and why it matters: "Murray et al. (Lancet, 2022) estimated 1.27 million deaths directly attributable to AMR globally in 2019, establishing the epidemiological basis for the unmet need calculation in this report."
+For literature_citations entries, write the relevance field as a full sentence explaining exactly what the paper found and why it matters: "Author et al. (Journal, Year) measured [specific finding], which directly establishes [the unmet need, adoption precedent, or market evidence this report relies on]."
 
 RULES:
 1. Every source_url must point to a SPECIFIC page, not a homepage. Examples:
@@ -2291,7 +2332,7 @@ def _parse_expert_response(data, idea, product_type, expert, demand_results, hos
         market_geography       = _geo_obj,
         recommended_next_steps = data.get("recommended_next_steps", []),
         strategic_playbook     = data.get("strategic_playbook", []),
-        literature_citations   = data.get("literature_citations", []),
+        literature_citations   = _filter_lit(data.get("literature_citations", []), idea, sub_expert_id),
         limitations            = data.get("limitations"),
         signals_searched       = total_signals,
         hospital_needs_searched = len(hospital_matches_raw),
@@ -2406,7 +2447,7 @@ async def _generate_antibiotic_report(
         market_geography=geography,
         recommended_next_steps=data.get("recommended_next_steps", []),
         strategic_playbook=data.get("strategic_playbook", []),
-        literature_citations=data.get("literature_citations", []),
+        literature_citations=_filter_lit(data.get("literature_citations", []), idea, "drug_amr"),
         limitations=data.get("limitations"),
         signals_searched=total_signals,
         hospital_needs_searched=len(hospital_matches_raw),
@@ -2541,7 +2582,7 @@ async def _generate_generic_pi_report(
         market_geography=geography,
         recommended_next_steps=data.get("recommended_next_steps", []),
         strategic_playbook=data.get("strategic_playbook", []),
-        literature_citations=data.get("literature_citations", []),
+        literature_citations=_filter_lit(data.get("literature_citations", []), idea, ""),
         limitations=data.get("limitations"),
         signals_searched=total_signals,
         hospital_needs_searched=len(hospital_matches_raw),
@@ -2624,7 +2665,7 @@ def _parse_legacy_response(claude_response, idea, demand_results, hospital_match
         related_conditions=data.get("related_conditions", []),
         recommended_next_steps=data.get("recommended_next_steps", []),
         strategic_playbook=data.get("strategic_playbook", []),
-        literature_citations=data.get("literature_citations", []),
+        literature_citations=_filter_lit(data.get("literature_citations", []), idea, ""),
         limitations=data.get("limitations"),
         idea_submitted=idea,
         signals_searched=total_signals,
@@ -2815,16 +2856,37 @@ def _enforce_market_consistency(report, deriv) -> None:
             "combination":                 "blended device + software/diagnostic revenue streams",
             "gene_cell_therapy":           "annual treated cohort × one-time price",
             "vaccine":                     "population at risk × immunization rate × price",
-        }.get(_arch, "eligible patients × annual price")
+        }.get(_arch, "buyers × annual revenue per buyer")
 
         ms.total_addressable_market_usd = float(tam)
         ms.serviceable_market_usd = float(sam)
         ms.formula = (
             f"TAM = ${tam:,.0f} ({_fmt(tam)}, {_tam_basis}). "
             f"SAM = TAM × {pen}% reachable penetration = ${sam:,.0f} ({_fmt(sam)}). "
-            f"SOM = SAM × {cap}% Year-1 capture = ${som:,.0f} ({_fmt(som)}). "
+            f"SOM = SAM × {cap}% (Year-1 capture) = ${som:,.0f} ({_fmt(som)}). "
             f"US, annual; figures from the deterministic bottom-up derivation."
         )
+
+        # B-01: propagate the code-computed TAM/SAM/SOM into every matching step so
+        # the step table never disagrees with the headline (B-01: LLM sometimes sets the
+        # TAM step to the pessimistic endpoint while the label says "midpoint").
+        # B-10: strip duplicate step-number prefixes ("Step 1 - Step 1 - …").
+        import re as _re_b01
+        _dedup = _re_b01.compile(r"^Step\s+(\d+)\s*[-–—]\s*Step\s+\1\s*[-–—]\s*", _re_b01.I)
+        for step in (getattr(ms, "steps", None) or []):
+            # Dedup label first so the keyword check below sees clean text
+            raw_lbl = getattr(step, "label", "") or ""
+            clean_lbl = _dedup.sub("", raw_lbl).strip(" –—-")
+            if clean_lbl != raw_lbl:
+                step.label = clean_lbl
+            lbl_lo = step.label.lower()
+            # Overwrite step value so step ↔ headline agree
+            if "total addressable" in lbl_lo or (" tam" in lbl_lo and "sam" not in lbl_lo):
+                step.value = float(tam)
+            elif "serviceable addressable" in lbl_lo or ("sam" in lbl_lo and "som" not in lbl_lo):
+                step.value = float(sam)
+            elif "obtainable" in lbl_lo or "som" in lbl_lo:
+                step.value = float(som)
     except Exception as e:
         logger.warning("market consistency enforcement skipped: %s", e)
 

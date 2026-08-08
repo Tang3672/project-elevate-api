@@ -34,76 +34,15 @@ _RESEARCH_TOOL_ARCHETYPES: frozenset[str] = frozenset({
     "research_infrastructure_saas",
 })
 
-# For non-clinical research tools, ClinicalTrials.gov and FDA drugs@FDA are the
-# wrong corpora.  Return a canned list of genuine functional comparators instead.
-_RESEARCH_TOOL_COMPARATORS: list[dict] = [
-    {
-        "name":         "ActiGraph (Actigraph LLC)",
-        "category":     "Commercial research wearable logger",
-        "description":  "Industry-standard wearable motion sensing and movement data logger used in NIH-funded trials. "
-                        "GT9X Link and CentrePoint platform. Dominant in clinical research; weak at custom firmware.",
-        "url":          "https://actigraphcorp.com",
-        "incumbent":    True,
-    },
-    {
-        "name":         "Empatica EmbracePlus (research tier)",
-        "category":     "Research wearable + cloud data pipeline",
-        "description":  "FDA-cleared as medical but also sold to academic researchers under a research-tier license. "
-                        "Strong in CNS/epilepsy research. REST API for data export.",
-        "url":          "https://www.empatica.com/embraceplus/",
-        "incumbent":    False,
-    },
-    {
-        "name":         "Movisens Move4 / EcgMove4",
-        "category":     "Research sensor + movisensXS software",
-        "description":  "German research-grade wearable sensor platform for ambulatory monitoring. "
-                        "Strong in European academic research networks. Per-device one-time license.",
-        "url":          "https://www.movisens.com",
-        "incumbent":    False,
-    },
-    {
-        "name":         "Golioth IoT platform",
-        "category":     "Cloud infrastructure for embedded device fleets",
-        "description":  "Firmware OTA + device telemetry platform for custom embedded devices. "
-                        "Competes on device-fleet management for labs that build their own hardware.",
-        "url":          "https://golioth.io",
-        "incumbent":    False,
-    },
-    {
-        "name":         "Blues Wireless (Notecard)",
-        "category":     "Low-power cellular data logging module",
-        "description":  "Cellular IoT module with pre-paid global data for sensor telemetry. "
-                        "Competes when the lab needs offline → cloud data transport without WiFi.",
-        "url":          "https://blues.com",
-        "incumbent":    False,
-    },
-    {
-        "name":         "Memfault",
-        "category":     "Embedded device monitoring & crash analytics",
-        "description":  "Device observability platform: crash reporting, OTA, and metrics for embedded devices. "
-                        "Competes on lab-built device fleets that need telemetry without a data scientist.",
-        "url":          "https://memfault.com",
-        "incumbent":    False,
-    },
-    {
-        "name":         "DIY / Status quo (SD-card + lab scripts)",
-        "category":     "Status quo — no commercial product",
-        "description":  "Most academic neurotech labs write custom Python/MATLAB scripts and store data on SD cards "
-                        "or lab-managed servers. Zero direct cost; high researcher time cost. The dominant incumbent.",
-        "url":          "",
-        "incumbent":    True,
-    },
-]
+# F-2: _RESEARCH_TOOL_COMPARATORS deleted — it was Hublink-specific and appeared for every
+# research-tool product. Product-specific comparators are now extracted by
+# _extract_research_tool_comparators() using the idea text + Haiku.
 
-# Honest empty-state text by archetype — emitted when the wrong corpus is queried
-_HONEST_EMPTY_STATE: dict[str, str] = {
-    "research_tool_non_clinical": (
-        "No functional comparators were identified through ClinicalTrials.gov or FDA drugs@FDA "
-        "(these databases index clinical-use regulated products and are not the correct corpus "
-        "for a non-clinical research data-logging platform). "
-        "Genuine functional comparators are commercial research tools (see above), not FDA-regulated devices."
-    ),
-}
+_HONEST_EMPTY_NOTE = (
+    "ClinicalTrials.gov and FDA drugs@FDA are not the correct corpus for "
+    "non-clinical research infrastructure. Functional comparators are "
+    "extracted from the product description and domain context."
+)
 
 
 # ── DOMAIN → SEARCH TERMS MAPPING ────────────────────────────────────────────
@@ -296,8 +235,11 @@ _DEFAULT_STRATEGIES = [
     },
 ]
 
+# B-04: non-clinical archetypes must never inherit clinical _DEFAULT_STRATEGIES.
+# Their strategies come from strategy_database.format_strategies_for_report.
+_NON_CLINICAL_ARCHETYPES = frozenset({"research_tool_non_clinical", "research_infrastructure_saas"})
 for domain in DOMAIN_SEARCH_TERMS:
-    if domain not in DOMAIN_STRATEGIES:
+    if domain not in DOMAIN_STRATEGIES and domain not in _NON_CLINICAL_ARCHETYPES:
         DOMAIN_STRATEGIES[domain] = _DEFAULT_STRATEGIES
 
 
@@ -507,18 +449,92 @@ async def _filter_trials_by_relevance(
     return passed, dropped
 
 
+async def _extract_research_tool_comparators(
+    idea: str,
+    sub_expert_id: str,
+) -> list[dict]:
+    """
+    Extract product-specific functional comparators from the idea description
+    using a Haiku call. Called by attach_competitive_landscape() to populate §7
+    with data-driven comparators instead of a product-specific frozen list.
+    """
+    if not idea:
+        return []
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        return []
+    prompt = (
+        f"Product: {idea[:600]}\n\n"
+        "List 3-5 genuine functional competitors or incumbent alternatives for this specific product. "
+        "Include commercial tools, platforms, or DIY approaches in the same domain. "
+        "Do NOT include FDA-regulated clinical devices unless the product itself is clinical. "
+        "Always include one 'status_quo' entry for the DIY or do-nothing incumbent.\n\n"
+        "Return ONLY a JSON array — no markdown, no explanation:\n"
+        '[{"name":"...", "category":"direct|adjacent_general|status_quo", '
+        '"description":"...", "overlap":"...", "where_you_win":"", '
+        '"where_you_lose":"", "switching_cost":"", "price_point":"", '
+        '"url":"", "incumbent":false}]'
+    )
+    try:
+        import re as _re
+        async with httpx.AsyncClient(timeout=12.0) as client:
+            resp = await client.post(
+                _ANTHROPIC_API_URL,
+                headers={
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json={
+                    "model": _HAIKU_MODEL,
+                    "max_tokens": 1500,
+                    "messages": [{"role": "user", "content": prompt}],
+                },
+            )
+        if resp.status_code != 200:
+            logger.warning("_extract_research_tool_comparators: Haiku returned %d", resp.status_code)
+            return []
+        text = resp.json().get("content", [{}])[0].get("text", "")
+        m = _re.search(r'\[.*\]', text, _re.DOTALL)
+        if not m:
+            return []
+        comparators = json.loads(m.group(0))
+        required_keys = {
+            "name", "category", "description", "overlap",
+            "where_you_win", "where_you_lose", "switching_cost",
+            "price_point", "url", "incumbent",
+        }
+        result = []
+        for c in comparators:
+            if isinstance(c, dict) and c.get("name"):
+                for k in required_keys:
+                    c.setdefault(k, "" if k != "incumbent" else False)
+                c["incumbent"] = bool(c.get("incumbent", False))
+                result.append(c)
+        return result
+    except Exception as _e:
+        logger.debug("_extract_research_tool_comparators failed (non-fatal): %s", _e)
+        return []
+
+
 async def _gather_research_tool_intel(disease_name: str, sub_expert_id: str) -> Dict:
     """
     For non-clinical research tool archetypes: skip ClinicalTrials.gov and FDA
-    (wrong corpora), return the static comparator list with an honest explanation.
+    (wrong corpora). Returns empty research_tool_comparators — the MSRP pipeline
+    already injects product-specific competitor context for the LLM's §1. Structured
+    §7 comparators are populated by attach_competitive_landscape() via
+    _extract_research_tool_comparators().
+
+    B-04: strategies come from strategy_database (archetype-specific), never
+    from _DEFAULT_STRATEGIES (clinical FDA designations).
     """
-    archetype_note = _HONEST_EMPTY_STATE.get("research_tool_non_clinical", "")
+    from app.services.strategy_database import format_strategies_for_report
     return {
-        "competitor_trials":    {"trials": [], "total_found": 0, "corpus_note": archetype_note},
-        "fda_precedents":       {"approvals": [], "corpus_note": archetype_note},
-        "research_tool_comparators": _RESEARCH_TOOL_COMPARATORS,
-        "strategic_playbook":   _DEFAULT_STRATEGIES,
-        "honest_empty_state":   archetype_note,
+        "competitor_trials":         {"trials": [], "total_found": 0, "corpus_note": _HONEST_EMPTY_NOTE},
+        "fda_precedents":            {"approvals": [], "corpus_note": _HONEST_EMPTY_NOTE},
+        "research_tool_comparators": [],
+        "strategic_playbook":        format_strategies_for_report(sub_expert_id),
+        "honest_empty_state":        _HONEST_EMPTY_NOTE,
     }
 
 
@@ -583,7 +599,10 @@ async def gather_competitive_intelligence(
         except Exception as _rg_e:
             logger.warning("H-04 relevance gate failed (non-fatal): %s", _rg_e)
 
-    strategies = DOMAIN_STRATEGIES.get(sub_expert_id, _DEFAULT_STRATEGIES)
+    # B-04: always resolve strategies through strategy_database (archetype-gated,
+    # no minimum-count padding) rather than falling back to _DEFAULT_STRATEGIES.
+    from app.services.strategy_database import format_strategies_for_report
+    strategies = format_strategies_for_report(sub_expert_id)
 
     result = {
         "competitor_trials":  trials_data,

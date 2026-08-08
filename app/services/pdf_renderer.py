@@ -213,6 +213,12 @@ def _link(url: str, text: str) -> str:
     return f'<a href="{_e(url)}">{_e(text)}</a>'
 
 
+def _toc_entry(populated: bool, num: str, anchor: str, label: str) -> str:
+    if not populated:
+        return ""
+    return f'      <li><span class="toc-num">§{num}</span><a href="#{anchor}">{label}</a></li>'
+
+
 # ── Section renderers (F-08: tables for structured data) ─────────────────────
 
 def _render_market_sizing(ms: dict) -> str:
@@ -264,6 +270,64 @@ def _render_market_sizing(ms: dict) -> str:
     {f'<div><dt>Serviceable Market</dt><dd class="num big">{sam_fmt}</dd></div>' if sam_fmt else ""}
   </dl>
   {f'<p class="methodology">{note}</p>' if note else ""}
+</div>"""
+
+
+def _render_axis_decisions(axis_decisions: dict) -> str:
+    """Render C.1/C.2 segmentation axis selection/rejection table.
+
+    Outputs two blocks:
+    - Selected axes (used to build the market funnel)
+    - Considered and excluded axes (with rejection reasons)
+    """
+    if not axis_decisions:
+        return ""
+    selected = axis_decisions.get("selected", [])
+    rejected = axis_decisions.get("rejected", [])
+    if not selected and not rejected:
+        return ""
+
+    sel_rows = ""
+    for ax in selected:
+        lift = ax.get("est_lift")
+        lift_str = f"{lift:.0%}" if lift else "—"
+        sel_rows += f"""<tr>
+          <td>{_e(ax.get("label",""))}</td>
+          <td><span class="family-tag">{_e(ax.get("family","").replace("_"," "))}</span></td>
+          <td class="num">{lift_str}</td>
+        </tr>"""
+
+    rej_rows = ""
+    for ax in rejected:
+        if not ax.get("reason"):
+            continue
+        rej_rows += f"""<tr>
+          <td>{_e(ax.get("label",""))}</td>
+          <td><span class="family-tag">{_e(ax.get("family","").replace("_"," "))}</span></td>
+          <td class="note">{_e(ax.get("reason",""))}</td>
+        </tr>"""
+
+    sel_block = f"""
+<h3>Segmentation axes selected ({len(selected)})</h3>
+<table class="data-table">
+  <thead><tr><th>Axis</th><th>Family</th><th class="num">Typical variance explained</th></tr></thead>
+  <tbody>{sel_rows}</tbody>
+</table>""" if sel_rows else ""
+
+    rej_block = f"""
+<h3>Considered and excluded ({len([r for r in rejected if r.get("reason")])})</h3>
+<table class="data-table">
+  <thead><tr><th>Axis</th><th>Family</th><th>Reason excluded</th></tr></thead>
+  <tbody>{rej_rows}</tbody>
+</table>""" if rej_rows else ""
+
+    return f"""
+<div class="section" id="s-axis-decisions">
+  <h2>Segmentation Methodology</h2>
+  <p class="methodology">The following axes were evaluated for this product's buyer model.
+  Axes are selected based on the buyer type, product domain, and available data sources.</p>
+  {sel_block}
+  {rej_block}
 </div>"""
 
 
@@ -357,24 +421,61 @@ def _render_market_access(ma: dict) -> str:
 def _render_competitive_landscape(ci: dict) -> str:
     if not ci:
         return ""
-    rt = ci.get("research_tool_comparators", ci.get("comparators", []))
+    from app.services.competitor_schema import normalize_landscape
+
+    # B-05: normalize to unified schema — resolves key aliases and fills missing fields
+    ci = normalize_landscape(ci)
+    competitors = ci.get("competitors", [])
     trials = (ci.get("competitor_trials") or {}).get("trials", [])
     honest_empty = _e(ci.get("honest_empty_state", ""))
 
+    # Detect corpus: research-tool landscape has no stage/company fields
+    is_research_tool = ci.get("corpus", "").startswith("research_tool") or (
+        competitors and not competitors[0].get("company")
+    )
+
     comp_rows = ""
-    for c in rt:
-        comp_rows += f"""<tr>
-          <td><strong>{_e(c.get("name",""))}</strong></td>
-          <td>{_e(c.get("category",""))}</td>
-          <td>{_e(c.get("key_differentiator","") or c.get("description",""))}</td>
-          <td>{"Incumbent" if c.get("incumbent") else "Challenger"}</td>
-        </tr>"""
+    if is_research_tool:
+        for c in competitors:
+            role = "Incumbent" if c.get("incumbent") else "Challenger"
+            key_diff = _e(
+                c.get("overlap") or c.get("key_differentiator") or c.get("description") or ""
+            )
+            win = _e(c.get("where_you_win") or "")
+            lose = _e(c.get("where_you_lose") or "")
+            switch = _e(c.get("switching_cost") or "")
+            price = _e(c.get("price_point") or "")
+            comp_rows += f"""<tr>
+              <td><strong>{_e(c.get("name",""))}</strong><br>
+                  <span class="sec-note">{_e(c.get("category",""))}</span></td>
+              <td>{key_diff}</td>
+              <td class="pos">{win}</td>
+              <td class="neg">{lose}</td>
+              <td>{switch}</td>
+              <td>{price}</td>
+              <td>{role}</td>
+            </tr>"""
+        header = "<tr><th>Product</th><th>Overlap</th><th>Where You Win</th><th>Where You Lose</th><th>Switching Cost</th><th>Price</th><th>Role</th></tr>"
+    else:
+        for c in competitors:
+            adv = "; ".join(c.get("advantages") or [])
+            vuln = "; ".join(c.get("vulnerabilities") or [])
+            comp_rows += f"""<tr>
+              <td><strong>{_e(c.get("name",""))}</strong>
+                  {f"({_e(c.get('brand_name',''))})" if c.get("brand_name") else ""}</td>
+              <td>{_e(c.get("company",""))}</td>
+              <td>{_e(c.get("stage",""))}</td>
+              <td>{_e(c.get("route",""))}</td>
+              <td>{_e(adv)}</td>
+              <td>{_e(vuln)}</td>
+            </tr>"""
+        header = "<tr><th>Product</th><th>Company</th><th>Stage</th><th>Route</th><th>Advantages</th><th>Vulnerabilities</th></tr>"
 
     trial_rows = ""
     for t in trials[:8]:
         trial_rows += f"""<tr>
           <td>{_e(t.get("nct_id",""))}</td>
-          <td>{_e(t.get("title","")[:80])}</td>
+          <td>{_e((t.get("title") or "")[:80])}</td>
           <td>{_e(t.get("status",""))}</td>
           <td>{_e(t.get("sponsor",""))}</td>
         </tr>"""
@@ -383,7 +484,7 @@ def _render_competitive_landscape(ci: dict) -> str:
 <div class="section" id="s-competitive">
   <h2><span class="sec-num">6</span> Competitive Landscape</h2>
   {f'<p class="honest-empty">{honest_empty}</p>' if honest_empty else ""}
-  {f'<table class="data-table"><thead><tr><th>Product</th><th>Category</th><th>Key Differentiator</th><th>Role</th></tr></thead><tbody>{comp_rows}</tbody></table>' if comp_rows else ""}
+  {f'<table class="data-table"><thead>{header}</thead><tbody>{comp_rows}</tbody></table>' if comp_rows else ""}
   {f'<h3>Active Clinical Trials</h3><table class="data-table"><thead><tr><th>NCT ID</th><th>Title</th><th>Status</th><th>Sponsor</th></tr></thead><tbody>{trial_rows}</tbody></table>' if trial_rows else ""}
 </div>"""
 
@@ -866,6 +967,20 @@ def _build_css(product_name: str) -> str:
       flex: 1;
     }}
 
+    /* ── A-02: Mock / demo watermark ── */
+    .mock-banner {{
+      background: #FEF3C7;
+      color: #78350F;
+      border: 1.5pt solid #D97706;
+      padding: .45rem .75rem;
+      margin-bottom: 1.5rem;
+      font-family: system-ui, -apple-system, sans-serif;
+      font-size: var(--t-sm);
+      font-weight: 600;
+      text-align: center;
+      border-radius: 3pt;
+    }}
+
     /* ── @media print overrides ── */
     @media print {{
       body {{ background: white; }}
@@ -888,6 +1003,7 @@ def render_report_html(
     product_name: str = "",
     institution: str = "",
     report_date: str = "",
+    mock_mode: bool = False,
 ) -> str:
     """
     Converts a PIReport dict to a self-contained, print-ready HTML document.
@@ -898,8 +1014,12 @@ def render_report_html(
         product_name: F-01 intake field. If empty, derived from idea_submitted.
         institution:  F-01 meta line (e.g. "Washington University Neurotech Hub")
         report_date:  ISO date string. If empty, uses report.generated_at.
+        mock_mode:    When True (or when report.model_version starts with "mock"),
+                      injects a DEMO watermark banner so sample reports are never
+                      mistaken for real outputs.
     """
     pname = product_name or derive_product_name(report)
+    is_mock = mock_mode or (report.get("model_version") or "").lower().startswith("mock")
     domain_label = derive_domain_label(report)
     date_str = derive_report_date(report, report_date)
     institution = institution or (report.get("institution") or "")
@@ -939,6 +1059,9 @@ def render_report_html(
 
     # Market sizing (F-08 tables)
     ms_html = _render_market_sizing(report.get("market_sizing") or {})
+
+    # C.1/C.2: axis selection/rejection table
+    axis_html = _render_axis_decisions(report.get("axis_decisions") or {})
 
     # Regulatory pathway — suppress for LIFE_SCIENCES_RESEARCH domain (Part C)
     _domain = (report.get("domain") or "").upper()
@@ -1026,8 +1149,59 @@ def render_report_html(
     # Recommended next steps
     steps_html = _render_recommended_steps(report.get("recommended_next_steps", []))
 
-    # Citations (F-04, F-05)
-    cit_html = _render_citations(report.get("literature_citations", report.get("sources", [])))
+    # Citations (F-04, F-05) — aggregate same sources as web renderer (G-01 parity)
+    _all_cits: list = list(report.get("sources") or [])
+    _seen_cit_urls: set = {c.get("url") for c in _all_cits if c.get("url")}
+
+    def _add_cit_by_url(name: str, url: str) -> None:
+        """Add a citation discovered by URL only (strategies, segments). Skips if no URL."""
+        if not url or url in _seen_cit_urls:
+            return
+        _seen_cit_urls.add(url)
+        _all_cits.append({"name": name, "url": url})
+
+    # Literature citations always appear even when they lack a URL (F-05 no-URL marker).
+    # Deduplicate by URL only when a URL is actually present.
+    for _p in report.get("literature_citations") or []:
+        _purl = (
+            _p.get("url")
+            or _p.get("source_url")
+            or (f"https://pubmed.ncbi.nlm.nih.gov/{_p['pmid']}/" if _p.get("pmid") else "")
+        )
+        if _purl and _purl in _seen_cit_urls:
+            continue
+        if _purl:
+            _seen_cit_urls.add(_purl)
+        # Preserve the original dict (keeps name, number, year etc.); patch url if needed
+        _entry = dict(_p)
+        if _purl and not _entry.get("url"):
+            _entry["url"] = _purl
+        elif not _entry.get("name"):
+            _entry["name"] = (
+                f"{_p.get('authors', '')} ({_p.get('year', '')}). {_p.get('title', '')}.".strip()
+            )
+        _all_cits.append(_entry)
+
+    for _s in report.get("strategic_playbook") or []:
+        _add_cit_by_url(
+            f"{_s.get('example', '')} — {_s.get('strategy', '')}",
+            _s.get("source_url", ""),
+        )
+
+    for _b in (report.get("market_access") or {}).get("buyer_segments") or []:
+        _add_cit_by_url(
+            f"{_b.get('source', '')} — {_b.get('segment_name', _b.get('segment', ''))}",
+            _b.get("source_url", ""),
+        )
+
+    _reimb_url = (report.get("market_access") or {}).get("reimbursement_source_url")
+    if _reimb_url:
+        _add_cit_by_url("Reimbursement pathway source", _reimb_url)
+
+    for _ci, _cc in enumerate(_all_cits):
+        _cc["number"] = _ci + 1
+
+    cit_html = _render_citations(_all_cits)
 
     # Footer disclaimer (F-07: once, at bottom)
     disclaimer = (
@@ -1036,6 +1210,34 @@ def render_report_html(
         "All market estimates carry inherent uncertainty. "
         "Consult domain specialists before making material business decisions."
     )
+
+    # B-06: dynamic TOC — only list sections that have rendered content
+    _toc_rows = "\n".join(filter(None, [
+        _toc_entry(bool(exec_html),                    "1",  "s-executive",    "The Opportunity"),
+        _toc_entry(bool(evid_html),                    "2",  "s-evidence",     "Evidence Base &amp; Limitations"),
+        _toc_entry(bool(ms_html),                      "3",  "s-market",       "Market Sizing"),
+        _toc_entry(bool(rp_html),                      "4",  "s-regulatory",   "Regulatory &amp; Compliance Overview"),
+        _toc_entry(bool(ma_html),                      "5",  "s-access",       "Market Access &amp; Commercial Strategy"),
+        _toc_entry(bool(ci_html),                      "6",  "s-competitive",  "Competitive Landscape"),
+        _toc_entry("s-value-drivers" in p1_html,       "7",  "s-value-drivers","Value Driver Ranking"),
+        _toc_entry("s-segments"      in p1_html,       "8",  "s-segments",     "Segment Fit"),
+        _toc_entry("s-features"      in p1_html,       "9",  "s-features",     "Feature Investment Posture"),
+        _toc_entry("s-pricing"       in p1_html,       "10", "s-pricing",      "Pricing Model Analysis"),
+        _toc_entry("s-positioning"   in p1_html,       "11", "s-positioning",  "Positioning Statement"),
+        _toc_entry("s-risks"         in p1_html,       "12", "s-risks",        "Strategic Risks"),
+        _toc_entry("s-guiding"       in p1_html,       "13", "s-guiding",      "Guiding Question"),
+        _toc_entry("s-adversarial"   in p1_html,       "14", "s-adversarial",  "Adversarial Review"),
+        _toc_entry(bool(steps_html),                   "15", "s-next-steps",   "Recommended Next Steps"),
+        _toc_entry(bool(cit_html),                     "—",  "s-citations",    "Citations"),
+    ]))
+    toc_html = f"""
+  <!-- F-07: Table of Contents (dynamic — empty sections omitted) -->
+  <nav class="toc" aria-label="Table of contents">
+    <h2>Contents</h2>
+    <ol>
+{_toc_rows}
+    </ol>
+  </nav>"""
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -1059,33 +1261,13 @@ def render_report_html(
     <p class="meta">{_e(meta_line)}</p>
     <p class="generated-by">Prepared by Medlevate</p>
   </header>
-
-  <!-- F-07: Table of Contents -->
-  <nav class="toc" aria-label="Table of contents">
-    <h2>Contents</h2>
-    <ol>
-      <li><span class="toc-num">§1</span><a href="#s-executive">The Opportunity</a></li>
-      <li><span class="toc-num">§2</span><a href="#s-evidence">Evidence Base &amp; Limitations</a></li>
-      <li><span class="toc-num">§3</span><a href="#s-market">Market Sizing</a></li>
-      <li><span class="toc-num">§4</span><a href="#s-regulatory">Regulatory &amp; Compliance Overview</a></li>
-      <li><span class="toc-num">§5</span><a href="#s-access">Market Access &amp; Commercial Strategy</a></li>
-      <li><span class="toc-num">§6</span><a href="#s-competitive">Competitive Landscape</a></li>
-      <li><span class="toc-num">§7</span><a href="#s-value-drivers">Value Driver Ranking</a></li>
-      <li><span class="toc-num">§8</span><a href="#s-segments">Segment Fit</a></li>
-      <li><span class="toc-num">§9</span><a href="#s-features">Feature Investment Posture</a></li>
-      <li><span class="toc-num">§10</span><a href="#s-pricing">Pricing Model Analysis</a></li>
-      <li><span class="toc-num">§11</span><a href="#s-positioning">Positioning Statement</a></li>
-      <li><span class="toc-num">§12</span><a href="#s-risks">Strategic Risks</a></li>
-      <li><span class="toc-num">§13</span><a href="#s-guiding">Guiding Question</a></li>
-      <li><span class="toc-num">§14</span><a href="#s-adversarial">Adversarial Review</a></li>
-      <li><span class="toc-num">§15</span><a href="#s-next-steps">Recommended Next Steps</a></li>
-      <li><span class="toc-num">—</span><a href="#s-citations">Citations</a></li>
-    </ol>
-  </nav>
+  {"<div class='mock-banner' role='alert'>DEMO REPORT — Generated with sample data. Not for investment decisions or distribution.</div>" if is_mock else ""}
+  {toc_html}
 
   {exec_html}
   {evid_html}
   {ms_html}
+  {axis_html}
   {rp_html}
   {ma_html}
   {ci_html}

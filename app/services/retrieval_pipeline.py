@@ -980,6 +980,34 @@ def _compute_coverage(
 # FORMAT FUSED FACTS INTO CHAPTER CONTEXT STRINGS
 # ═══════════════════════════════════════════════════════════════════════════════
 
+# F-11 / C-01: minimum quality score required for a fact to appear in §1
+# context blocks. Facts below this threshold are dropped (relevance gate).
+# Tier label is appended to each included fact so Claude knows source quality.
+_MIN_QUALITY_SECTION1: float = 0.60
+
+
+def _tier_label(tier: int) -> str:
+    """Return a bracketed tier label for source-quality transparency."""
+    return f"[T{tier}]"
+
+
+def _best_fact_above_threshold(
+    fused: dict[str, list[RetrievedFact]],
+    concept: str,
+    min_quality: float = _MIN_QUALITY_SECTION1,
+) -> "RetrievedFact | None":
+    """Return the highest-quality fact for `concept` at or above `min_quality`.
+
+    Facts in `fused[concept]` are already sorted descending by quality_score
+    (from _fuse_facts). This function enforces the F-11 relevance gate.
+    Returns None if no fact meets the threshold.
+    """
+    for fact in fused.get(concept, []):
+        if fact.quality_score >= min_quality:
+            return fact
+    return None
+
+
 def _format_facts_for_context(
     fused: dict[str, list[RetrievedFact]],
     disease_name: str,
@@ -988,110 +1016,131 @@ def _format_facts_for_context(
     """
     Format retrieved facts into chapter-specific context strings
     ready for injection into Claude's prompt.
+
+    F-11 (C-01): only facts with quality_score >= _MIN_QUALITY_SECTION1 are
+    included. Each included fact carries a tier label ([T0]–[T3]) so Claude
+    can signal source quality in §1 narrative without hallucinating a tier.
     """
     blocks: dict[str, str] = {}
 
     # ── disease_intelligence ─────────────────────────────────────────────────
+    # F-11: only facts with quality_score >= _MIN_QUALITY_SECTION1 are included;
+    # each fact carries a tier label for source transparency in §1 narrative.
     di_lines = [f"\n=== DISEASE INTELLIGENCE — {disease_name.upper()} (Database-Grounded) ==="]
     for concept in ["prevalence_incidence", "survival_prognosis", "stage_distribution",
                      "disease_burden_dalys", "biomarker_prevalence", "gene_variant_data"]:
-        for fact in fused.get(concept, []):
-            v = fact.value
-            if not v:
-                continue
-            if concept == "prevalence_incidence":
-                if isinstance(v, dict) and "annual_new_cases" in v:
-                    di_lines.append(f"  • Annual incidence: {v['annual_new_cases']:,} new cases/yr [NCI SEER 2024, seer.cancer.gov]")
-                elif isinstance(v, dict) and "us_patient_estimate" in v:
-                    di_lines.append(f"  • US patient population: ~{v['us_patient_estimate']:,} [Orphanet CC BY 4.0]")
-                elif isinstance(v, dict) and "dalys" in v:
-                    di_lines.append(f"  • Disease burden: {v['dalys']:,.0f} US DALYs [WHO GHO]")
-            elif concept == "survival_prognosis" and isinstance(v, dict) and "5yr_survival_all" in v:
-                di_lines.append(f"  • 5-year survival (all stages): {v['5yr_survival_all']:.1%} [NCI SEER 2024]")
-            elif concept == "stage_distribution" and isinstance(v, dict) and "stage_dist_distant" in v:
-                di_lines.append(f"  • Stage IV at diagnosis: {v.get('stage_dist_distant', 0):.0%} [NCI SEER 2024]")
-            elif concept == "disease_burden_dalys" and isinstance(v, dict) and "dalys" in v:
-                di_lines.append(f"  • US DALYs: {v['dalys']:,.0f} [WHO GHO]")
-            elif concept == "gene_variant_data" and isinstance(v, dict) and v.get("found"):
-                di_lines.append(f"  • Gene target: {v.get('gene_symbol')} — {v.get('note', '')} [ClinVar, NCBI]")
-            break  # Use only top-quality fact per concept
+        fact = _best_fact_above_threshold(fused, concept)
+        if fact is None:
+            continue   # relevance gate: no fact met _MIN_QUALITY_SECTION1
+        v = fact.value
+        if not v:
+            continue
+        tl = _tier_label(fact.tier)
+        if concept == "prevalence_incidence":
+            if isinstance(v, dict) and "annual_new_cases" in v:
+                di_lines.append(f"  • Annual incidence: {v['annual_new_cases']:,} new cases/yr [NCI SEER 2024, seer.cancer.gov] {tl}")
+            elif isinstance(v, dict) and "us_patient_estimate" in v:
+                di_lines.append(f"  • US patient population: ~{v['us_patient_estimate']:,} [Orphanet CC BY 4.0] {tl}")
+            elif isinstance(v, dict) and "dalys" in v:
+                di_lines.append(f"  • Disease burden: {v['dalys']:,.0f} US DALYs [WHO GHO] {tl}")
+        elif concept == "survival_prognosis" and isinstance(v, dict) and "5yr_survival_all" in v:
+            di_lines.append(f"  • 5-year survival (all stages): {v['5yr_survival_all']:.1%} [NCI SEER 2024] {tl}")
+        elif concept == "stage_distribution" and isinstance(v, dict) and "stage_dist_distant" in v:
+            di_lines.append(f"  • Stage IV at diagnosis: {v.get('stage_dist_distant', 0):.0%} [NCI SEER 2024] {tl}")
+        elif concept == "disease_burden_dalys" and isinstance(v, dict) and "dalys" in v:
+            di_lines.append(f"  • US DALYs: {v['dalys']:,.0f} [WHO GHO] {tl}")
+        elif concept == "gene_variant_data" and isinstance(v, dict) and v.get("found"):
+            di_lines.append(f"  • Gene target: {v.get('gene_symbol')} — {v.get('note', '')} [ClinVar, NCBI] {tl}")
     di_lines.append("INSTRUCTION: Cite these data points verbatim. Do NOT generate different numbers.")
     blocks["disease_intelligence"] = "\n".join(di_lines)
 
     # ── regulatory_pathway ───────────────────────────────────────────────────
     reg_lines = ["\n=== REGULATORY PATHWAY — Precedent-Grounded ==="]
-    for fact in fused.get("fda_approval_timeline", []):
-        if isinstance(fact.value, list):
-            for p in fact.value[:2]:
-                reg_lines.append(f"  • {p['drug']}: {p['total_years']}yr via {p['pathway']} [{p['fda_application']}]")
-                reg_lines.append(f"    Source: {p['source']} | {p['url']}")
-        break
-    for fact in fused.get("ptrs_probability", []):
+    fact = _best_fact_above_threshold(fused, "fda_approval_timeline")
+    if fact is not None and isinstance(fact.value, list):
+        tl = _tier_label(fact.tier)
+        for p in fact.value[:2]:
+            reg_lines.append(f"  • {p['drug']}: {p['total_years']}yr via {p['pathway']} [{p['fda_application']}] {tl}")
+            reg_lines.append(f"    Source: {p['source']} | {p['url']}")
+    fact = _best_fact_above_threshold(fused, "ptrs_probability")
+    if fact is not None:
         v = fact.value
+        tl = _tier_label(fact.tier)
         if isinstance(v, dict) and "ptrs_pct" in v:
-            reg_lines.append(f"  • Cumulative LOA (Phase 1→approval): {v['ptrs_pct']:.1f}% [{v.get('citation', 'BIO2020')[:60]}]")
+            reg_lines.append(f"  • Cumulative LOA (Phase 1→approval): {v['ptrs_pct']:.1f}% [{v.get('citation', 'BIO2020')[:60]}] {tl}")
         elif isinstance(v, dict) and v.get("validated"):
-            reg_lines.append(f"  • Realized LOA (FDA outcomes): {v.get('realized_loa_pct', 'N/A')}% (model: {v.get('model_loa_pct')}%)")
-        break
-    for fact in fused.get("competitor_trial_count", []):
+            reg_lines.append(f"  • Realized LOA (FDA outcomes): {v.get('realized_loa_pct', 'N/A')}% (model: {v.get('model_loa_pct')}%) {tl}")
+    fact = _best_fact_above_threshold(fused, "competitor_trial_count")
+    if fact is not None:
         v = fact.value
+        tl = _tier_label(fact.tier)
         if isinstance(v, dict) and "count" in v:
-            reg_lines.append(f"  • Active competing trials: {v['count']} [ClinicalTrials.gov]")
-        break
+            reg_lines.append(f"  • Active competing trials: {v['count']} [ClinicalTrials.gov] {tl}")
     blocks["regulatory_pathway"] = "\n".join(reg_lines)
 
     # ── market_access ────────────────────────────────────────────────────────
     ma_lines = ["\n=== MARKET ACCESS — Verified Counts ==="]
-    for fact in fused.get("buyer_counts", []):
+    fact = _best_fact_above_threshold(fused, "buyer_counts")
+    if fact is not None:
         v = fact.value
+        tl = _tier_label(fact.tier)
         if isinstance(v, dict) and "segments" in v:
             for seg, data in list(v["segments"].items())[:4]:
                 count_data = data.get("count", {})
                 count_val = count_data.get("count", "N/A")
                 count_src = count_data.get("source", "")
-                ma_lines.append(f"  • {seg}: {count_val:,} [{count_src}]" if isinstance(count_val, int) else f"  • {seg}: {count_val} [{count_src}]")
-        break
-    for fact in fused.get("payer_access_signal", []):
+                ma_lines.append(
+                    f"  • {seg}: {count_val:,} [{count_src}] {tl}"
+                    if isinstance(count_val, int)
+                    else f"  • {seg}: {count_val} [{count_src}] {tl}"
+                )
+    fact = _best_fact_above_threshold(fused, "payer_access_signal")
+    if fact is not None:
         v = fact.value
+        tl = _tier_label(fact.tier)
         if isinstance(v, dict) and v.get("icer_found"):
-            ma_lines.append(f"  • ICER: {v.get('drug_class')} — {v.get('payer_concern', '')} [{v.get('source', '')[:50]}]")
+            ma_lines.append(f"  • ICER: {v.get('drug_class')} — {v.get('payer_concern', '')} [{v.get('source', '')[:50]}] {tl}")
         elif isinstance(v, dict) and v.get("found"):
-            ma_lines.append(f"  • NICE HTA: {v.get('signal', '')} ({v.get('analogous_ta_count')} analogous TAs)")
-        break
-    for fact in fused.get("kol_landscape", []):
+            ma_lines.append(f"  • NICE HTA: {v.get('signal', '')} ({v.get('analogous_ta_count')} analogous TAs) {tl}")
+    fact = _best_fact_above_threshold(fused, "kol_landscape")
+    if fact is not None:
         v = fact.value
+        tl = _tier_label(fact.tier)
         if isinstance(v, dict) and "top_institutions" in v:
-            ma_lines.append(f"  • Top KOL institutions: {', '.join(v['top_institutions'][:3])} [CMS Open Payments]")
-        break
+            ma_lines.append(f"  • Top KOL institutions: {', '.join(v['top_institutions'][:3])} [CMS Open Payments] {tl}")
     blocks["market_access"] = "\n".join(ma_lines)
 
     # ── strategic_playbook ───────────────────────────────────────────────────
     sp_lines = ["\n=== STRATEGIC INTELLIGENCE ==="]
-    for fact in fused.get("funding_opportunities", []):
+    fact = _best_fact_above_threshold(fused, "funding_opportunities")
+    if fact is not None:
         v = fact.value
+        tl = _tier_label(fact.tier)
         if isinstance(v, dict) and "program" in v:
-            sp_lines.append(f"  • {v['program']}: ${v.get('annual_funding_m')}M/yr [DoD CDMRP, cdmrp.health.mil]")
+            sp_lines.append(f"  • {v['program']}: ${v.get('annual_funding_m')}M/yr [DoD CDMRP, cdmrp.health.mil] {tl}")
         elif isinstance(v, list):
             for opp in v[:2]:
-                sp_lines.append(f"  • {opp.get('type', '')}: {opp.get('title', '')[:80]} [{opp.get('source', '')}]")
-        break
-    for fact in fused.get("global_market_size", []):
+                sp_lines.append(f"  • {opp.get('type', '')}: {opp.get('title', '')[:80]} [{opp.get('source', '')}] {tl}")
+    fact = _best_fact_above_threshold(fused, "global_market_size")
+    if fact is not None:
         v = fact.value
+        tl = _tier_label(fact.tier)
         if isinstance(v, dict) and "global_multiplier" in v:
-            sp_lines.append(f"  • Global TAM multiplier: {v['global_multiplier']}× US (OECD per-capita pharma spend ratios)")
+            sp_lines.append(f"  • Global TAM multiplier: {v['global_multiplier']}× US (OECD per-capita pharma spend ratios) {tl}")
         elif isinstance(v, dict) and "citation" in v:
-            sp_lines.append(f"  • International pricing context: {v.get('note', '')} [{v.get('citation', '')[:60]}]")
-        break
-    for fact in fused.get("realized_tam_factor", []):
+            sp_lines.append(f"  • International pricing context: {v.get('note', '')} [{v.get('citation', '')[:60]}] {tl}")
+    fact = _best_fact_above_threshold(fused, "realized_tam_factor")
+    if fact is not None:
         v = fact.value
+        tl = _tier_label(fact.tier)
         if isinstance(v, dict) and "realized_tam_factor" in v:
-            sp_lines.append(f"  • Realized TAM factor: {v['realized_tam_factor']:.0%} (fill rate {v.get('pct_with_any_rx', 0):.0%} × adherence {v.get('real_world_adherence', 0):.0%}) [AHRQ MEPS]")
-        break
-    for fact in fused.get("pathway_biology", []):
+            sp_lines.append(f"  • Realized TAM factor: {v['realized_tam_factor']:.0%} (fill rate {v.get('pct_with_any_rx', 0):.0%} × adherence {v.get('real_world_adherence', 0):.0%}) [AHRQ MEPS] {tl}")
+    fact = _best_fact_above_threshold(fused, "pathway_biology")
+    if fact is not None:
         v = fact.value
+        tl = _tier_label(fact.tier)
         if isinstance(v, list) and v:
-            sp_lines.append(f"  • MOA pathway: {v[0].get('pathway', '')} [{v[0].get('reactome_id', '')}] [Reactome CC BY 4.0]")
-        break
+            sp_lines.append(f"  • MOA pathway: {v[0].get('pathway', '')} [{v[0].get('reactome_id', '')}] [Reactome CC BY 4.0] {tl}")
     blocks["strategic_playbook"] = "\n".join(sp_lines)
 
     return blocks

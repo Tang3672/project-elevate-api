@@ -238,8 +238,8 @@ class TestFixture1Hublink:
         comparators = result.get("research_tool_comparators", [])
         assert isinstance(comparators, list), \
             "_gather_research_tool_intel must return a 'research_tool_comparators' list"
-        assert len(comparators) >= 1, \
-            "_gather_research_tool_intel must return at least one comparator"
+        # F-2: static list deleted; _extract_research_tool_comparators() populates §7
+        # comparators from the idea text — _gather_research_tool_intel now returns []
 
     # ── world model isolation ─────────────────────────────────────────────────
 

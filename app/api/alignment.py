@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from typing import Optional
 
 from app.services.alignment_service import generate_alignment_report, generate_pi_report
-from app.api.auth import get_current_user
+from app.api.auth import get_current_user, get_optional_user
 from app.models.alignment import AlignmentReport, PIReport
 
 logger = logging.getLogger(__name__)
@@ -515,6 +515,60 @@ async def get_market_sizing_derivation(body: dict):
     except Exception as e:
         logger.error("Market sizing derivation failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/market-sizing-override")
+async def save_market_sizing_override(
+    body: dict,
+    current_user=Depends(get_optional_user),
+):
+    """Persist a PI's edited market-sizing step values for a report."""
+    from app.db import market_sizing_override_repository as _repo
+    report_id = body.get("report_id")
+    if not report_id:
+        raise HTTPException(status_code=400, detail="report_id required")
+    user_id = (current_user or {}).get("id")
+    row_id = await _repo.save_override(
+        report_id=str(report_id),
+        segment_id=0,
+        user_id=user_id,
+        net_price_usd=0,
+        overrides={
+            "step_overrides": body.get("step_overrides", {}),
+            "rationale": body.get("rationale", ""),
+        },
+        added_gates=[],
+        removed_gates=[],
+        extra_segment_ids=[],
+        tam_usd=body.get("tam_usd"),
+        sam_usd=body.get("sam_usd"),
+        som_usd=body.get("som_usd"),
+        label=(body.get("rationale") or "")[:120] or None,
+    )
+    return {"ok": True, "override_id": row_id}
+
+
+@router.get("/market-sizing-override/{report_id}")
+async def get_market_sizing_override(
+    report_id: str,
+    current_user=Depends(get_optional_user),
+):
+    """Return saved market-sizing overrides for a report, or {has_override: false}."""
+    from app.db import market_sizing_override_repository as _repo
+    user_id = (current_user or {}).get("id")
+    saved = await _repo.get_override(str(report_id), 0, user_id)
+    if not saved:
+        return {"has_override": False}
+    ov = saved.get("overrides") or {}
+    return {
+        "has_override": True,
+        "step_overrides": ov.get("step_overrides", {}),
+        "rationale": ov.get("rationale", ""),
+        "tam_usd": saved.get("tam_usd"),
+        "sam_usd": saved.get("sam_usd"),
+        "som_usd": saved.get("som_usd"),
+        "updated_at": str(saved.get("updated_at", "")),
+    }
 
 
 # ── Discovery Engine Endpoints ────────────────────────────────────────────────

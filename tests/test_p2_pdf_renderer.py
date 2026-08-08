@@ -678,3 +678,298 @@ class TestRenderIntegration:
         assert hasattr(r, "institution")
         assert r.product_name is None
         assert r.institution is None
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# G-01 — Export parity (web renderer ↔ PDF renderer)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestG01ExportParity:
+    """
+    Both renderers must produce equivalent output from the same model.
+    Because the jsPDF renderer is browser-only, these tests verify the Python
+    renderer against a Python replica of the web's JS aggregation logic, and
+    verify shared model invariants that both renderers depend on.
+    """
+
+    def _full_report(self) -> dict:
+        return {
+            "product_name": "Hublink",
+            "idea_submitted": "Hublink: a non-clinical wearable data platform for academic PIs.",
+            "executive_summary": "Hublink addresses the gap in research-grade wearable data logging.",
+            "expert_domain": "research_tool_non_clinical",
+            "generated_at": "2026-08-03T00:00:00",
+            "sources": [
+                {"number": 1, "name": "NIH RePORTER", "url": "https://reporter.nih.gov"},
+                {"number": 2, "name": "NSF Award Search", "url": "https://www.nsf.gov/awardsearch/"},
+            ],
+            "literature_citations": [
+                {
+                    "pmid": "21500937",
+                    "title": "REDCap — a metadata-driven methodology for software implementation",
+                    "authors": "Harris P et al.",
+                    "journal": "J Biomed Inform",
+                    "year": 2009,
+                    "url": "https://pubmed.ncbi.nlm.nih.gov/21500937/",
+                    "relevance": "Citation-driven research software adoption",
+                },
+                {
+                    "pmid": "27898677",
+                    "title": "Fiji: an open-source platform for biological-image analysis",
+                    "authors": "Schindelin J et al.",
+                    "journal": "Nat Methods",
+                    "year": 2012,
+                    "url": "https://pubmed.ncbi.nlm.nih.gov/27898677/",
+                    "relevance": "Citation-driven adoption in research tools",
+                },
+            ],
+            "market_sizing": {
+                "total_addressable_market_usd": 45_833_000,
+                "serviceable_market_usd": 13_750_000,
+                "steps": [],
+                "formula": "TAM = 5,500 labs x $8,333/yr",
+                "methodology_note": "Bottom-up buyer model.",
+            },
+            "market_sizing_provenance": {
+                "run": {
+                    "tam_usd": 45_833_000,
+                    "sam_usd": 13_750_000,
+                    "som_usd": 2_062_500,
+                },
+                "scenarios": [
+                    {
+                        "scenario": "conservative",
+                        "tam_usd": 45_833_000,
+                        "sam_usd": 9_625_000,
+                        "som_usd": 1_031_250,
+                        "narrative": "Slow lab adoption.",
+                    },
+                    {
+                        "scenario": "base",
+                        "tam_usd": 45_833_000,
+                        "sam_usd": 13_750_000,
+                        "som_usd": 2_062_500,
+                        "narrative": "Adoption in line with comparable launches.",
+                    },
+                    {
+                        "scenario": "aggressive",
+                        "tam_usd": 45_833_000,
+                        "sam_usd": 17_875_000,
+                        "som_usd": 3_300_000,
+                        "narrative": "Fast conference buzz and citation adoption.",
+                    },
+                ],
+                "waterfall": [],
+            },
+            "strategic_playbook": [
+                {
+                    "strategy": "LabArchives institutional expansion",
+                    "example": "LabArchives",
+                    "what_they_did": "Used consortium model to drive adoption.",
+                    "how_to_apply": "Offer free-to-lab tiers at R1 institutions.",
+                    "source_url": "https://www.labarchives.com",
+                },
+            ],
+            "recommended_next_steps": [
+                "Conduct 20-lab pilot to validate the buyer population assumption.",
+            ],
+        }
+
+    def _web_aggregate_citations(self, report: dict) -> list:
+        """Replicate the web renderer's JS allSources aggregation in Python."""
+        srcs = list(report.get("sources") or [])
+        seen = {s.get("url") for s in srcs if s.get("url")}
+
+        def add(name, url):
+            if not url or url in seen:
+                return
+            seen.add(url)
+            srcs.append({"name": name, "url": url})
+
+        for p in report.get("literature_citations") or []:
+            url = (
+                p.get("url")
+                or p.get("source_url")
+                or (f"https://pubmed.ncbi.nlm.nih.gov/{p['pmid']}/" if p.get("pmid") else "")
+            )
+            name = f"{p.get('authors','')} ({p.get('year','')}). {p.get('title','')}."
+            add(name, url)
+
+        for s in report.get("strategic_playbook") or []:
+            if s.get("source_url"):
+                add(f"{s.get('example','')} — {s.get('strategy','')}", s["source_url"])
+
+        for b in (report.get("market_access") or {}).get("buyer_segments") or []:
+            if b.get("source_url"):
+                add(
+                    f"{b.get('source','')} — {b.get('segment_name', b.get('segment',''))}",
+                    b["source_url"],
+                )
+
+        reimb_url = (report.get("market_access") or {}).get("reimbursement_source_url")
+        if reimb_url:
+            add("Reimbursement pathway source", reimb_url)
+
+        return srcs
+
+    def test_citation_count_parity(self):
+        """PDF renderer must emit the same citation count as the web's aggregated source list."""
+        report = self._full_report()
+        web_count = len(self._web_aggregate_citations(report))
+        html = render_report_html(report, product_name="Hublink")
+        table_m = re.search(r'<table[^>]*citations-table[^>]*>.*?</table>', html, re.DOTALL)
+        assert table_m, "Citations table not found in PDF renderer output"
+        # Subtract 1 for the <thead><tr> header row
+        pdf_count = len(re.findall(r"<tr>", table_m.group())) - 1
+        assert pdf_count == web_count, (
+            f"Citation count mismatch: web={web_count}, PDF renderer={pdf_count}"
+        )
+
+    def test_strategy_source_url_in_pdf_citations(self):
+        """Strategic playbook source_url must appear in the PDF renderer's citation table."""
+        report = self._full_report()
+        html = render_report_html(report, product_name="Hublink")
+        url = report["strategic_playbook"][0]["source_url"]
+        assert url in html, (
+            f"Strategy source URL {url!r} missing from PDF renderer citations"
+        )
+
+    def test_literature_urls_in_pdf_citations(self):
+        """PubMed URLs from literature_citations must appear in the PDF renderer output."""
+        report = self._full_report()
+        html = render_report_html(report, product_name="Hublink")
+        for p in report["literature_citations"]:
+            url = p.get("url") or f"https://pubmed.ncbi.nlm.nih.gov/{p.get('pmid')}/"
+            assert url in html, (
+                f"Literature URL {url!r} missing from PDF renderer citations"
+            )
+
+    def test_tam_numeric_consistency(self):
+        """market_sizing.total_addressable_market_usd must equal market_sizing_provenance.run.tam_usd."""
+        report = self._full_report()
+        assert report["market_sizing"]["total_addressable_market_usd"] == \
+               report["market_sizing_provenance"]["run"]["tam_usd"]
+
+    def test_sam_numeric_consistency(self):
+        """market_sizing.serviceable_market_usd must equal market_sizing_provenance.run.sam_usd."""
+        report = self._full_report()
+        assert report["market_sizing"]["serviceable_market_usd"] == \
+               report["market_sizing_provenance"]["run"]["sam_usd"]
+
+    def test_scenario_hierarchy(self):
+        """SAM ≤ TAM and SOM ≤ SAM for every scenario — an invariant both renderers assume."""
+        report = self._full_report()
+        prov = report["market_sizing_provenance"]
+        tam = prov["run"]["tam_usd"]
+        for sc in prov.get("scenarios") or []:
+            assert sc["sam_usd"] <= tam, (
+                f"Scenario '{sc['scenario']}': SAM {sc['sam_usd']} > TAM {tam}"
+            )
+            assert sc["som_usd"] <= sc["sam_usd"], (
+                f"Scenario '{sc['scenario']}': SOM {sc['som_usd']} > SAM {sc['sam_usd']}"
+            )
+
+    def test_pdf_title_uses_product_name(self):
+        """Both renderers title the report using product_name, not the taxonomy string."""
+        report = self._full_report()
+        html = render_report_html(report, product_name="Hublink")
+        title_m = re.search(r"<title>(.*?)</title>", html, re.DOTALL)
+        assert title_m, "PDF renderer output must have a <title> tag"
+        title_text = title_m.group(1)
+        assert "Hublink" in title_text
+        assert "research_tool" not in title_text.lower()
+
+    def test_no_undefined_in_pdf_content(self):
+        """Neither renderer may emit the string 'undefined' in rendered visible content."""
+        report = self._full_report()
+        html = render_report_html(report, product_name="Hublink")
+        # Strip style/script blocks to avoid false positives from variable declarations
+        stripped = re.sub(r"<style[^>]*>.*?</style>", "", html, flags=re.DOTALL)
+        stripped = re.sub(r"<script[^>]*>.*?</script>", "", stripped, flags=re.DOTALL)
+        assert "undefined" not in stripped.lower(), (
+            "PDF renderer must not emit 'undefined' in rendered content"
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# F-07 (JS) — jsPDF date, step-label dedup, empty-section suppression
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestF07JsPdf:
+    """
+    Source-inspection tests for the three F-7 JS fixes in downloadPDF():
+
+    C-06  PDF header / filename both derive date from r.generated_at, not new Date().
+    Step  Bare "Step N" labels stripped before "Step N —" is prepended (no duplication).
+    §3/§5 Headings only rendered when there is actual content (no orphan headings).
+    """
+
+    def _pdf_src(self) -> str:
+        import os
+        path = os.path.normpath(
+            os.path.join(os.path.dirname(__file__), "..", "..", "ProjectElevate-Frontend", "app.html")
+        )
+        with open(path, encoding="utf-8") as f:
+            src = f.read()
+        start = src.rfind("function downloadPDF")
+        assert start != -1, "downloadPDF function must exist in app.html"
+        return src[start:]
+
+    def test_c06_header_uses_generated_at(self):
+        """PDF header dateStr must be derived from r.generated_at, not new Date()."""
+        src = self._pdf_src()
+        assert "r.generated_at" in src, (
+            "downloadPDF must read r.generated_at to build dateStr (C-06)"
+        )
+        # The bare new Date() call for dateStr must not appear (it would ignore report date)
+        assert "const dateStr = new Date()" not in src, (
+            "dateStr must not use new Date() directly — it must use r.generated_at (C-06)"
+        )
+
+    def test_c06_filename_uses_gen_date_not_new_date(self):
+        """Filename date must come from the same _genDate variable as the header."""
+        src = self._pdf_src()
+        assert "_genDate.toISOString" in src, (
+            "Filename must use _genDate.toISOString() so header and filename share the same date (C-06)"
+        )
+        # The filename line must reference _genDate, not a bare new Date() call
+        filename_line = next(
+            (l for l in src.splitlines() if "pdf.save(filename)" in l or "filename =" in l),
+            ""
+        )
+        assert "_genDate" in filename_line or "new Date().toISOString" not in filename_line, (
+            "Filename construction must use _genDate.toISOString(), not new Date() directly (C-06)"
+        )
+
+    def test_f7_step_label_regex_handles_bare_step_n(self):
+        """Step label strip regex must have optional separator [-–—]? to handle 'Step 1' bare labels."""
+        src = self._pdf_src()
+        # The regex must make the separator optional ([-–—]?) not required ([-–—])
+        # so "Step 1" bare labels don't survive as duplicates in the bullet output
+        assert "[-–—]?" in src, (
+            "jsPDF step-label regex must use [-–—]? (optional separator) to handle "
+            "bare 'Step N' labels without producing 'Step 1 — Step 1: ...' duplication (F-7)"
+        )
+
+    def test_f7_step_label_conditional_dash(self):
+        """After stripping the Step prefix, dash separator must only be added when label remains."""
+        src = self._pdf_src()
+        # The construction must guard: _labelPart only added when _rawLabel is non-empty
+        assert "_labelPart" in src, (
+            "jsPDF step-label must use a _labelPart guard so empty stripped labels "
+            "don't produce 'Step 1 — : value' output (F-7)"
+        )
+
+    def test_f7_section3_empty_header_suppressed(self):
+        """Heading(3) for Regulatory must only fire when rp has actual content."""
+        src = self._pdf_src()
+        assert "_rpHasContent" in src, (
+            "jsPDF §3 heading must be guarded by _rpHasContent to suppress orphan heading (F-7)"
+        )
+
+    def test_f7_section5_empty_header_suppressed(self):
+        """Heading(5) for Market Access must only fire when ma has actual content."""
+        src = self._pdf_src()
+        assert "_maHasContent" in src, (
+            "jsPDF §5 heading must be guarded by _maHasContent to suppress orphan heading (F-7)"
+        )

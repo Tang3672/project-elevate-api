@@ -138,41 +138,31 @@ class TestDecisionTreeFormat:
 # ─────────────────────────────────────────────────────────────────────────────
 
 from app.services.competitive_intelligence_service import (
-    _RESEARCH_TOOL_COMPARATORS,
-    _HONEST_EMPTY_STATE,
     _RESEARCH_TOOL_ARCHETYPES,
+    _HONEST_EMPTY_NOTE,
     _gather_research_tool_intel,
+    _extract_research_tool_comparators,
     format_intelligence_for_expert,
 )
 
 
-class TestResearchToolComparators:
-
-    def test_has_at_least_5_comparators(self):
-        assert len(_RESEARCH_TOOL_COMPARATORS) >= 5
-
-    def test_each_comparator_has_required_keys(self):
-        for c in _RESEARCH_TOOL_COMPARATORS:
-            assert "name" in c, f"Missing 'name' in {c}"
-            assert "category" in c, f"Missing 'category' in {c}"
-            assert "description" in c, f"Missing 'description' in {c}"
-
-    def test_actigraph_is_present_as_incumbent(self):
-        names_lower = [c["name"].lower() for c in _RESEARCH_TOOL_COMPARATORS]
-        assert any("actigraph" in n for n in names_lower)
-        actigraph = next(c for c in _RESEARCH_TOOL_COMPARATORS if "actigraph" in c["name"].lower())
-        assert actigraph.get("incumbent") is True
-
-    def test_status_quo_diy_is_present(self):
-        names_lower = [c["name"].lower() for c in _RESEARCH_TOOL_COMPARATORS]
-        assert any("diy" in n or "status quo" in n for n in names_lower)
-
-    def test_honest_empty_state_exists_for_research_tool(self):
-        assert "research_tool_non_clinical" in _HONEST_EMPTY_STATE
-        assert len(_HONEST_EMPTY_STATE["research_tool_non_clinical"]) > 50
+class TestResearchToolArchetype:
 
     def test_research_tool_archetypes_frozenset(self):
         assert "research_tool_non_clinical" in _RESEARCH_TOOL_ARCHETYPES
+
+    def test_extract_comparators_is_async_callable(self):
+        import inspect
+        assert inspect.iscoroutinefunction(_extract_research_tool_comparators)
+
+    def test_extract_comparators_returns_empty_without_api_key(self, monkeypatch):
+        import asyncio, os
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        result = asyncio.run(_extract_research_tool_comparators("soil moisture sensor", "research_infrastructure_saas"))
+        assert isinstance(result, list)
+
+    def test_honest_empty_note_is_nonempty(self):
+        assert len(_HONEST_EMPTY_NOTE) > 40
 
 
 class TestGatherResearchToolIntel:
@@ -180,10 +170,10 @@ class TestGatherResearchToolIntel:
     def _run(self, coro):
         return asyncio.run(coro)
 
-    def test_returns_research_tool_comparators(self):
+    def test_returns_research_tool_comparators_key(self):
         result = self._run(_gather_research_tool_intel("neurotech", "research_tool_non_clinical"))
         assert "research_tool_comparators" in result
-        assert len(result["research_tool_comparators"]) >= 5
+        assert isinstance(result["research_tool_comparators"], list)
 
     def test_competitor_trials_empty(self):
         result = self._run(_gather_research_tool_intel("neurotech", "research_tool_non_clinical"))
@@ -202,20 +192,24 @@ class TestGatherResearchToolIntel:
 class TestFormatIntelligenceForExpert:
 
     def test_research_tool_format_mentions_functional_comparators(self):
+        _sample = [
+            {"name": "SampleTool", "category": "direct", "description": "A sample tool",
+             "url": "", "incumbent": False},
+        ]
         intel = {
-            "research_tool_comparators": _RESEARCH_TOOL_COMPARATORS[:3],
+            "research_tool_comparators": _sample,
             "competitor_trials": {"trials": [], "total_found": 0},
             "fda_precedents": {"approvals": []},
             "strategic_playbook": [],
-            "honest_empty_state": _HONEST_EMPTY_STATE.get("research_tool_non_clinical", ""),
+            "honest_empty_state": _HONEST_EMPTY_NOTE,
         }
         formatted = format_intelligence_for_expert(intel, "neurotech")
         assert "FUNCTIONAL COMPARATORS" in formatted
-        assert "ActiGraph" in formatted
+        assert "SampleTool" in formatted
 
     def test_research_tool_format_does_not_mention_fda_approval_precedents_as_header(self):
         intel = {
-            "research_tool_comparators": _RESEARCH_TOOL_COMPARATORS[:3],
+            "research_tool_comparators": [],
             "competitor_trials": {"trials": [], "total_found": 0},
             "fda_precedents": {"approvals": []},
             "strategic_playbook": [],

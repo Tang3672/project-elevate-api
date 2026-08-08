@@ -88,7 +88,7 @@ FRAC_BUDGET_AUTH:   float = 0.47  # labs with purchasing authority (cadence-adju
 # Fallback NIH-funded fraction if RePORTER API is unavailable
 FRAC_NIH_FUNDED_FALLBACK: float = 0.62
 
-# Price-tier mix among addressable labs — assumed ⚠; operator should supply from their pipeline.
+# Price-tier mix among addressable labs — assumed ⚠; no primary source; appears in sensitivity ranking.
 MIX_ACADEMIC:      float = 0.80
 MIX_CORE_FACILITY: float = 0.15
 MIX_SITE_LICENSE:  float = 0.05
@@ -426,6 +426,121 @@ def nih_ic_codes_for_ta(ta: str) -> list[str]:
     return list(_TA_TO_NIH_IC_CODES.get(ta.lower().strip() if ta else "", []))
 
 
+# ── NSF Awards API ────────────────────────────────────────────────────────────
+
+# Maps TA keys to NSF directorate/division codes used by the NSF Awards API.
+# NSF does not use disease-area filtering (it funds basic research), so this
+# maps to the NSF directorate most relevant for instrumentation tools.
+# "BIO" = Biological Sciences directorate (most relevant for life-sciences tools).
+# "MPS" = Mathematical and Physical Sciences (physics/chemistry instruments).
+# An empty list means "keyword-only, no directorate filter" — all NSF programs.
+_TA_TO_NSF_DIRECTORATE: dict[str, list[str]] = {
+    "neuroscience":     ["BIO", "SBE"],  # BIO + Social/Behavioral/Economic Sciences
+    "cns":              ["BIO", "SBE"],
+    "oncology":         ["BIO"],
+    "immunology":       ["BIO"],
+    "gene_therapy":     ["BIO"],
+    "hematology":       ["BIO"],
+    "metabolic":        ["BIO"],
+    "cardiovascular":   ["BIO"],
+    "rare_disease":     ["BIO"],
+    "ibd":              ["BIO"],
+    "nash_mash":        ["BIO"],
+    # Research tools without a specific TA: search all NSF
+}
+
+NSF_AWARDS_URL:     str   = "https://api.nsf.gov/services/v1/awards.json"
+NSF_AWARDS_TIMEOUT: float = 12.0
+NSF_RECENT_YEAR:    int   = 2022   # awards from this year onward count as "active"
+
+
+def nsf_directorate_for_ta(ta: str) -> list[str]:
+    """Return NSF directorate codes for a therapeutic area.
+
+    Returns an empty list for unknown or non-biology TAs, meaning the NSF
+    query runs without a directorate filter (all active NSF awards).
+
+    Args:
+        ta: Therapeutic area key from intake — never hardcoded at the call site.
+    """
+    return list(_TA_TO_NSF_DIRECTORATE.get(ta.lower().strip() if ta else "", []))
+
+
+async def query_nsf_awards(keyword: str, directorates: list[str] | tuple[str, ...] = ()) -> Dict[str, Any]:
+    """
+    Query the NSF Awards API v1 for recent awards matching the keyword.
+
+    Counts distinct award IDs as a proxy for funded-lab count.
+    The API is public and requires no authentication key.
+
+    Endpoint: GET https://api.nsf.gov/services/v1/awards.json
+    Params:   keyword=<kw>, dateStart=01/01/<NSF_RECENT_YEAR>, printFields=id
+
+    Falls back to a static estimate if the API fails or times out.
+
+    Args:
+        keyword:      Search term derived from idea text or product name.
+        directorates: Optional NSF directorate codes to filter the query.
+                      Must be derived from intake via nsf_directorate_for_ta() —
+                      never hardcoded at a call site.
+                      Empty sequence (default) = no directorate filter = all NSF.
+
+    Returns:
+        dict with:
+          award_count     — number of matching NSF awards (int)
+          source          — human-readable source string for the node
+          fallback_used   — True if the static fallback was applied
+    """
+    _NSF_STATIC_FALLBACK_COUNT = 800   # ~800 active NSF BIO/SBE awards/yr match broad instrumentation terms
+
+    fallback: Dict[str, Any] = {
+        "award_count":  _NSF_STATIC_FALLBACK_COUNT,
+        "source": (
+            f"Static fallback: ~{_NSF_STATIC_FALLBACK_COUNT} NSF awards/yr "
+            f"in instrumentation-relevant directorates "
+            f"(NSF Awards API unavailable)"
+        ),
+        "fallback_used": True,
+    }
+
+    params: dict = {
+        "keyword":    keyword,
+        "dateStart":  f"01/01/{NSF_RECENT_YEAR}",
+        "printFields": "id",
+    }
+    if directorates:
+        params["fundProgramName"] = ",".join(directorates)
+
+    try:
+        async with httpx.AsyncClient(timeout=NSF_AWARDS_TIMEOUT) as client:
+            resp = await client.get(NSF_AWARDS_URL, params=params)
+        resp.raise_for_status()
+        data = resp.json()
+        awards = data.get("response", {}).get("award", []) or []
+        count = len(awards)
+        dir_note = f" directorates={directorates}" if directorates else ""
+        if count == 0:
+            logger.info(
+                "NSF Awards returned 0 results for keyword '%s'%s; using static fallback.",
+                keyword, dir_note,
+            )
+            return fallback
+        source = (
+            f"NSF Awards API v1 — keyword='{keyword}'{dir_note}, "
+            f"awards from {NSF_RECENT_YEAR} onward: {count} matching awards "
+            f"(https://api.nsf.gov/services/v1/awards.json)"
+        )
+        logger.info("NSF Awards: keyword='%s'%s → %d awards", keyword, dir_note, count)
+        return {
+            "award_count":  count,
+            "source":       source,
+            "fallback_used": False,
+        }
+    except Exception as exc:
+        logger.warning("NSF Awards API failed (%s); using static fallback.", exc)
+        return fallback
+
+
 async def query_nih_reporter(keyword: str, agency_codes: tuple[str, ...] | list[str] = ()) -> Dict[str, Any]:
     """
     Query NIH RePORTER v2 for active grants matching the keyword.
@@ -567,9 +682,13 @@ async def build_life_sciences_research_tree(
     """
     Build the LIFE_SCIENCES_RESEARCH segmentation tree for research-tool products.
 
-    Queries NIH RePORTER to count labs with active grants in the relevant domain,
-    then applies the D.2 funnel fractions to arrive at addressable labs split by
-    operator-supplied or assumed price tiers.
+    Queries NIH RePORTER AND NSF Awards API concurrently to count labs with
+    active grants in the relevant domain, then applies the D.2 funnel fractions
+    to arrive at addressable labs split by operator-supplied or assumed price tiers.
+
+    F-10 (spec v5 item 9): executes both NIH RePORTER and NSF Awards queries for
+    real; IC codes and NSF directorates are derived from intake via the agency-
+    mapping tables (_TA_TO_NIH_IC_CODES, _TA_TO_NSF_DIRECTORATE) — never hardcoded.
 
     All assumed fractions are flagged ⚠ and stored on the node with (low, high)
     bounds for Monte Carlo sampling.
@@ -578,22 +697,50 @@ async def build_life_sciences_research_tree(
         idea:         Full idea / product description text (drives NIH keyword search).
         product_name: Short product name used as the NIH search keyword when provided.
         ta:           Therapeutic area key from intake (e.g. 'cns', 'oncology').
-                      Drives NIH IC filtering via nih_ic_codes_for_ta() — not hardcoded.
-                      Empty string (default) = no IC filter = all NIH (correct for
+                      Drives NIH IC filtering via nih_ic_codes_for_ta() and NSF
+                      directorate filtering via nsf_directorate_for_ta() — not hardcoded.
+                      Empty string (default) = no filter = all NIH / all NSF (correct for
                       cross-disease research tools).
 
     Returns:
         Deterministic SegmentTree; distributions encoded in (low, high, confidence).
     """
-    keyword    = product_name.strip() if product_name.strip() else (idea[:80].strip() if idea else "laboratory data logging instrumentation")
-    ic_codes   = nih_ic_codes_for_ta(ta)
-    nih_result = await query_nih_reporter(keyword, agency_codes=ic_codes)
-    nih_labs_val = float(nih_result["lab_count"])
-    nih_source   = nih_result["source"]
-    nih_method: Literal["retrieved", "modeled"] = (
-        "retrieved" if not nih_result["fallback_used"] else "modeled"
+    keyword       = product_name.strip() if product_name.strip() else (idea[:80].strip() if idea else "laboratory data logging instrumentation")
+    ic_codes      = nih_ic_codes_for_ta(ta)
+    nsf_divs      = nsf_directorate_for_ta(ta)
+
+    # Execute NIH RePORTER and NSF Awards queries concurrently (F-10)
+    nih_result, nsf_result = await asyncio.gather(
+        query_nih_reporter(keyword, agency_codes=ic_codes),
+        query_nsf_awards(keyword, directorates=nsf_divs),
     )
-    nih_confidence = 0.60 if not nih_result["fallback_used"] else 0.45
+
+    # NIH count is the primary lab-count denominator (most R1 labs have NIH funding).
+    # NSF adds non-NIH-funded labs (e.g. engineering, physics, math departments).
+    # We add a conservative 20% of NSF awards as incremental non-NIH labs to avoid
+    # double-counting (many labs hold both NIH and NSF grants simultaneously).
+    nih_labs_val   = float(nih_result["lab_count"])
+    nsf_incr_labs  = float(nsf_result["award_count"]) * 0.20   # incremental non-NIH labs
+    combined_labs  = nih_labs_val + nsf_incr_labs
+
+    nih_source = nih_result["source"]
+    nsf_source = nsf_result["source"]
+    combined_source = f"{nih_source} | NSF incremental: {nsf_source}"
+    combined_method: Literal["retrieved", "modeled"] = (
+        "retrieved"
+        if (not nih_result["fallback_used"] or not nsf_result["fallback_used"])
+        else "modeled"
+    )
+    combined_confidence = max(
+        0.60 if not nih_result["fallback_used"] else 0.45,
+        0.50 if not nsf_result["fallback_used"] else 0.35,
+    )
+    nih_labs_val = combined_labs   # use combined for downstream funnel
+
+    nih_labs_val  = combined_labs
+    nih_method    = combined_method
+    nih_confidence = combined_confidence
+    nih_source    = combined_source
 
     # Derived funnel values
     total_institutions  = float(CARNEGIE_INSTITUTION_COUNT)
@@ -641,15 +788,18 @@ async def build_life_sciences_research_tree(
             confidence=0.75,
             editable=False,
         ),
-        # ── Retrieved: NIH/NSF-funded labs in scope ───────────────────────────
+        # ── Retrieved: NIH+NSF-funded labs in scope (F-10) ──────────────────
         SegmentNode(
             id="nih_funded_labs",
-            label="Labs with Active NIH/NSF Funding in Scope Field",
+            label="Labs with Active NIH or NSF Funding in Scope Field",
             parent_id="labs_total",
             value=nih_labs_val,
             unit="labs",
             method=nih_method,
-            formula="NIH RePORTER API v2: distinct principal investigators with active grants",
+            formula=(
+                "NIH RePORTER API v2 (distinct PIs) + NSF Awards API "
+                "(20% incremental non-NIH labs to avoid double-count)"
+            ),
             source=nih_source,
             low=max(nih_labs_val * 0.70, 1.0),
             high=min(nih_labs_val * 1.40, total_labs),
@@ -718,7 +868,7 @@ async def build_life_sciences_research_tree(
                 f"not_custom_solved × {FRAC_BUDGET_AUTH:.0%} "
                 "(PI budget authority rate × annual procurement-cycle overlap — assumed ⚠)"
             ),
-            source="Assumed — operator should supply from pipeline or primary research ⚠",
+            source="Assumed — no primary source; appears in sensitivity analysis",
             low=not_custom_labs * 0.35,
             high=not_custom_labs * 0.62,
             confidence=0.55,
@@ -733,9 +883,9 @@ async def build_life_sciences_research_tree(
             method="derived",
             formula=(
                 f"budget_authority_labs × {MIX_ACADEMIC:.0%} "
-                "(tier mix — assumed ⚠; operator should supply from pipeline data)"
+                "(tier mix — assumed ⚠; no primary source)"
             ),
-            source="Assumed — operator should supply observed price-tier mix ⚠",
+            source="Assumed — no primary source; appears in sensitivity analysis",
             low=addressable_labs * 0.65,
             high=addressable_labs * 0.90,
             confidence=0.60,
@@ -751,9 +901,9 @@ async def build_life_sciences_research_tree(
             method="derived",
             formula=(
                 f"budget_authority_labs × {MIX_CORE_FACILITY:.0%} "
-                "(tier mix — assumed ⚠; operator should supply from pipeline data)"
+                "(tier mix — assumed ⚠; no primary source)"
             ),
-            source="Assumed — operator should supply observed price-tier mix ⚠",
+            source="Assumed — no primary source; appears in sensitivity analysis",
             low=addressable_labs * 0.08,
             high=addressable_labs * 0.22,
             confidence=0.55,
@@ -769,9 +919,9 @@ async def build_life_sciences_research_tree(
             method="derived",
             formula=(
                 f"budget_authority_labs × {MIX_SITE_LICENSE:.0%} "
-                "(tier mix — assumed ⚠; operator should supply from pipeline data)"
+                "(tier mix — assumed ⚠; no primary source)"
             ),
-            source="Assumed — operator should supply observed price-tier mix ⚠",
+            source="Assumed — no primary source; appears in sensitivity analysis",
             low=addressable_labs * 0.02,
             high=addressable_labs * 0.10,
             confidence=0.50,

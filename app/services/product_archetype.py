@@ -104,6 +104,9 @@ _CLINICAL_REGULATED_VOCAB: FrozenSet[str] = frozenset({
     "clinical indication", "510k", "fda clearance", "fda-cleared",
     "ifu label", "labeling claim", "510 k", "class ii device",
     "510 (k)", "premarket notification",
+    # C-04: vocabulary that appeared in v5 agronomy/research-tool reports
+    "therapeutic area", "disease-relevant", "payer uptake",
+    "guideline inclusion", "initial label", "iqvia forecast",
 })
 
 # Vocab that should NEVER appear in a drug/small-molecule report
@@ -542,6 +545,105 @@ def _walk_dict(
     elif isinstance(obj, (list, tuple)):
         for i, item in enumerate(obj):
             _walk_dict(item, archetype, path=f"{path}[{i}]", violations=violations)
+
+
+# ─── Per-archetype competitor entry schema ────────────────────────────────────
+#
+# Each archetype expects competitor entries in a distinct shape.  Mixing schemas
+# produces "undefined" in rendered output when a field from one schema is read
+# on an entry that follows a different schema.
+#
+# required_fields: must be present (non-None, non-empty) in every entry.
+# forbidden_fields: must NOT appear — their presence signals a schema mismatch.
+
+COMPETITOR_SCHEMA: dict[ProductArchetype, dict] = {
+    ProductArchetype.RESEARCH_TOOL_NON_CLINICAL: {
+        "required_fields":  frozenset({"name", "category", "description"}),
+        "optional_fields":  frozenset({"url", "incumbent", "key_differentiator"}),
+        "forbidden_fields": frozenset({"stage", "nct_id", "sponsor", "company",
+                                       "brand_name", "route", "advantages",
+                                       "vulnerabilities"}),
+    },
+    ProductArchetype.RESEARCH_INFRASTRUCTURE_SAAS: {
+        "required_fields":  frozenset({"name", "category", "description"}),
+        "optional_fields":  frozenset({"url", "incumbent", "key_differentiator"}),
+        "forbidden_fields": frozenset({"stage", "nct_id", "sponsor", "brand_name",
+                                       "route"}),
+    },
+    ProductArchetype.THERAPEUTIC_SMALL_MOLECULE: {
+        "required_fields":  frozenset({"name", "company", "stage"}),
+        "optional_fields":  frozenset({"brand_name", "route", "advantages",
+                                       "vulnerabilities", "positioning_signal",
+                                       "nct_id", "title", "status", "sponsor"}),
+        "forbidden_fields": frozenset({"incumbent", "url", "category"}),
+    },
+    ProductArchetype.THERAPEUTIC_BIOLOGIC: {
+        "required_fields":  frozenset({"name", "company", "stage"}),
+        "optional_fields":  frozenset({"brand_name", "route", "advantages",
+                                       "vulnerabilities", "positioning_signal",
+                                       "nct_id", "title", "status", "sponsor"}),
+        "forbidden_fields": frozenset({"incumbent", "url", "category"}),
+    },
+    ProductArchetype.DEVICE_CLASS_II: {
+        "required_fields":  frozenset({"name", "company", "stage"}),
+        "optional_fields":  frozenset({"brand_name", "advantages", "vulnerabilities",
+                                       "positioning_signal", "nct_id", "title",
+                                       "status", "sponsor"}),
+        "forbidden_fields": frozenset({"incumbent", "url", "category"}),
+    },
+    ProductArchetype.SAMD_CLINICAL: {
+        "required_fields":  frozenset({"name", "company", "stage"}),
+        "optional_fields":  frozenset({"brand_name", "advantages", "vulnerabilities",
+                                       "positioning_signal", "nct_id", "title",
+                                       "status", "sponsor"}),
+        "forbidden_fields": frozenset({"incumbent", "url", "category"}),
+    },
+    ProductArchetype.DIAGNOSTIC_IVD: {
+        "required_fields":  frozenset({"name", "company", "stage"}),
+        "optional_fields":  frozenset({"brand_name", "route", "advantages",
+                                       "vulnerabilities", "positioning_signal",
+                                       "nct_id", "title", "status", "sponsor"}),
+        "forbidden_fields": frozenset({"incumbent", "category"}),
+    },
+}
+
+
+def get_competitor_schema(archetype: ProductArchetype) -> dict:
+    """
+    Return the competitor entry schema for an archetype.
+    Falls back to the generic drug schema for archetypes without an explicit entry.
+    """
+    return COMPETITOR_SCHEMA.get(archetype, {
+        "required_fields":  frozenset({"name", "company", "stage"}),
+        "optional_fields":  frozenset(),
+        "forbidden_fields": frozenset(),
+    })
+
+
+def validate_competitor_entry(
+    entry: dict,
+    archetype: ProductArchetype,
+) -> list[str]:
+    """
+    Check a single competitor dict against the archetype schema.
+    Returns a list of violation strings (empty = clean).
+    """
+    schema = get_competitor_schema(archetype)
+    violations: list[str] = []
+    for field in schema["required_fields"]:
+        val = entry.get(field)
+        if not val and val != 0:
+            violations.append(
+                f"required field {field!r} missing or empty in competitor entry "
+                f"for archetype {archetype.value!r}"
+            )
+    for field in schema["forbidden_fields"]:
+        if field in entry:
+            violations.append(
+                f"forbidden field {field!r} present in competitor entry "
+                f"for archetype {archetype.value!r} (schema mismatch)"
+            )
+    return violations
 
 
 # ─── Inapplicable section stub ────────────────────────────────────────────────

@@ -56,6 +56,8 @@ def _modality(product_type: str, sub_expert_id: str = "") -> str:
         return "device"
     if any(k in s for k in ("diagnostic", "assay", "ivd", "test", "biomarker")):
         return "diagnostic"
+    if any(k in s for k in ("research_tool", "research tool", "non_clinical", "lab software", "pi tool", "data platform")):
+        return "research_tool"
     if any(k in s for k in ("software", "digital", "samd", "algorithm", "app")):
         return "digital"
     if any(k in s for k in ("antibiotic", "small_molecule", "small molecule", "drug", "molecule", "amr")):
@@ -63,7 +65,7 @@ def _modality(product_type: str, sub_expert_id: str = "") -> str:
     return "other"
 
 
-#                        patent  license  spinout  acquire  sbir   reimburse
+#                        patent  license  spinout  acquire  sbir   reimburse(N/A)
 _MODALITY_PRIORS = {
     "small_molecule": (0.72,   0.78,    0.55,    0.72,    0.70,  0.65),
     "biologic":       (0.76,   0.80,    0.58,    0.78,    0.62,  0.60),
@@ -72,6 +74,8 @@ _MODALITY_PRIORS = {
     "device":         (0.62,   0.55,    0.60,    0.60,    0.72,  0.50),
     "diagnostic":     (0.60,   0.52,    0.58,    0.55,    0.74,  0.45),
     "digital":        (0.42,   0.45,    0.55,    0.45,    0.66,  0.40),
+    # Non-clinical research tools: high SBIR fit; regulatory/reimbursement are N/A
+    "research_tool":  (0.50,   0.42,    0.58,    0.35,    0.82,  0.00),
     "other":          (0.58,   0.58,    0.55,    0.58,    0.66,  0.55),
 }
 _PRIOR_KEYS = ("patent", "license", "spinout", "acquire", "sbir", "reimburse")
@@ -87,6 +91,7 @@ _MODALITY_TEXT = {
     "device":         ("medical device",      "device design and method-of-use claims",          True),
     "diagnostic":     ("diagnostic",          "assay, biomarker, and method claims",             True),
     "digital":        ("AI/software (SaMD)",  "software, algorithm, and method claims",          True),
+    "research_tool":  ("research tool",       "software, method, and data-platform claims",      True),
     "other":          ("product",             "the applicable IP claims",                        False),
 }
 
@@ -155,17 +160,38 @@ def score_commercialization(signals: dict) -> dict:
         "competitive_whitespace":  _clamp(0.70 * whitespace + 0.30 * moat),
     }
 
-    # Overall priority — weighted blend of the decision-relevant dimensions.
-    overall = (
-        0.22 * scores["investor_attractiveness"]
-        + 0.18 * scores["regulatory_feasibility"]
-        + 0.15 * market
-        + 0.12 * scores["patentability"]
-        + 0.10 * scores["licensing_likelihood"]
-        + 0.08 * scores["sbir_fit"]
-        + 0.08 * scores["competitive_whitespace"]
-        + 0.07 * scores["reimbursement_feasibility"]
-    )
+    # B-08: research tools have no FDA pathway or CMS reimbursement — mark N/A.
+    # Excluded dimensions must not enter the composite (they would anchor at the neutral
+    # prior and distort the score for a product class where they are meaningless).
+    _na_dims: set[str] = set()
+    if modality == "research_tool":
+        scores["regulatory_feasibility"] = None
+        scores["reimbursement_feasibility"] = None
+        _na_dims = {"regulatory_feasibility", "reimbursement_feasibility"}
+
+    # Overall priority — weighted blend of decision-relevant dimensions.
+    # Weights for research tools renormalize the remaining six to sum to 1.0
+    # (original weights / 0.75, where 0.75 = 1.0 - 0.18_regulatory - 0.07_reimburse).
+    if _na_dims:
+        overall = (
+            0.29 * scores["investor_attractiveness"]
+            + 0.20 * market
+            + 0.16 * scores["patentability"]
+            + 0.13 * scores["licensing_likelihood"]
+            + 0.11 * scores["sbir_fit"]
+            + 0.11 * scores["competitive_whitespace"]
+        )
+    else:
+        overall = (
+            0.22 * scores["investor_attractiveness"]
+            + 0.18 * scores["regulatory_feasibility"]
+            + 0.15 * market
+            + 0.12 * scores["patentability"]
+            + 0.10 * scores["licensing_likelihood"]
+            + 0.08 * scores["sbir_fit"]
+            + 0.08 * scores["competitive_whitespace"]
+            + 0.07 * scores["reimbursement_feasibility"]
+        )
     scores["overall_priority"] = _clamp(overall)
 
     return {
@@ -188,13 +214,27 @@ _SRC = {
     "patents":  "Recent US patent filings (Google Patents)",
     "trl":      "Technology Readiness Level assessment (NIH/BARDA framework)",
     "sbir":     "Recent NIH SBIR/STTR awards in this space (NIH Reporter)",
-    "market":   "Bottom-up market sizing (CDC/SEER epidemiology + CMS pricing)",
     "modality": "Modality base rates (AUTM licensing surveys + FDA approval data)",
     "payer":    "Payer/reimbursement assessment (expert panel + CMS coverage data)",
 }
 
 
-def _band(v: float) -> str:
+def _market_evidence_source(modality: str = "") -> str:
+    """Return the market sizing evidence label appropriate to the product modality."""
+    m = (modality or "").lower()
+    if m == "research_tool":
+        return "Bottom-up market sizing (NIH-funded lab counts × annual spend per lab)"
+    if m == "diagnostic":
+        return "Bottom-up market sizing (procedure volume × price per test)"
+    if m in ("device", "digital"):
+        return "Bottom-up market sizing (addressable site/procedure counts × ASP)"
+    # Clinical default — drugs, biologics, gene therapy, vaccines
+    return "Bottom-up market sizing (CDC/SEER epidemiology + CMS pricing)"
+
+
+def _band(v: Optional[float]) -> str:
+    if v is None:
+        return "N/A"
     return "STRONG" if v >= 0.66 else ("MODERATE" if v >= 0.45 else "WEAK")
 
 
@@ -215,7 +255,11 @@ def build_rationales(signals: dict, scores: dict, market: float, whitespace: flo
     designations = signals.get("designations") or []
     payer = signals.get("payer_barrier")
 
+    _market_src = _market_evidence_source(_mkey)
+
     def d(fact, src):
+        if src == "market":
+            return {"fact": fact, "source": _market_src}
         return {"fact": fact, "source": _SRC.get(src, src)}
 
     def dim(key, drivers):
@@ -302,11 +346,11 @@ _DRIVER_PHRASES = {
 
 def _top_drivers(scores: dict, market: float, whitespace: float) -> list[str]:
     """Surface the strongest positives and the most material risks."""
+    # Exclude N/A dimensions (None) — they can't be ranked or flagged as risks.
+    scored = {k: v for k, v in scores.items() if v is not None and k != "overall_priority"}
     drivers: list[str] = []
     # strongest positives
-    for key, val in sorted(scores.items(), key=lambda kv: kv[1], reverse=True):
-        if key == "overall_priority":
-            continue
+    for key, val in sorted(scored.items(), key=lambda kv: kv[1], reverse=True):
         if val >= 0.65 and key in _DRIVER_PHRASES:
             drivers.append(_DRIVER_PHRASES[key][0])
         if len(drivers) >= 2:
@@ -315,9 +359,7 @@ def _top_drivers(scores: dict, market: float, whitespace: float) -> list[str]:
         drivers.append("Large addressable market")
     # material risks
     risks: list[str] = []
-    for key, val in sorted(scores.items(), key=lambda kv: kv[1]):
-        if key == "overall_priority":
-            continue
+    for key, val in sorted(scored.items(), key=lambda kv: kv[1]):
         if val <= 0.40 and key in _DRIVER_PHRASES:
             risks.append(_DRIVER_PHRASES[key][1])
         if len(risks) >= 2:
@@ -349,9 +391,10 @@ def _recommendation(s: dict) -> str:
         primary = "Advance to a provisional patent and run targeted funder outreach matched to current TRL."
 
     # Guardrail
+    reimb = s.get("reimbursement_feasibility")
     if pat < 0.45 or white < 0.35:
         primary += " Validate freedom-to-operate / patentability before further spend."
-    elif s["reimbursement_feasibility"] < 0.45:
+    elif reimb is not None and reimb < 0.45:
         primary += " Build the reimbursement/coding strategy early — it is the main commercial risk."
     return primary
 
