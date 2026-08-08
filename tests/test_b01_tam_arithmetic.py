@@ -23,6 +23,7 @@ def _research_tool_derivation():
     return generate_market_sizing_derivation(
         idea="Hublink: a non-clinical wearable data platform for academic PIs.",
         disease_name="neuroscience",
+        therapeutic_area="neuroscience",
         sub_expert_id="research_tool_non_clinical",
     )
 

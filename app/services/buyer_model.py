@@ -237,6 +237,119 @@ def check_price_vs_spend_band(
     return None
 
 
+# ─── Domain-specific buyer parameters for research tools ─────────────────────
+#
+# Keyed by domain slug. Pop and spend differ by funder ecosystem and typical
+# instrument budget:
+#   NIH-heavy domains (neuroscience, genomics) → larger eligible lab pools,
+#     higher per-cycle spend (competitive R01/R21 grant budgets).
+#   NSF/USDA-heavy domains (agronomy, ecology) → smaller pools, lower spend
+#     (NIFA/NSF grants carry lower direct-cost ceilings than NIH R01).
+
+_RESEARCH_TOOL_DOMAIN_PARAMS: dict[str, dict] = {
+    "neuroscience":      {"pop_lo": 3_000, "pop_hi": 8_000,  "sp_lo": 20_000, "sp_hi": 30_000,
+                          "cycle": 3.0,
+                          "denominator": "NIH-funded neuroscience and neurotech labs",
+                          "funder": "NIH RePORTER (NINDS, NIMH, NIDA, NIA)"},
+    "physiology":        {"pop_lo": 2_000, "pop_hi": 6_000,  "sp_lo": 15_000, "sp_hi": 25_000,
+                          "cycle": 3.0,
+                          "denominator": "NIH-funded physiology and bioengineering labs",
+                          "funder": "NIH RePORTER (NIGMS, NIBIB)"},
+    "agronomy":          {"pop_lo": 800,   "pop_hi": 3_500,  "sp_lo": 5_000,  "sp_hi": 12_000,
+                          "cycle": 3.0,
+                          "denominator": "NSF/USDA NIFA-funded agronomy and crop science labs",
+                          "funder": "NSF Awards API + USDA NIFA"},
+    "ecology":           {"pop_lo": 1_000, "pop_hi": 4_000,  "sp_lo": 4_000,  "sp_hi": 10_000,
+                          "cycle": 3.0,
+                          "denominator": "NSF-funded ecology and environmental monitoring labs",
+                          "funder": "NSF Awards API (BIO, GEO directorates)"},
+    "environmental":     {"pop_lo": 1_200, "pop_hi": 4_500,  "sp_lo": 5_000,  "sp_hi": 12_000,
+                          "cycle": 3.0,
+                          "denominator": "NSF-funded environmental science and monitoring labs",
+                          "funder": "NSF Awards API (GEO, BIO)"},
+    "genomics":          {"pop_lo": 5_000, "pop_hi": 15_000, "sp_lo": 10_000, "sp_hi": 25_000,
+                          "cycle": 3.0,
+                          "denominator": "NIH-funded genomics and molecular biology labs",
+                          "funder": "NIH RePORTER (NCI, NHGRI, NIGMS)"},
+    "molecular_biology": {"pop_lo": 4_000, "pop_hi": 12_000, "sp_lo": 8_000,  "sp_hi": 20_000,
+                          "cycle": 3.0,
+                          "denominator": "NIH-funded molecular and cell biology labs",
+                          "funder": "NIH RePORTER (NIGMS, NHLBI, NCI)"},
+    "microbiology":      {"pop_lo": 2_500, "pop_hi": 7_000,  "sp_lo": 8_000,  "sp_hi": 18_000,
+                          "cycle": 3.0,
+                          "denominator": "NIH-funded microbiology and infectious disease labs",
+                          "funder": "NIH RePORTER (NIAID, NIBIB)"},
+    "default":           {"pop_lo": 2_000, "pop_hi": 6_000,  "sp_lo": 8_000,  "sp_hi": 20_000,
+                          "cycle": 3.0,
+                          "denominator": "NIH/NSF-funded research labs in scope field",
+                          "funder": "NIH RePORTER + NSF Awards API"},
+}
+
+# Keyword overrides for idea text and TA strings not matching a domain slug directly
+_DOMAIN_KEYWORDS: dict[str, str] = {
+    "agro": "agronomy", "crop": "agronomy", "soil": "agronomy", "plant": "agronomy",
+    "environ": "ecology", "ecosystem": "ecology", "watershed": "ecology",
+    "neuro": "neuroscience", "brain": "neuroscience", "synap": "neuroscience",
+    "genom": "genomics", "sequen": "genomics", "ngs ": "genomics",
+    "mol bio": "molecular_biology", "cell bio": "molecular_biology",
+    "micro": "microbiology", "bacteri": "microbiology", "virus": "microbiology",
+    "physio": "physiology", "bioengineer": "physiology",
+}
+
+
+def research_tool_buyer_for_domain(
+    therapeutic_area: str,
+    idea: str = "",
+    population_source: str = "",
+    spend_source: str = "",
+) -> "BuyerModel":
+    """
+    Domain-specific buyer model for research tools / lab infrastructure.
+
+    Replaces the single `academic_neurotech_lab_buyer()` default so that
+    agronomy, ecology, genomics, etc. get populations and spend bands that
+    reflect their actual funder ecosystem — not neuroscience defaults.
+
+    Population and spend defaults are assumed estimates; override via
+    population_source / spend_source when live API data or primary research
+    is available.
+    """
+    ta = (therapeutic_area or "").lower().strip()
+
+    params: dict | None = None
+    # Direct slug match first
+    for key, p in _RESEARCH_TOOL_DOMAIN_PARAMS.items():
+        if key == "default":
+            continue
+        if key in ta or ta.startswith(key):
+            params = p
+            break
+
+    # Keyword search across TA + idea text
+    if params is None:
+        combined = ta + " " + idea.lower()
+        for kw, domain in _DOMAIN_KEYWORDS.items():
+            if kw in combined:
+                params = _RESEARCH_TOOL_DOMAIN_PARAMS[domain]
+                break
+
+    if params is None:
+        params = _RESEARCH_TOOL_DOMAIN_PARAMS["default"]
+
+    return academic_neurotech_lab_buyer(
+        observed_spend_lo=params["sp_lo"],
+        observed_spend_hi=params["sp_hi"],
+        cycle_years=params["cycle"],
+        population_lo=params["pop_lo"],
+        population_hi=params["pop_hi"],
+        population_denominator=params["denominator"],
+        population_source=population_source or params["funder"],
+        spend_source=spend_source or (
+            "Assumed — should be validated with n≥10 PI interviews in this domain"
+        ),
+    )
+
+
 # ─── Pre-built buyer models for common research-tool archetypes ───────────────
 
 def academic_neurotech_lab_buyer(

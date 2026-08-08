@@ -1626,48 +1626,46 @@ def _derive_research_tool_formula(
     Numbers from academic_neurotech_lab_buyer() defaults; NIH RePORTER for lab count.
     """
     try:
-        from app.services.buyer_model import academic_neurotech_lab_buyer, MarketSizeResult
-        bm = academic_neurotech_lab_buyer()
+        from app.services.buyer_model import research_tool_buyer_for_domain, MarketSizeResult
+        bm = research_tool_buyer_for_domain(therapeutic_area, idea)
         ms = MarketSizeResult(buyer_model=bm, sam_fraction=0.30, som_fraction=0.15,
                               som_horizon_years=5)
         pop_lo  = bm.buyer_population_lo
         pop_hi  = bm.buyer_population_hi
         sp_lo   = bm.annualised_spend_lo()
         sp_hi   = bm.annualised_spend_hi()
-        # Use midpoint values (not lo) as the headline — avoids labeling the
-        # conservative endpoint as the base case.
         pop_mid = (bm.buyer_population_lo + bm.buyer_population_hi) / 2
         sp_mid  = (bm.annualised_spend_lo() + bm.annualised_spend_hi()) / 2
-        tam     = pop_mid * sp_mid          # midpoint TAM (e.g. 5,500 × $8,333 ≈ $45.8M)
+        tam     = pop_mid * sp_mid
         sam     = tam * ms.sam_fraction
         som     = sam * ms.som_fraction
         pop_src = bm.population_source
         sp_src  = bm.spend_source
+        domain_label = bm.population_denominator
     except Exception as _e:
         logger.warning("buyer_model import failed in derivation — using hardcoded defaults: %s", _e)
         pop_lo, pop_hi = 3_000, 8_000
-        sp_lo,  sp_hi  = 6_667, 10_000   # $20k-$30k / 3yr cycle annualised
-        tam  = ((pop_lo + pop_hi) / 2) * ((sp_lo + sp_hi) / 2)   # midpoint
+        sp_lo,  sp_hi  = 6_667, 10_000
+        tam  = ((pop_lo + pop_hi) / 2) * ((sp_lo + sp_hi) / 2)
         sam  = tam * 0.30
         som  = sam * 0.15
         pop_src = "NIH RePORTER — estimate pending verification"
         sp_src  = "Assumed — no observed spend data; appears in sensitivity analysis"
+        domain_label = "NIH/NSF-funded research labs in scope field"
 
     steps = [
         DerivationStep(
             step_num=1,
-            title="Step 1 — Eligible buyer population",
-            formula=f"NIH-funded labs running instrumented multi-day experiments: {pop_lo:,}–{pop_hi:,}",
+            title=f"Step 1 — Eligible buyer population ({domain_label})",
+            formula=f"{domain_label}: {pop_lo:,}–{pop_hi:,}",
             value=float((pop_lo + pop_hi) / 2),
             unit="labs",
             source_paper=pop_src,
             source_url="https://reporter.nih.gov/",
             explanation=(
                 f"Buyer is an academic PI, not a hospital enterprise. "
-                f"Population = NIH-funded neuroscience / ecology / physiology labs that run "
-                f"instrumented long-duration unattended experiments. "
-                f"Range: {pop_lo:,} (conservative, confirmed active neurotech) to "
-                f"{pop_hi:,} (broader STEM research lab estimate). "
+                f"Population = {domain_label}. "
+                f"Range: {pop_lo:,} (conservative) to {pop_hi:,} (optimistic). "
                 f"Source: {pop_src}."
             ),
             data_source=pop_src,

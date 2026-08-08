@@ -89,16 +89,8 @@ def _derive(idea: str, ta: str, sub_expert: str):
     )
 
 
-# ── TAM / SAM / SOM (xfail — known hardcoded-constant bug) ────────────────────
+# ── TAM / SAM / SOM ────────────────────────────────────────────────────────────
 
-@pytest.mark.xfail(
-    reason=(
-        "Market engine currently uses hardcoded 5,500 labs × $8,333 — "
-        "both products produce the same TAM. Fix: execute live API query "
-        "and derive product-specific buyer population. See spec v5 Part A."
-    ),
-    strict=False,
-)
 def test_tam_differs_across_products():
     hub   = _derive(_HUB_IDEA,  _HUB_TA,  _HUB_SUB_EXPERT)
     soil  = _derive(_SOIL_IDEA, _SOIL_TA, _SOIL_SUB_EXPERT)
@@ -108,10 +100,6 @@ def test_tam_differs_across_products():
     )
 
 
-@pytest.mark.xfail(
-    reason="Same hardcoded engine — SAM shares the 30% gate across products.",
-    strict=False,
-)
 def test_sam_differs_across_products():
     hub   = _derive(_HUB_IDEA,  _HUB_TA,  _HUB_SUB_EXPERT)
     soil  = _derive(_SOIL_IDEA, _SOIL_TA, _SOIL_SUB_EXPERT)
@@ -120,10 +108,6 @@ def test_sam_differs_across_products():
     )
 
 
-@pytest.mark.xfail(
-    reason="Same hardcoded engine — SOM shares the 15% gate across products.",
-    strict=False,
-)
 def test_som_differs_across_products():
     hub   = _derive(_HUB_IDEA,  _HUB_TA,  _HUB_SUB_EXPERT)
     soil  = _derive(_SOIL_IDEA, _SOIL_TA, _SOIL_SUB_EXPERT)
@@ -132,21 +116,13 @@ def test_som_differs_across_products():
     )
 
 
-# ── Step 1 buyer population label (xfail — currently a constant) ──────────────
+# ── Step 1 buyer population label ─────────────────────────────────────────────
 
-@pytest.mark.xfail(
-    reason=(
-        "Step 1 denominator label is currently constant: "
-        "'NIH-funded neuroscience/neurotech labs'. "
-        "Fix: derive from intake scope fields."
-    ),
-    strict=False,
-)
 def test_step1_population_label_differs():
     hub   = _derive(_HUB_IDEA,  _HUB_TA,  _HUB_SUB_EXPERT)
     soil  = _derive(_SOIL_IDEA, _SOIL_TA, _SOIL_SUB_EXPERT)
-    hub_label  = (hub.steps[0].label  if hub.steps  else "")
-    soil_label = (soil.steps[0].label if soil.steps else "")
+    hub_label  = (hub.steps[0].title  if hub.steps  else "")
+    soil_label = (soil.steps[0].title if soil.steps else "")
     assert hub_label != soil_label, (
         f"Step 1 population label is identical for both products: {hub_label!r}"
     )
@@ -371,16 +347,8 @@ class TestFiveProductsDiffer:
             f"Five-product suite must use 5 different sub_expert_ids; got {set(subs)}"
         )
 
-    @pytest.mark.xfail(
-        reason=(
-            "TAM is frozen at 5,500 labs × $8,333 for research-domain products "
-            "and uses hardcoded patient population for pharma — all five products "
-            "may produce the same TAM until live API queries are wired (F-10)."
-        ),
-        strict=False,
-    )
     def test_tam_differs_across_all_five(self):
-        """All five products must produce distinct TAM values (xfail until F-10)."""
+        """All five products must produce distinct TAM values."""
         results = self._derive_all()
         tams = [r.us_tam_usd for r in results]
         assert len(set(tams)) == 5, (
