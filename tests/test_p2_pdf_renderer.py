@@ -889,3 +889,87 @@ class TestG01ExportParity:
         assert "undefined" not in stripped.lower(), (
             "PDF renderer must not emit 'undefined' in rendered content"
         )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# F-07 (JS) — jsPDF date, step-label dedup, empty-section suppression
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestF07JsPdf:
+    """
+    Source-inspection tests for the three F-7 JS fixes in downloadPDF():
+
+    C-06  PDF header / filename both derive date from r.generated_at, not new Date().
+    Step  Bare "Step N" labels stripped before "Step N —" is prepended (no duplication).
+    §3/§5 Headings only rendered when there is actual content (no orphan headings).
+    """
+
+    def _pdf_src(self) -> str:
+        import os
+        path = os.path.normpath(
+            os.path.join(os.path.dirname(__file__), "..", "..", "ProjectElevate-Frontend", "app.html")
+        )
+        with open(path, encoding="utf-8") as f:
+            src = f.read()
+        start = src.rfind("function downloadPDF")
+        assert start != -1, "downloadPDF function must exist in app.html"
+        return src[start:]
+
+    def test_c06_header_uses_generated_at(self):
+        """PDF header dateStr must be derived from r.generated_at, not new Date()."""
+        src = self._pdf_src()
+        assert "r.generated_at" in src, (
+            "downloadPDF must read r.generated_at to build dateStr (C-06)"
+        )
+        # The bare new Date() call for dateStr must not appear (it would ignore report date)
+        assert "const dateStr = new Date()" not in src, (
+            "dateStr must not use new Date() directly — it must use r.generated_at (C-06)"
+        )
+
+    def test_c06_filename_uses_gen_date_not_new_date(self):
+        """Filename date must come from the same _genDate variable as the header."""
+        src = self._pdf_src()
+        assert "_genDate.toISOString" in src, (
+            "Filename must use _genDate.toISOString() so header and filename share the same date (C-06)"
+        )
+        # The filename line must reference _genDate, not a bare new Date() call
+        filename_line = next(
+            (l for l in src.splitlines() if "pdf.save(filename)" in l or "filename =" in l),
+            ""
+        )
+        assert "_genDate" in filename_line or "new Date().toISOString" not in filename_line, (
+            "Filename construction must use _genDate.toISOString(), not new Date() directly (C-06)"
+        )
+
+    def test_f7_step_label_regex_handles_bare_step_n(self):
+        """Step label strip regex must have optional separator [-–—]? to handle 'Step 1' bare labels."""
+        src = self._pdf_src()
+        # The regex must make the separator optional ([-–—]?) not required ([-–—])
+        # so "Step 1" bare labels don't survive as duplicates in the bullet output
+        assert "[-–—]?" in src, (
+            "jsPDF step-label regex must use [-–—]? (optional separator) to handle "
+            "bare 'Step N' labels without producing 'Step 1 — Step 1: ...' duplication (F-7)"
+        )
+
+    def test_f7_step_label_conditional_dash(self):
+        """After stripping the Step prefix, dash separator must only be added when label remains."""
+        src = self._pdf_src()
+        # The construction must guard: _labelPart only added when _rawLabel is non-empty
+        assert "_labelPart" in src, (
+            "jsPDF step-label must use a _labelPart guard so empty stripped labels "
+            "don't produce 'Step 1 — : value' output (F-7)"
+        )
+
+    def test_f7_section3_empty_header_suppressed(self):
+        """Heading(3) for Regulatory must only fire when rp has actual content."""
+        src = self._pdf_src()
+        assert "_rpHasContent" in src, (
+            "jsPDF §3 heading must be guarded by _rpHasContent to suppress orphan heading (F-7)"
+        )
+
+    def test_f7_section5_empty_header_suppressed(self):
+        """Heading(5) for Market Access must only fire when ma has actual content."""
+        src = self._pdf_src()
+        assert "_maHasContent" in src, (
+            "jsPDF §5 heading must be guarded by _maHasContent to suppress orphan heading (F-7)"
+        )
