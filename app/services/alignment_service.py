@@ -1443,6 +1443,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
             + researcher_ctx + intelligence_text + market_derivation_text
         ),
         pi_memory=pi_memory_context,
+        institution=institution or "",
     )
 
     # Append clinical guideline compliance check to system prompt
@@ -1482,6 +1483,10 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
         "composition'; 'Apply to NIAID SBIR Phase I, ~$300K, next deadline'; 'Run a 28-day murine "
         "thigh-infection PK/PD study vs linezolid'), with a rough cost or timeframe where known. "
         "Avoid vague advice like 'pursue funding' or 'engage stakeholders'. "
+        "INSTITUTION RULE (C-03): never name a specific institution (university, hospital, or TTO) "
+        "unless it was explicitly provided in the intake text above. "
+        "Use generic forms: 'your institution\\'s TTO', 'your technology transfer office', "
+        "'your institution\\'s patent committee'. The submitter knows their own institution. "
         "(9) MARKET SIZING: populate market_sizing.steps (eligible population, price, penetration) "
         "and the TAM/SAM/SOM values using ONLY the bottom-up derivation provided above. Keep the "
         "formula field brief — the system renders the exact, verified arithmetic separately, so do "
@@ -1677,6 +1682,23 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
                 )
     except Exception as _b04_e:
         logger.warning("B-04 person scan failed (non-fatal): %s", _b04_e)
+
+    # C-03: Scrub fabricated institution names from action items.
+    # Institution is an entity type — it must come from intake or render generically.
+    try:
+        from app.services.institution_scrubber import scrub_institution_fields as _scrub_inst
+        _c03_intake = (idea + " " + (institution or "")).lower()
+        _c03_target = {k: data[k] for k in ("recommended_next_steps",) if k in data}
+        if _c03_target:
+            _c03_cleaned, _c03_count = _scrub_inst(_c03_target, _c03_intake)
+            data.update(_c03_cleaned)
+            if _c03_count:
+                logger.warning(
+                    "C-03: replaced %d fabricated institution name(s) with generic form",
+                    _c03_count,
+                )
+    except Exception as _c03_e:
+        logger.warning("C-03 institution scrub failed (non-fatal): %s", _c03_e)
 
     # R-04: Scrub past dates from recommended_next_steps.
     # Replace any date reference (Month YYYY, Q1-4 YYYY, YYYY alone) that is
@@ -2033,11 +2055,13 @@ async def _update_world_model_bg(disease_name: str, report, pub_data: dict, ci_d
         logger.debug("World model background update failed: %s", e)
 
 
-def _build_expert_context(idea, expert, demand_results, hospital_matches, disease_knowledge="", pi_memory=""):
+def _build_expert_context(idea, expert, demand_results, hospital_matches, disease_knowledge="", pi_memory="", institution=""):
     lines = [
         f"PRINCIPAL INVESTIGATOR INNOVATION:\n{idea}",
         "",
     ]
+    if institution:
+        lines += [f"SUBMITTER'S INSTITUTION: {institution}", ""]
     if pi_memory:
         lines += [pi_memory, ""]
     lines += [
