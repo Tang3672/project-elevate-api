@@ -61,12 +61,14 @@ class TestResearchToolTamArithmetic:
 
     def test_midpoint_step_title_value_is_midpoint(self):
         """
-        The derivation step whose title contains 'midpoint' must carry the midpoint
-        value — not the pessimistic or optimistic endpoint.
+        The TAM step titled '... midpoint estimate' must carry the midpoint TAM value
+        — not the pessimistic or optimistic endpoint.  F-14 added 'midpoint' to Step 4
+        and Step 5 titles too (SAM/SOM midpoints), so we filter specifically for the
+        TAM midpoint step via 'midpoint estimate'.
         """
         deriv = _research_tool_derivation()
-        mid_steps = [s for s in deriv.steps if "midpoint" in (s.title or "").lower()]
-        assert mid_steps, "No derivation step with 'midpoint' in its title found."
+        mid_steps = [s for s in deriv.steps if "midpoint estimate" in (s.title or "").lower()]
+        assert mid_steps, "No derivation step with 'midpoint estimate' in its title found."
         for step in mid_steps:
             assert step.value > 40_000_000, (
                 f"Step '{step.title}' says midpoint but value is {step.value:,.0f} — "
@@ -215,7 +217,7 @@ class TestSomLabelConsistency:
         som_step = next((s for s in deriv.steps if "SOM" in (s.title or "")), None)
         assert som_step, "No SOM step found."
         exp_lower = (som_step.explanation or "").lower()
-        assert "5 year" in exp_lower or "5-year" in exp_lower or "5 yr" in exp_lower, (
+        assert "5 year" in exp_lower or "5-year" in exp_lower or "5 yr" in exp_lower or "5-yr" in exp_lower, (
             f"SOM explanation must mention 5-year horizon."
         )
 
@@ -282,15 +284,20 @@ class TestNoDuplicateSensitivityRange:
         )
 
     def test_confidence_note_no_contradictory_usd_range(self):
-        """confidence_note must not contain its own USD range that contradicts formula_overview."""
+        """
+        confidence_note must not contain a sprawling set of contradictory USD ranges.
+        F-14 legitimately adds Monte Carlo P5-P95 (TAM) and P25-P75 (SOM) ranges,
+        so up to 4 USD ranges are now acceptable (parameter range + 2 MC ranges + headroom).
+        The original defect — a duplicated 'sensitivity range' phrase with different numbers
+        — is covered by test_confidence_note_no_extended_sensitivity_range.
+        """
         deriv = _research_tool_derivation()
         cn = deriv.confidence_note or ""
-        # Count USD-formatted ranges (e.g. "$10M–$120M")
         import re
         usd_ranges = re.findall(r'\$\d+[MBK]?–\$\d+[MBK]?', cn)
-        assert len(usd_ranges) <= 1, (
+        assert len(usd_ranges) <= 4, (
             f"confidence_note has {len(usd_ranges)} USD ranges {usd_ranges!r}; "
-            "at most one is allowed (the parameter range, if present)"
+            "at most 4 are allowed (parameter range + Monte Carlo TAM P5-P95 + SOM P25-P75)"
         )
 
 

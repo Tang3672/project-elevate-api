@@ -54,6 +54,40 @@ class DerivationStep:
 
 
 @dataclass
+class SensitivityEntry:
+    """One row in the tornado / sensitivity chart — shows the SOM swing when one
+    parameter varies from its low to high bound while the others sit at midpoint."""
+    parameter:    str    # human-readable name, e.g. "Buyer population (eligible labs)"
+    lo_label:     str    # value at low, e.g. "3,000 labs"
+    hi_label:     str    # value at high, e.g. "8,000 labs"
+    som_at_lo:    float  # SOM when this param = lo, all others = mid
+    som_at_hi:    float  # SOM when this param = hi, all others = mid
+    swing_pct:    float  # (som_at_hi - som_at_lo) / som_mid × 100 — width of tornado bar
+
+
+@dataclass
+class MonteCarloResult:
+    """Output of a 10 k-sample Monte Carlo simulation over the parameter space."""
+    n_samples:   int
+    seed:        int
+    # TAM distribution (drives headline uncertainty)
+    tam_p5:      float
+    tam_p25:     float
+    tam_p50:     float
+    tam_p75:     float
+    tam_p95:     float
+    # SAM and SOM medians + spread
+    sam_p25:     float
+    sam_p50:     float
+    sam_p75:     float
+    som_p25:     float
+    som_p50:     float
+    som_p75:     float
+    # Tornado: parameters ranked by impact on SOM, widest bar first
+    sensitivity_ranking: list[SensitivityEntry]
+
+
+@dataclass
 class MarketSizingDerivation:
     idea:             str
     archetype:        str
@@ -70,6 +104,7 @@ class MarketSizingDerivation:
     key_assumptions:  list[str]
     confidence_note:  str
     primary_citations: list[dict]
+    monte_carlo:      Optional[MonteCarloResult] = None
 
 
 def _fmt(usd: float) -> str:
@@ -1612,6 +1647,99 @@ def _derive_samd_formula(
 # Sources: NIH RePORTER (lab count); primary user research (spend band).
 # ══════════════════════════════════════════════════════════════════════════════
 
+# SAM/SOM uncertainty bounds for the research-tool buyer model.
+# 30% and 15% are the midpoints; these ranges encode genuine ignorance
+# about early-adopter fraction and year-5 ramp rate.
+_SAM_LO, _SAM_MID, _SAM_HI = 0.15, 0.30, 0.45   # early-adopter fraction
+_SOM_LO, _SOM_MID, _SOM_HI = 0.08, 0.15, 0.25   # 5-yr SAM penetration
+
+
+def _run_research_tool_sensitivity(
+    pop_lo: float, pop_hi: float,
+    sp_lo:  float, sp_hi:  float,
+    sam_lo: float = _SAM_LO, sam_hi: float = _SAM_HI,
+    som_lo: float = _SOM_LO, som_hi: float = _SOM_HI,
+    n_samples: int = 10_000,
+    seed: int = 42,
+) -> MonteCarloResult:
+    """
+    Monte Carlo + tornado chart for the research-tool buyer model.
+
+    Four independent Uniform inputs:
+        TAM = pop × spend
+        SAM = TAM × sam_rate
+        SOM = SAM × som_rate
+
+    Returns percentile distributions and a tornado ranking (widest SOM swing first).
+    """
+    import numpy as np
+    rng = np.random.default_rng(seed)
+
+    pop   = rng.uniform(pop_lo,  pop_hi,  n_samples)
+    sp    = rng.uniform(sp_lo,   sp_hi,   n_samples)
+    sam_r = rng.uniform(sam_lo,  sam_hi,  n_samples)
+    som_r = rng.uniform(som_lo,  som_hi,  n_samples)
+
+    tam_s = pop * sp
+    sam_s = tam_s * sam_r
+    som_s = sam_s * som_r
+
+    tam_p5,  tam_p25, tam_p50, tam_p75, tam_p95 = np.percentile(tam_s, [5, 25, 50, 75, 95])
+    sam_p25, sam_p50, sam_p75                   = np.percentile(sam_s, [25, 50, 75])
+    som_p25, som_p50, som_p75                   = np.percentile(som_s, [25, 50, 75])
+
+    # Tornado: hold 3 params at midpoint, swing the 4th from lo → hi, measure SOM delta.
+    pop_mid = (pop_lo + pop_hi) / 2
+    sp_mid  = (sp_lo  + sp_hi)  / 2
+    sam_mid = (sam_lo + sam_hi) / 2
+    som_mid = (som_lo + som_hi) / 2
+    som_base = pop_mid * sp_mid * sam_mid * som_mid
+
+    def _entry(param, lo_lbl, hi_lbl, som_lo_val, som_hi_val) -> SensitivityEntry:
+        swing = (som_hi_val - som_lo_val) / som_base * 100
+        return SensitivityEntry(
+            parameter=param, lo_label=lo_lbl, hi_label=hi_lbl,
+            som_at_lo=som_lo_val, som_at_hi=som_hi_val, swing_pct=round(swing, 1),
+        )
+
+    entries = [
+        _entry(
+            "Buyer population (eligible labs)",
+            f"{pop_lo:,.0f} labs", f"{pop_hi:,.0f} labs",
+            pop_lo * sp_mid * sam_mid * som_mid,
+            pop_hi * sp_mid * sam_mid * som_mid,
+        ),
+        _entry(
+            "Annual spend per lab",
+            f"${sp_lo:,.0f}/yr", f"${sp_hi:,.0f}/yr",
+            pop_mid * sp_lo * sam_mid * som_mid,
+            pop_mid * sp_hi * sam_mid * som_mid,
+        ),
+        _entry(
+            "SAM adoption rate (early-adopter fraction)",
+            f"{sam_lo:.0%} of TAM", f"{sam_hi:.0%} of TAM",
+            pop_mid * sp_mid * sam_lo * som_mid,
+            pop_mid * sp_mid * sam_hi * som_mid,
+        ),
+        _entry(
+            "SOM penetration rate (5-yr ramp)",
+            f"{som_lo:.0%} of SAM", f"{som_hi:.0%} of SAM",
+            pop_mid * sp_mid * sam_mid * som_lo,
+            pop_mid * sp_mid * sam_mid * som_hi,
+        ),
+    ]
+    entries.sort(key=lambda e: e.swing_pct, reverse=True)
+
+    return MonteCarloResult(
+        n_samples=n_samples, seed=seed,
+        tam_p5=float(tam_p5),   tam_p25=float(tam_p25), tam_p50=float(tam_p50),
+        tam_p75=float(tam_p75), tam_p95=float(tam_p95),
+        sam_p25=float(sam_p25), sam_p50=float(sam_p50), sam_p75=float(sam_p75),
+        som_p25=float(som_p25), som_p50=float(som_p50), som_p75=float(som_p75),
+        sensitivity_ranking=entries,
+    )
+
+
 def _derive_research_tool_formula(
     idea: str, disease_name: str, therapeutic_area: str,
     us_prev: int, signals: dict,
@@ -1628,7 +1756,7 @@ def _derive_research_tool_formula(
     try:
         from app.services.buyer_model import research_tool_buyer_for_domain, MarketSizeResult
         bm = research_tool_buyer_for_domain(therapeutic_area, idea)
-        ms = MarketSizeResult(buyer_model=bm, sam_fraction=0.30, som_fraction=0.15,
+        ms = MarketSizeResult(buyer_model=bm, sam_fraction=_SAM_MID, som_fraction=_SOM_MID,
                               som_horizon_years=5)
         pop_lo  = bm.buyer_population_lo
         pop_hi  = bm.buyer_population_hi
@@ -1647,11 +1775,18 @@ def _derive_research_tool_formula(
         pop_lo, pop_hi = 3_000, 8_000
         sp_lo,  sp_hi  = 6_667, 10_000
         tam  = ((pop_lo + pop_hi) / 2) * ((sp_lo + sp_hi) / 2)
-        sam  = tam * 0.30
-        som  = sam * 0.15
+        sam  = tam * _SAM_MID
+        som  = sam * _SOM_MID
         pop_src = "NIH RePORTER — estimate pending verification"
         sp_src  = "Assumed — no observed spend data; appears in sensitivity analysis"
         domain_label = "NIH/NSF-funded research labs in scope field"
+
+    # Monte Carlo over the full parameter space (population × spend × SAM rate × SOM rate).
+    _mc: Optional[MonteCarloResult] = None
+    try:
+        _mc = _run_research_tool_sensitivity(pop_lo, pop_hi, sp_lo, sp_hi)
+    except Exception as _mc_e:
+        logger.warning("Monte Carlo sensitivity failed (non-fatal): %s", _mc_e)
 
     steps = [
         DerivationStep(
@@ -1719,38 +1854,62 @@ def _derive_research_tool_formula(
         ),
         DerivationStep(
             step_num=4,
-            title="Step 4 — Serviceable Addressable Market (SAM = 30% of TAM)",
-            formula=f"SAM = {_fmt(tam)} × 30% = {_fmt(sam)}",
+            title=f"Step 4 — Serviceable Addressable Market (SAM = {_SAM_MID:.0%} of TAM, midpoint)",
+            formula=(
+                f"SAM = {_fmt(tam)} × [{_SAM_LO:.0%}–{_SAM_HI:.0%}] early-adopter fraction "
+                f"= {_fmt(tam * _SAM_LO)}–{_fmt(tam * _SAM_HI)}; midpoint {_fmt(sam)}"
+            ),
             value=float(sam),
             unit="USD",
-            source_paper="Expert estimate — early-adopter labs likely to switch from status quo within 5 yrs",
+            source_paper="Assumed — early-adopter fraction (method=assumed; validate with n≥30 PI interviews)",
             source_url="",
             explanation=(
-                "Primary competition is status quo (manual SD cards, lab-built scripts). "
-                "~30% of eligible labs are early adopters who would switch given strong "
-                "reliability/convenience case. This fraction should be validated with "
-                "structured interview data (n≥30 PIs)."
+                f"Primary competition is status quo (manual SD cards, lab-built scripts). "
+                f"The early-adopter fraction [{_SAM_LO:.0%}–{_SAM_HI:.0%}] encodes genuine uncertainty "
+                f"about how many eligible labs would switch within 5 years. "
+                f"Midpoint {_SAM_MID:.0%} used as the planning base. "
+                f"This is the second-largest source of uncertainty in the model — see sensitivity ranking."
             ),
-            data_source="Expert estimate",
-            assumptions=["30% early-adopter fraction pending primary research validation"],
+            data_source="Assumed (method=assumed); target: structured PI interviews n≥30",
+            assumptions=[
+                f"Early-adopter fraction range: {_SAM_LO:.0%}–{_SAM_HI:.0%} (midpoint {_SAM_MID:.0%})",
+                "Validate with structured interview data before fundraising",
+            ],
         ),
         DerivationStep(
             step_num=5,
-            title="Step 5 — Serviceable Obtainable Market (SOM = 15% of SAM, 5-yr horizon)",
-            formula=f"SOM = {_fmt(sam)} × 15% = {_fmt(som)}",
+            title=f"Step 5 — Serviceable Obtainable Market (SOM = {_SOM_MID:.0%} of SAM, 5-yr horizon)",
+            formula=(
+                f"SOM = {_fmt(sam)} × [{_SOM_LO:.0%}–{_SOM_HI:.0%}] 5-yr penetration "
+                f"= {_fmt(sam * _SOM_LO)}–{_fmt(sam * _SOM_HI)}; midpoint {_fmt(som)}"
+            ),
             value=float(som),
             unit="USD",
-            source_paper="Expert estimate — early-stage research tool launch benchmarks",
+            source_paper="Assumed — 5-yr SAM ramp rate (method=assumed; validate with comparable research-tool launches)",
             source_url="",
             explanation=(
-                "15% SAM penetration over 5 years assumes: (1) 12–18 month sales cycle per lab, "
-                "(2) referral-driven growth from early adopters, (3) pricing at or below "
-                "observed spend band to reduce friction."
+                f"5-yr penetration [{_SOM_LO:.0%}–{_SOM_HI:.0%}] of SAM assumes: (1) 12–18 month sales cycle per lab, "
+                f"(2) referral-driven growth from early adopters, (3) pricing at or below observed spend band. "
+                f"Midpoint {_SOM_MID:.0%} used as planning base. "
+                f"This is the largest single source of uncertainty in the model — see sensitivity ranking."
             ),
-            data_source="Expert estimate",
-            assumptions=["5-year horizon", "15% SAM capture at product/market fit"],
+            data_source="Assumed (method=assumed); target: comparable research-tool SaaS launch benchmarks",
+            assumptions=[
+                f"5-yr penetration range: {_SOM_LO:.0%}–{_SOM_HI:.0%} of SAM (midpoint {_SOM_MID:.0%})",
+                "No Bass diffusion calibration yet; ranges from early-stage SaaS benchmarks",
+            ],
         ),
     ]
+
+    _mc_note = ""
+    if _mc is not None:
+        _mc_note = (
+            f" Monte Carlo ({_mc.n_samples:,} samples): "
+            f"TAM P5–P95 = {_fmt(_mc.tam_p5)}–{_fmt(_mc.tam_p95)}; "
+            f"SOM P25–P75 = {_fmt(_mc.som_p25)}–{_fmt(_mc.som_p75)}. "
+            f"Dominant uncertainty: {_mc.sensitivity_ranking[0].parameter} "
+            f"({_mc.sensitivity_ranking[0].swing_pct:.0f}% SOM swing)."
+        )
 
     return MarketSizingDerivation(
         idea=idea,
@@ -1768,21 +1927,24 @@ def _derive_research_tool_formula(
         sam_fmt=_fmt(sam),
         som_fmt=_fmt(som),
         key_assumptions=[
-            f"Buyer = academic PI on grant cycle (not hospital enterprise)",
-            f"Lab population: {pop_lo:,}–{pop_hi:,} eligible labs (NIH RePORTER)",
-            f"Annualised spend: ${sp_lo:,.0f}–${sp_hi:,.0f}/lab/yr (primary research)",
-            "SAM = 30% early adopters; SOM = 15% SAM over 5 yrs",
+            "Buyer = academic PI on grant cycle (not hospital enterprise)",
+            f"Lab population: {pop_lo:,}–{pop_hi:,} eligible labs ({pop_src})",
+            f"Annualised spend: ${sp_lo:,.0f}–${sp_hi:,.0f}/lab/yr ({sp_src})",
+            f"SAM adoption rate: {_SAM_LO:.0%}–{_SAM_HI:.0%} (midpoint {_SAM_MID:.0%}) — assumed",
+            f"SOM 5-yr penetration: {_SOM_LO:.0%}–{_SOM_HI:.0%} (midpoint {_SOM_MID:.0%}) — assumed",
         ],
         confidence_note=(
-            f"Lab count from NIH RePORTER queries (unverified); spend band from primary PI interviews "
-            f"(should be expanded with n≥30 structured interviews). "
-            f"Parameter range: {_fmt(pop_lo * sp_lo)}–{_fmt(pop_hi * sp_hi)}; "
-            f"midpoint ({_fmt(tam)}) used as planning base."
+            f"Lab count unverified (NIH RePORTER queries, not executed); "
+            f"spend band from primary PI interviews (expand to n≥30). "
+            f"TAM parameter range: {_fmt(pop_lo * sp_lo)}–{_fmt(pop_hi * sp_hi)}; "
+            f"midpoint {_fmt(tam)} used as planning base."
+            + _mc_note
         ),
         primary_citations=[
             {"ref": "NIH RePORTER", "title": "NIH-funded research grants by topic", "url": "https://reporter.nih.gov/"},
             {"ref": "Primary PI interviews", "title": "PI spend band (primary research)", "url": ""},
         ],
+        monte_carlo=_mc,
     )
 
 
@@ -1987,10 +2149,27 @@ def format_derivation_for_prompt(deriv: MarketSizingDerivation) -> str:
             f"{step.value:,.0f} {step.unit} | "
             f"Source: {step.source_paper[:80]}"
         )
+    mc_lines: list[str] = []
+    if deriv.monte_carlo is not None:
+        mc = deriv.monte_carlo
+        mc_lines = [
+            f"",
+            f"SENSITIVITY ANALYSIS ({mc.n_samples:,}-sample Monte Carlo, seed={mc.seed}):",
+            f"  TAM range (P5–P95): {_fmt(mc.tam_p5)} – {_fmt(mc.tam_p95)}",
+            f"  SOM range (P25–P75): {_fmt(mc.som_p25)} – {_fmt(mc.som_p75)}",
+            f"  Sensitivity ranking (widest SOM swing first):",
+        ]
+        for i, e in enumerate(mc.sensitivity_ranking, 1):
+            mc_lines.append(
+                f"    {i}. {e.parameter}: {e.lo_label} → {e.hi_label} "
+                f"(SOM swing ±{e.swing_pct:.0f}%)"
+            )
+
     lines += [
         f"",
         f"Key assumptions: {' | '.join(deriv.key_assumptions[:4])}",
         f"Uncertainty note: {deriv.confidence_note}",
+    ] + mc_lines + [
         f"",
         f"═══ MANDATORY MARKET SIZING NUMBERS — USE EXACTLY ═══",
         f"TAM: {deriv.tam_fmt} | SAM: {deriv.sam_fmt} | SOM: {deriv.som_fmt}",
