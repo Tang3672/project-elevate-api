@@ -601,8 +601,107 @@ _GENERIC_QUESTIONS: list[IntakeQuestion] = [
     ),
 ]
 
+_RESEARCH_SAAS_QUESTIONS: list[IntakeQuestion] = [
+    IntakeQuestion(
+        id="rsq_buyer_persona",
+        text="Who is the primary purchaser and what drives their buying decision?",
+        binds_to="buyer.persona",
+        why_asked="Buyer persona (PI self-serve vs IT vs core facility) determines deal structure and price ceiling.",
+        input_type="single",
+        options=[
+            "Individual PI with NIH R01/R21 funding — purchases from lab supplies budget",
+            "Core facility or research IT department — institutional procurement or site license",
+            "University library or data office — institution-wide research data infrastructure",
+            "Industry R&D lab (pharma/biotech) — vendor qualification and data governance required",
+        ],
+        default=None,
+        impact_rank=1,
+    ),
+    IntakeQuestion(
+        id="rsq_price_band",
+        text="What is the expected annual cost per lab or per institution?",
+        binds_to="price.observed_band",
+        why_asked="Annual subscription band sets the SAM ceiling and informs per-seat vs site-license pricing.",
+        input_type="single",
+        options=[
+            "Under $2k/yr (freemium or low-cost add-on to existing hardware)",
+            "$2k–$10k/yr (individual lab or per-PI subscription)",
+            "$10k–$50k/yr (core facility or department license)",
+            "Over $50k/yr (institution-wide site license or enterprise contract)",
+        ],
+        default=None,
+        impact_rank=2,
+        engine_estimate=_lsr_price_band_estimate(),
+    ),
+    IntakeQuestion(
+        id="rsq_status_quo",
+        text="What does the lab currently do instead of using this platform?",
+        binds_to="comp.status_quo",
+        why_asked="Incumbent workflow (manual transfer, consumer cloud, ELN) anchors the switching-cost and moat score.",
+        input_type="single",
+        options=[
+            "Manual transfer — grad students physically move files via SD card or USB",
+            "Consumer cloud — Dropbox, Box, or Google Drive shared folder",
+            "Home-built scripts — custom cron jobs or Python/Bash transfer automation",
+            "Commercial ELN or data platform (e.g. LabArchives, Benchling, Quartzy)",
+        ],
+        default=None,
+        impact_rank=3,
+    ),
+    IntakeQuestion(
+        id="rsq_data_type",
+        text="What type of research data does the platform primarily manage or move?",
+        binds_to="seg.primary_data_type",
+        why_asked="Data type (time series vs imaging vs omics) determines which lab segments are addressable and sets storage cost expectations.",
+        input_type="single",
+        options=[
+            "Behavioral / physiological time series (running wheels, EEG, EMG, force plates)",
+            "Imaging data (fluorescence microscopy, histology, in-vivo MRI/fMRI)",
+            "Genomics / sequencing outputs (FASTQ, BAM, VCF files)",
+            "General experimental files (any format — instrument-agnostic)",
+        ],
+        default=None,
+        impact_rank=4,
+    ),
+    IntakeQuestion(
+        id="rsq_regulatory_gate",
+        text="Does the platform ever handle data linked to an identified patient?",
+        binds_to="reg.intended_use_jurisdiction",
+        why_asked="HIPAA scope changes the compliance burden and sales cycle significantly for research data platforms.",
+        input_type="single",
+        options=[
+            "No — purely de-identified or non-human research data",
+            "No — but data may be retrospectively linked to patient records under an IRB protocol",
+            "Unclear — some users may link experimental data to clinical records",
+            "Yes — the platform handles identified human subject data",
+        ],
+        default="No — purely de-identified or non-human research data",
+        impact_rank=5,
+    ),
+    IntakeQuestion(
+        id="rsq_grant_funding",
+        text="Is the lab's purchase expected to be funded by a specific mechanism?",
+        binds_to="buyer.budget_source",
+        why_asked="Grant mechanism (R01 supplies vs S10 equipment vs institutional) determines decision timeline and price elasticity.",
+        input_type="single",
+        options=[
+            "R01/R21 lab supplies budget (~$50k–$200k/yr indirect)",
+            "S10 shared instrumentation or data infrastructure grant (≥ $50k, multi-PI)",
+            "SBIR/STTR direct commercialisation grant",
+            "Institutional / departmental discretionary budget (no specific grant)",
+        ],
+        default=None,
+        impact_rank=6,
+    ),
+]
+
 _RESEARCH_ARCHETYPES = frozenset({
     "research_tool_non_clinical",
+    "research_infrastructure_saas",
+    "research_saas",
+})
+
+_RESEARCH_SAAS_ARCHETYPES = frozenset({
     "research_infrastructure_saas",
     "research_saas",
 })
@@ -630,7 +729,11 @@ def get_conditioned_questions(cls: Classification) -> list[IntakeQuestion]:
     arch_l = (cls.archetype or "").lower()
     domain_l = (cls.domain or "").upper()
 
-    if arch_l in _RESEARCH_ARCHETYPES or domain_l == "LIFE_SCIENCES_RESEARCH":
+    if arch_l in _RESEARCH_SAAS_ARCHETYPES:
+        # Data platforms, cloud sync, ELNs: data-centric questions
+        return list(_RESEARCH_SAAS_QUESTIONS)
+    elif arch_l in _RESEARCH_ARCHETYPES or domain_l == "LIFE_SCIENCES_RESEARCH":
+        # Physical instruments, sensors, hardware research tools
         return list(_RESEARCH_QUESTIONS)
     elif arch_l in _DEVICE_ARCHETYPES:
         return list(_DEVICE_QUESTIONS)

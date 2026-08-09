@@ -964,7 +964,11 @@ async def classify_product_endpoint(
         raise HTTPException(status_code=400, detail="Idea too short for classification")
 
     try:
-        cls = classify_product(idea)
+        import asyncio
+        loop = asyncio.get_event_loop()
+        # classify_product() makes a blocking Haiku call — run it off the event loop
+        # so the connection doesn't drop while the thread is waiting on Anthropic.
+        cls = await loop.run_in_executor(None, classify_product, idea)
         conditioned_qs = get_conditioned_questions(cls)
         legacy_qs = questions_to_legacy_format(conditioned_qs)
 
@@ -1168,11 +1172,19 @@ Return ONLY a JSON array of 6 objects. No other text.
 }}]"""
 
     try:
+        import asyncio as _aio
         client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-        msg = client.messages.create(
-            model="claude-haiku-4-5-20251001",  # cheap + fast — questions don't need Sonnet
-            max_tokens=1500,
-            messages=[{"role": "user", "content": prompt}],
+        # Sync Anthropic client — run off the event loop so the connection stays alive
+        # while Anthropic processes (typically 3–8 s); blocking the loop here caused
+        # "connection closed mid response" on Railway.
+        _loop = _aio.get_event_loop()
+        msg = await _loop.run_in_executor(
+            None,
+            lambda: client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=1500,
+                messages=[{"role": "user", "content": prompt}],
+            ),
         )
         text = msg.content[0].text if msg.content else "[]"
         # Extract JSON array
@@ -1289,12 +1301,17 @@ Return ONLY valid JSON with these exact fields:
     )
 
     try:
+        import asyncio as _aio
         client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-        msg = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=1200,
-            system=system,
-            messages=[{"role": "user", "content": user}],
+        _ncs_loop = _aio.get_event_loop()
+        msg = await _ncs_loop.run_in_executor(
+            None,
+            lambda: client.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=1200,
+                system=system,
+                messages=[{"role": "user", "content": user}],
+            ),
         )
         raw = msg.content[0].text.strip()
         if raw.startswith("```"):
