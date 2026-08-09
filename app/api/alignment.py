@@ -1014,26 +1014,10 @@ async def generate_clarifying_questions(
     if not idea or len(idea) < 20:
         raise HTTPException(status_code=400, detail="Idea too short")
 
-    # Fast path: conditioned questions from the deterministic bank
-    if classification_hint and isinstance(classification_hint, dict):
-        try:
-            from app.services.product_classifier import (
-                Classification, get_conditioned_questions, questions_to_legacy_format
-            )
-            cls = Classification(
-                product_name=classification_hint.get("product_name", ""),
-                one_line=classification_hint.get("one_line", ""),
-                domain=classification_hint.get("domain", "LIFE_SCIENCES_CLINICAL"),
-                archetype=classification_hint.get("archetype", "therapeutic_small_molecule"),
-                trl=int(classification_hint.get("trl", 3)),
-                confidence=float(classification_hint.get("confidence", 0.5)),
-                ambiguities=classification_hint.get("ambiguities", []),
-            )
-            conditioned_qs = get_conditioned_questions(cls)
-            legacy_qs = questions_to_legacy_format(conditioned_qs)
-            return {"questions": legacy_qs, "pathway": pathway, "conditioned": True}
-        except Exception as _cond_exc:
-            logger.warning("conditioned question fast-path failed: %s — falling through to LLM", _cond_exc)
+    # classification_hint is available to the LLM prompt below (for context),
+    # but we no longer short-circuit to the static bank here — the LLM generates
+    # questions tailored to the specific product description. Static conditioned
+    # questions are only the fallback when the LLM call fails.
 
     # Run live competitive sweep in parallel so the questions can reference real named competitors
     competitive_context = ""
@@ -1233,8 +1217,48 @@ Return ONLY a JSON array of 6 objects. No other text.
                 }
                 questions = [_mono_q] + questions
             return {"questions": questions[:8], "pathway": pathway}
+        # LLM returned no parseable questions — fall back to conditioned static bank
+        logger.warning("/clarify: LLM returned no questions, falling back to static bank")
+        if classification_hint and isinstance(classification_hint, dict):
+            try:
+                from app.services.product_classifier import (
+                    Classification, get_conditioned_questions, questions_to_legacy_format,
+                )
+                _cls = Classification(
+                    product_name=classification_hint.get("product_name", ""),
+                    one_line=classification_hint.get("one_line", ""),
+                    domain=classification_hint.get("domain", "LIFE_SCIENCES_CLINICAL"),
+                    archetype=classification_hint.get("archetype", "therapeutic_small_molecule"),
+                    trl=int(classification_hint.get("trl", 3)),
+                    confidence=float(classification_hint.get("confidence", 0.5)),
+                    ambiguities=classification_hint.get("ambiguities", []),
+                )
+                _legacy = questions_to_legacy_format(get_conditioned_questions(_cls))
+                return {"questions": _legacy, "pathway": pathway, "conditioned": True}
+            except Exception:
+                pass
         return {"questions": [], "pathway": pathway}
     except Exception as e:
+        # LLM call failed entirely — fall back to static bank before returning 500
+        logger.warning("/clarify: LLM exception, falling back to static bank: %s", e)
+        if classification_hint and isinstance(classification_hint, dict):
+            try:
+                from app.services.product_classifier import (
+                    Classification, get_conditioned_questions, questions_to_legacy_format,
+                )
+                _cls = Classification(
+                    product_name=classification_hint.get("product_name", ""),
+                    one_line=classification_hint.get("one_line", ""),
+                    domain=classification_hint.get("domain", "LIFE_SCIENCES_CLINICAL"),
+                    archetype=classification_hint.get("archetype", "therapeutic_small_molecule"),
+                    trl=int(classification_hint.get("trl", 3)),
+                    confidence=float(classification_hint.get("confidence", 0.5)),
+                    ambiguities=classification_hint.get("ambiguities", []),
+                )
+                _legacy = questions_to_legacy_format(get_conditioned_questions(_cls))
+                return {"questions": _legacy, "pathway": pathway, "conditioned": True}
+            except Exception:
+                pass
         raise HTTPException(status_code=500, detail=str(e))
 
 
