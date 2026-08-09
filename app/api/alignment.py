@@ -1041,7 +1041,7 @@ async def generate_clarifying_questions(
                     product_type=product_type or "drug_small_molecule",
                 )
             ),
-            timeout=12.0,
+            timeout=5.0,
         )
         if landscape.competitors:
             competitive_context = format_for_prompt(landscape)
@@ -1074,8 +1074,7 @@ async def generate_clarifying_questions(
     except Exception:
         pass
 
-    # Determine modality so the questions match the KIND of product. A device/SaMD must
-    # NOT get drug patient-population / line-of-therapy / MIC-IC50 questions.
+    # Determine modality so the questions match the KIND of product.
     _mod_sid = ""
     try:
         from app.services.soft_router import soft_route
@@ -1083,8 +1082,15 @@ async def generate_clarifying_questions(
     except Exception:
         pass
     _mk = f"{_mod_sid} {product_type}".lower()
+    # Also look at the classification archetype (from /classify) if available
+    _arch = (classification_hint or {}).get("archetype", "") if isinstance(classification_hint, dict) else ""
     _is_devicelike = (_mod_sid.lower().startswith(("device_", "diagnostic_", "digital_"))
                       or any(x in _mk for x in ("software", "samd", "medical_device", "diagnostic", "digital")))
+    _is_research_tool = (not _is_devicelike and (
+        _mod_sid.lower().startswith("research_")
+        or _arch.lower().startswith("research_")
+        or any(x in _mk for x in ("research_tool", "research_infra", "research_saas"))
+    ))
 
     if _is_devicelike:
         param_block = """REQUIRED PARAMETERS TO UNLOCK (one question per parameter) — this is a DEVICE / DIAGNOSTIC / SaMD, so ask about the software/device, NOT drug patient populations:
@@ -1104,6 +1110,25 @@ async def generate_clarifying_questions(
 - Every option must be specific to THIS software/device and clinical use — never abstract, and never drug-shaped
 - Use real device/AI competitor names and real technical endpoints (sensitivity, specificity, AUC, time-to-result) — NOT drug names, organisms, MIC/IC50, or lines of therapy
 - Options should cover the realistic range for this specific product
+- Include a "None of these — explain:" option when appropriate"""
+    elif _is_research_tool:
+        param_block = """REQUIRED PARAMETERS TO UNLOCK (one question per parameter) — this is a NON-CLINICAL RESEARCH TOOL / DATA PLATFORM for academic or industry research labs, so ask about lab workflows and lab economics, NOT clinical pathways or patient populations:
+  Q1 → LAB SEGMENT: Which specific type of research lab or instrumentation ecosystem is the primary market?
+       (e.g., rodent behavioral neuroscience, human EEG, primate electrophysiology, genomics, imaging — be specific to what the product connects to or serves)
+  Q2 → STATUS QUO / INCUMBENT: What do labs currently do instead, and what named tools/workflows does this replace?
+       (e.g., manual USB export, MATLAB cloud connectors, Neuralynx/Plexon vendor-native cloud, Benchling ELN, LabArchives — name the specific incumbent)
+  Q3 → TECHNICAL NOVELTY: What does this do that existing research software or instrument vendor cloud solutions don't?
+       (passive vs. active sync, multi-vendor support, real-time closed-loop, instrument-agnostic protocol — be specific)
+  Q4 → ADOPTION EVIDENCE: How many labs are actively using it, and what is the usage pattern?
+       (beta users, publication mentions, grant acknowledgments, repeat daily users — what is the strongest current evidence of value?)
+  Q5 → BUYER & BUDGET: Who actually pays, and from which budget line?
+       (PI from R01/R21 supplies budget, core facility director, university IT, industry R&D lab — and approx. annual cost per lab)
+  Q6 → COMPETITIVE MOAT: vs the single most similar tool or vendor native solution, what is the measurable advantage?
+       (e.g., vs Spike2 cloud export: Hublink is instrument-agnostic across Noldus + Med Associates + TDT simultaneously)"""
+        options_rules = """RULES FOR OPTIONS:
+- Every option must be specific to THIS research tool and the lab ecosystem it serves — never abstract or clinical
+- Use real research software names (MATLAB, LabVIEW, Spike2, Benchling, LabArchives, Open Ephys, Med Associates, Noldus, etc.) and real lab workflows
+- Options should cover the realistic range a PI would recognize from their own lab
 - Include a "None of these — explain:" option when appropriate"""
     else:
         param_block = """REQUIRED FORMULA PARAMETERS TO UNLOCK (one question per parameter):
@@ -1125,13 +1150,24 @@ async def generate_clarifying_questions(
 - Options should cover the realistic range for this specific product
 - Include a "None of these — explain:" option when appropriate"""
 
+    # Include classification context if available so LLM knows the product category
+    classification_context = ""
+    if isinstance(classification_hint, dict):
+        _hint_arch = classification_hint.get("archetype", "")
+        _hint_domain = classification_hint.get("domain", "")
+        _hint_one_line = classification_hint.get("one_line", "")
+        if _hint_arch:
+            classification_context = f"\nClassified as: {_hint_arch} ({_hint_domain})"
+            if _hint_one_line:
+                classification_context += f"\nOne-line: {_hint_one_line}"
+
     prompt = f"""You are conducting deep research on a health innovation before generating a market intelligence report.
 Your goal: ask the 6 most important questions that will make this specific report dramatically more accurate.
 
 THE INNOVATION:
 "{idea}"
 
-Product type: {product_type}
+Product type: {product_type}{classification_context}
 {data_context}
 {competitive_context}
 
@@ -1147,28 +1183,24 @@ DEEP RESEARCH PRINCIPLES (follow these exactly):
 
 {options_rules}
 
-Return ONLY a JSON array of 6 objects. No other text.
+Return ONLY a valid JSON array of 6 objects. No markdown, no explanation, no other text.
 [{{
-  "question": "<specific question directly referencing the product's disease/mechanism>",
+  "question": "<specific question directly referencing the product>",
   "field": "snake_case_key",
   "options": ["<specific option with concrete detail>", "<specific option>", "<specific option>", "<specific option>"],
   "hint": "<prompt for what additional detail would most improve the analysis>"
 }}]"""
 
     try:
-        import asyncio as _aio
-        client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-        # Sync Anthropic client — run off the event loop so the connection stays alive
-        # while Anthropic processes (typically 3–8 s); blocking the loop here caused
-        # "connection closed mid response" on Railway.
-        _loop = _aio.get_event_loop()
-        msg = await _loop.run_in_executor(
-            None,
-            lambda: client.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=1500,
-                messages=[{"role": "user", "content": prompt}],
-            ),
+        # AsyncAnthropic is the native async client — no run_in_executor needed.
+        # The previous sync+run_in_executor pattern was unreliable on Railway because
+        # the competitive sweep (up to 12 s) + LLM (5-8 s) together could exceed
+        # Railway's proxy timeout before the response was assembled.
+        client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+        msg = await client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=1500,
+            messages=[{"role": "user", "content": prompt}],
         )
         text = msg.content[0].text if msg.content else "[]"
         # Extract JSON array
@@ -1193,6 +1225,14 @@ Return ONLY a JSON array of 6 objects. No other text.
                 "status_quo": "comp.status_quo",
                 "target_sites": "seg.gate.facility_type",
                 "intended_use": "seg.primary_use_case",
+                # research-tool fields
+                "lab_segment": "seg.primary_use_case",
+                "research_workflow_positioning": "seg.gate.use_case_depth",
+                "incumbent": "comp.status_quo",
+                "technical_novelty": "dev.mechanism_novelty",
+                "adoption_evidence": "dev.evidence_stage",
+                "competitive_moat": "comp.nearest_named_competitor",
+                "eligible_research_subpopulation": "seg.gate.eligible_population",
             }
             for q in questions:
                 if "binds_to" not in q:

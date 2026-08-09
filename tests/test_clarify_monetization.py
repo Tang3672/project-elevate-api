@@ -17,21 +17,31 @@ from app.api.auth import get_current_user
 
 @pytest.fixture
 def client(monkeypatch):
-    # Stub the Anthropic client so no network/LLM is hit; return two generic questions.
-    class _FakeMsg:
-        content = [type("C", (), {"text": '[{"question":"q1","field":"a","options":["x"],"hint":"h"},'
-                                          '{"question":"q2","field":"b","options":["y"],"hint":"h"}]'})()]
+    # Stub the async Anthropic client so no network/LLM is hit; return two generic questions.
+    _FAKE_TEXT = ('[{"question":"q1","field":"a","options":["x"],"hint":"h"},'
+                  '{"question":"q2","field":"b","options":["y"],"hint":"h"}]')
 
-    class _FakeMessages:
-        def create(self, **kw):
+    class _FakeMsg:
+        content = [type("C", (), {"text": _FAKE_TEXT})()]
+
+    class _FakeAsyncMessages:
+        async def create(self, **kw):
             return _FakeMsg()
 
-    class _FakeClient:
+    class _FakeAsyncClient:
         def __init__(self, *a, **k):
-            self.messages = _FakeMessages()
+            self.messages = _FakeAsyncMessages()
 
     import anthropic
-    monkeypatch.setattr(anthropic, "Anthropic", _FakeClient)
+    monkeypatch.setattr(anthropic, "AsyncAnthropic", _FakeAsyncClient)
+    # Also stub the sync client in case any other path uses it
+    class _FakeSyncMessages:
+        def create(self, **kw):
+            return _FakeMsg()
+    class _FakeSyncClient:
+        def __init__(self, *a, **k):
+            self.messages = _FakeSyncMessages()
+    monkeypatch.setattr(anthropic, "Anthropic", _FakeSyncClient)
 
     # Bypass competitor sweep + enrichment side calls (best-effort blocks already swallow errors).
     app = FastAPI()
