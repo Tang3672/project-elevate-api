@@ -1119,74 +1119,32 @@ async def generate_clarifying_questions(
 - Options should cover the realistic range for this specific product
 - Include a "None of these — explain:" option when appropriate"""
     elif _is_research_tool:
-        param_block = """MARKET SIZING PARAMETER QUESTIONS — this is a NON-CLINICAL RESEARCH TOOL / DATA PLATFORM.
-Generate exactly 6 questions, one per parameter listed below. Each question text must be tailored to THIS specific product.
-Options MUST follow the numeric format shown — the backend extracts these numbers to override the market sizing formula.
+        param_block = """This is a NON-CLINICAL RESEARCH TOOL. Generate exactly 6 questions with these exact field values and option formats (the backend parses the numbers to set TAM/SAM/SOM):
 
-PARAMETER Q1 — field MUST be "seg.target_lab_count" (sets pop_lo/pop_hi in TAM = pop × price):
-  Topic: How many US research labs is this realistically targeting?
-  Write the question specific to this product's lab type (e.g. "How many US neuroscience labs actively run unattended SD card experiments where automated sync would save time?")
-  Options MUST be 4 lab-count tiers in this exact format:
-    "Fewer than 1,000 labs — [describe the specific niche]"
-    "1,000–5,000 labs — [describe the segment]"
-    "5,000–20,000 labs — [describe the broader category]"
-    "Over 20,000 labs — [describe the broad use case]"
-  hint: Explain that this is the TAM population multiplier — the single largest driver of market size.
+Q1 field="seg.target_lab_count" — How many US labs of the relevant type does this realistically reach? Write the question specific to THIS product.
+Options (4 tiers, EXACT format — numbers are parsed): "Fewer than 1,000 labs — [niche]" | "1,000–5,000 labs — [segment]" | "5,000–20,000 labs — [broader]" | "Over 20,000 labs — [broad]"
+hint: "TAM = lab count × annual price — this number is the largest single driver of market size"
 
-PARAMETER Q2 — field MUST be "price.annual_per_lab" (sets sp_lo/sp_hi in TAM = pop × price):
-  Topic: What annual subscription price per lab does this target?
-  Write the question specific to this product's pricing context.
-  Options MUST be 4 dollar-range tiers in this exact format:
-    "Under $500/yr — [describe: e.g. grant-incidental, consumable-level spend]"
-    "$500–$2,000/yr — [describe: e.g. standard research software tier]"
-    "$2,000–$8,000/yr — [describe: e.g. mid-tier lab infrastructure]"
-    "$8,000–$25,000/yr — [describe: e.g. core facility or site license]"
-  hint: Explain that TAM = lab count × this price, so a $500 vs $5,000 answer changes TAM by 10×.
+Q2 field="price.annual_per_lab" — What annual price per lab does this target? Write specific to THIS product.
+Options (4 tiers, EXACT format): "Under $500/yr — [budget tier]" | "$500–$2,000/yr — [standard software]" | "$2,000–$8,000/yr — [mid-tier]" | "$8,000–$25,000/yr — [enterprise/core facility]"
+hint: "TAM = pop × this price; a $500 vs $5,000 answer changes TAM 10×"
 
-PARAMETER Q3 — field MUST be "seg.addressable_fraction" (sets SAM rate; SAM = TAM × this):
-  Topic: Of the target labs, what fraction has the problem badly enough to pay to solve it today?
-  Write the question specific to this product's pain point.
-  Options MUST be 4 percentage-range tiers in this exact format:
-    "Under 20% — [describe: e.g. niche pain, most labs have a workaround]"
-    "20–50% — [describe: e.g. common friction but labs tolerate manual process]"
-    "50–80% — [describe: e.g. near-universal for labs running long-duration unattended experiments]"
-    "Over 80% — [describe: e.g. virtually every target lab has this problem]"
-  hint: Explain this directly sets the SAM (Serviceable Addressable Market) as a fraction of TAM.
+Q3 field="seg.addressable_fraction" — What fraction of target labs has this pain badly enough to pay now? Write specific to THIS product.
+Options (4 tiers, EXACT format): "Under 20% — [niche pain]" | "20–50% — [common but tolerated]" | "50–80% — [near-universal pain]" | "Over 80% — [everyone has this problem]"
+hint: "This sets the SAM rate (SAM = TAM × this fraction)"
 
-PARAMETER Q4 — field MUST be "dev.paying_customers" (commercial traction; calibrates SOM):
-  Topic: How many labs are currently paying for or committed to this product?
-  Write the question specific to this product.
-  Options MUST be 4 count tiers:
-    "None yet — free beta / pilot stage; no revenue"
-    "1–10 labs paying or with signed LOIs"
-    "10–50 labs actively paying"
-    "50+ labs paying — validated product-market fit"
-  hint: Explain this calibrates the 5-yr SOM penetration rate in the model.
+Q4 field="dev.paying_customers" — Current paying or committed labs? Write specific to THIS product.
+Options: "None yet — free beta/pilot" | "1–10 labs paying or with LOIs" | "10–50 labs actively paying" | "50+ labs paying"
+hint: "Calibrates 5-yr SOM penetration rate"
 
-PARAMETER Q5 — field MUST be "price.deal_structure" (revenue model; affects per-unit pricing):
-  Topic: How is this product sold — what is the unit of sale?
-  Write the question specific to this product.
-  Options (no numeric format required here — 4 distinct pricing models):
-    "Per-lab annual subscription (one flat price per PI lab regardless of instrument count)"
-    "Per-device/per-instrument connection (price scales with how many instruments are connected)"
-    "Per-institution site license (university pays once for all labs)"
-    "Hardware device with bundled software (one-time purchase + annual maintenance)"
-  hint: Explain this determines whether the sp (spend per lab) in the formula is per-lab or per-device.
+Q5 field="price.deal_structure" — What is the unit of sale? Write specific to THIS product.
+Options: "Per-lab annual subscription" | "Per-device/instrument connection" | "Per-institution site license" | "Hardware + bundled software"
+hint: "Determines whether TAM formula uses per-lab or per-device pricing"
 
-PARAMETER Q6 — field MUST be "seg.primary_domain" (refines which population reference to use):
-  Topic: Which specific research domain or instrument ecosystem is the primary go-to-market target?
-  Write the question specific to this product.
-  Options (4 named domains with approximate US lab count in parentheses):
-    "[Domain 1 specific to this product] (~X,000 US labs)"
-    "[Domain 2] (~X,000 US labs)"
-    "[Domain 3] (~X,000 US labs)"
-    "Domain-agnostic — any academic lab with [relevant instrument type] (~X0,000 US labs)"
-  hint: Explain this selects the reference population from NIH RePORTER grant data."""
-        options_rules = """RULES FOR ALL OPTIONS:
-- Every option must be specific to THIS product's context — never abstract or clinical
-- For Q1/Q2/Q3: options MUST follow the numeric format exactly (the backend parses these numbers)
-- For Q4/Q6: use real named domains and real count estimates
-- The hint for each question must explicitly state which formula parameter it controls (pop, sp, SAM rate, SOM, etc.)"""
+Q6 field="seg.primary_domain" — Which research domain/instrument ecosystem is the primary GTM target? Write specific to THIS product with REAL named domains and approximate US lab counts.
+Options: "[domain 1] (~X,000 US labs)" | "[domain 2] (~X,000 US labs)" | "[domain 3] (~X,000 US labs)" | "Domain-agnostic (~XX,000 US labs)"
+hint: "Selects the NIH RePORTER population reference for the TAM calculation" """
+        options_rules = "OPTIONS RULE: Q1/Q2/Q3 options MUST include the exact numbers shown — the backend parses them. Use real domain names and lab counts for Q6. Never use clinical language."
     else:
         param_block = """REQUIRED FORMULA PARAMETERS TO UNLOCK (one question per parameter):
   Q1 → ELIGIBLE SUBPOPULATION: Which specific patient subset does this target?
@@ -1256,7 +1214,7 @@ Return ONLY a valid JSON array of 6 objects. No markdown, no explanation, no oth
         client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
         msg = await client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=1500,
+            max_tokens=2500,
             messages=[{"role": "user", "content": prompt}],
         )
         text = msg.content[0].text if msg.content else "[]"
