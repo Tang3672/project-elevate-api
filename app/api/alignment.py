@@ -1088,11 +1088,16 @@ async def generate_clarifying_questions(
     _arch = (classification_hint or {}).get("archetype", "") if isinstance(classification_hint, dict) else ""
     _is_devicelike = (_mod_sid.lower().startswith(("device_", "diagnostic_", "digital_"))
                       or any(x in _mk for x in ("software", "samd", "medical_device", "diagnostic", "digital")))
-    _is_research_tool = (not _is_devicelike and (
-        _mod_sid.lower().startswith("research_")
-        or _arch.lower().startswith("research_")
-        or any(x in _mk for x in ("research_tool", "research_infra", "research_saas"))
-    ))
+    # Explicit research_* archetype from /classify always wins over product_type inference
+    _is_research_tool = (
+        _arch.lower().startswith("research_")
+        or (not _is_devicelike and (
+            _mod_sid.lower().startswith("research_")
+            or any(x in _mk for x in ("research_tool", "research_infra", "research_saas"))
+        ))
+    )
+    if _is_research_tool:
+        _is_devicelike = False
 
     if _is_devicelike:
         param_block = """REQUIRED PARAMETERS TO UNLOCK (one question per parameter) — this is a DEVICE / DIAGNOSTIC / SaMD, so ask about the software/device, NOT drug patient populations:
