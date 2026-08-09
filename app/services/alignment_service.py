@@ -61,6 +61,7 @@ async def generate_pi_report(
     product_name:   Optional[str] = None,
     institution:    Optional[str] = None,
     domain:         Optional[str] = None,
+    clarify_answers: "dict | None" = None,
 ) -> PIReport:
     """
     Full MoE pipeline: idea → Expert Router → Expert Context → Claude → PIReport.
@@ -1303,6 +1304,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
             therapeutic_area=ta_for_deriv,
             us_patient_population=us_pop,
             sub_expert_id=sub_expert_id or "",   # H-07: research tools routed to buyer model
+            user_params=clarify_answers or {},
         )
         market_derivation_text = format_derivation_for_prompt(deriv)
         logger.info("Market sizing derivation generated: TAM=%s SAM=%s", deriv.tam_fmt, deriv.sam_fmt)

@@ -1654,6 +1654,67 @@ _SAM_LO, _SAM_MID, _SAM_HI = 0.15, 0.30, 0.45   # early-adopter fraction
 _SOM_LO, _SOM_MID, _SOM_HI = 0.08, 0.15, 0.25   # 5-yr SAM penetration
 
 
+def _parse_numeric_range(text: str) -> "tuple[float, float] | None":
+    """Extract (lo, hi) from option text like '1,000–5,000 labs' or '$2,000–$8,000/yr'.
+    Returns None if no parseable range found."""
+    import re
+    nums = [float(n.replace(",", "")) for n in re.findall(r"[\$]?([\d,]+(?:\.\d+)?)", text)]
+    if len(nums) >= 2:
+        return float(nums[0]), float(nums[1])
+    if len(nums) == 1:
+        # "Under X" → (0, X); "Over X" → (X, X * 4)
+        lo_text = text.lower()
+        if any(w in lo_text for w in ("under", "fewer", "below", "less")):
+            return 0.0, float(nums[0])
+        if any(w in lo_text for w in ("over", "more", "above", "50+")):
+            return float(nums[0]), float(nums[0]) * 4.0
+    return None
+
+
+def _apply_user_params(
+    user_params: dict,
+    pop_lo: float, pop_hi: float,
+    sp_lo: float,  sp_hi: float,
+    sam_lo: float = _SAM_LO, sam_hi: float = _SAM_HI,
+) -> "tuple[float, float, float, float, float, float, dict]":
+    """Apply PI-provided intake answers to override default market sizing parameters.
+
+    Returns (pop_lo, pop_hi, sp_lo, sp_hi, sam_lo, sam_hi, override_notes) where
+    override_notes records which params were actually changed and why.
+    """
+    import re
+    overrides: dict = {}
+
+    # Q1 — target lab population
+    lab_ans = user_params.get("seg.target_lab_count", "")
+    if lab_ans:
+        r = _parse_numeric_range(lab_ans)
+        if r:
+            pop_lo, pop_hi = r
+            overrides["pop"] = f"PI-provided: {int(pop_lo):,}–{int(pop_hi):,} labs"
+
+    # Q2 — annual price per lab
+    price_ans = user_params.get("price.annual_per_lab", "")
+    if price_ans:
+        r = _parse_numeric_range(price_ans)
+        if r:
+            sp_lo, sp_hi = r
+            overrides["sp"] = f"PI-provided: ${int(sp_lo):,}–${int(sp_hi):,}/yr per lab"
+
+    # Q3 — addressable fraction (SAM rate)
+    sam_ans = user_params.get("seg.addressable_fraction", "")
+    if sam_ans:
+        pcts = re.findall(r"(\d+)(?:\s*[–-]\s*(\d+))?\s*%", sam_ans)
+        if pcts:
+            lo_pct = float(pcts[0][0]) / 100
+            hi_pct = float(pcts[0][1]) / 100 if pcts[0][1] else lo_pct * 1.5
+            sam_lo = min(lo_pct, hi_pct)
+            sam_hi = max(lo_pct, hi_pct)
+            overrides["sam"] = f"PI-provided: {sam_lo:.0%}–{sam_hi:.0%} addressable"
+
+    return pop_lo, pop_hi, sp_lo, sp_hi, sam_lo, sam_hi, overrides
+
+
 def _run_research_tool_sensitivity(
     pop_lo: float, pop_hi: float,
     sp_lo:  float, sp_hi:  float,
@@ -1743,6 +1804,7 @@ def _run_research_tool_sensitivity(
 def _derive_research_tool_formula(
     idea: str, disease_name: str, therapeutic_area: str,
     us_prev: int, signals: dict,
+    user_params: "dict | None" = None,
 ) -> "MarketSizingDerivation":
     """
     Bottom-up TAM for non-clinical research tools.
@@ -1781,10 +1843,29 @@ def _derive_research_tool_formula(
         sp_src  = "Assumed — no observed spend data; appears in sensitivity analysis"
         domain_label = "NIH/NSF-funded research labs in scope field"
 
+    # Override defaults with PI-provided intake answers (from /clarify questions).
+    _sam_lo, _sam_hi = _SAM_LO, _SAM_HI
+    _user_overrides: dict = {}
+    if user_params:
+        pop_lo, pop_hi, sp_lo, sp_hi, _sam_lo, _sam_hi, _user_overrides = _apply_user_params(
+            user_params, pop_lo, pop_hi, sp_lo, sp_hi
+        )
+        if _user_overrides.get("pop"):
+            pop_src = "PI intake answer — " + _user_overrides["pop"]
+        if _user_overrides.get("sp"):
+            sp_src = "PI intake answer — " + _user_overrides["sp"]
+
+    # Recompute midpoints after any overrides
+    sam_mid = (_sam_lo + _sam_hi) / 2
+    tam  = ((pop_lo + pop_hi) / 2) * ((sp_lo + sp_hi) / 2)
+    sam  = tam * sam_mid
+    som  = sam * _SOM_MID
+
     # Monte Carlo over the full parameter space (population × spend × SAM rate × SOM rate).
     _mc: Optional[MonteCarloResult] = None
     try:
-        _mc = _run_research_tool_sensitivity(pop_lo, pop_hi, sp_lo, sp_hi)
+        _mc = _run_research_tool_sensitivity(pop_lo, pop_hi, sp_lo, sp_hi,
+                                              sam_lo=_sam_lo, sam_hi=_sam_hi)
     except Exception as _mc_e:
         logger.warning("Monte Carlo sensitivity failed (non-fatal): %s", _mc_e)
 
@@ -2069,6 +2150,7 @@ def generate_market_sizing_derivation(
     therapeutic_area: str = "other",
     us_patient_population: int = 0,
     sub_expert_id: str = "",
+    user_params: "dict | None" = None,
 ) -> MarketSizingDerivation:
     """
     Mixture of Experts router: classifies the innovation and dispatches to
@@ -2103,7 +2185,8 @@ def generate_market_sizing_derivation(
                 {k: v for k, v in signals.items() if v})
 
     if archetype == "research_tool_non_clinical":
-        return _derive_research_tool_formula(idea, dn, therapeutic_area, us_patient_population, signals)
+        return _derive_research_tool_formula(idea, dn, therapeutic_area, us_patient_population, signals,
+                                             user_params=user_params)
 
     if archetype == "gene_cell_therapy":
         return _derive_gene_therapy_formula(idea, dn, therapeutic_area, us_patient_population, signals)
