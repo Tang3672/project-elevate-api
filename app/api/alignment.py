@@ -44,6 +44,8 @@ class PIReportRequest(BaseModel):
         description="Originating institution (e.g. 'University of Michigan', 'NIH NIBIB').")
     domain: Optional[str] = Field(default=None,
         description="LIFE_SCIENCES_CLINICAL | LIFE_SCIENCES_RESEARCH | ENGINEERING_HARDWARE | SOFTWARE_INFRASTRUCTURE | ENERGY_CLIMATE | OTHER_DEEP_TECH. Auto-detected if omitted.")
+    clarify_answers: Optional[dict] = Field(default=None,
+        description="Structured answers from /clarify intake questions, keyed by binds_to field (e.g. 'seg.target_lab_count': '1,000-5,000 labs'). Used to override default market sizing parameters.")
 
 
 @router.post("/check", response_model=AlignmentReport)
@@ -140,7 +142,7 @@ async def get_pi_report(payload: PIReportRequest, current_user = Depends(get_cur
             _idea_from_payload(payload), payload.product_type, payload.disease_domain,
             payload.tier1_category, funding_pathway=payload.funding_pathway,
             product_name=payload.product_name, institution=payload.institution,
-            domain=payload.domain,
+            domain=payload.domain, clarify_answers=payload.clarify_answers,
         )
         await _increment_usage(current_user)
         return report
@@ -171,7 +173,7 @@ async def get_pi_report_async(payload: PIReportRequest, current_user = Depends(g
                 payload.tier1_category, funding_pathway=payload.funding_pathway,
                 user_id=(_user or {}).get("id"), skip_verification=True,
                 product_name=payload.product_name, institution=payload.institution,
-                domain=payload.domain,
+                domain=payload.domain, clarify_answers=payload.clarify_answers,
             )
             rd = report.model_dump(mode="json")
             try:
@@ -1112,24 +1114,74 @@ async def generate_clarifying_questions(
 - Options should cover the realistic range for this specific product
 - Include a "None of these — explain:" option when appropriate"""
     elif _is_research_tool:
-        param_block = """REQUIRED PARAMETERS TO UNLOCK (one question per parameter) — this is a NON-CLINICAL RESEARCH TOOL / DATA PLATFORM for academic or industry research labs, so ask about lab workflows and lab economics, NOT clinical pathways or patient populations:
-  Q1 → LAB SEGMENT: Which specific type of research lab or instrumentation ecosystem is the primary market?
-       (e.g., rodent behavioral neuroscience, human EEG, primate electrophysiology, genomics, imaging — be specific to what the product connects to or serves)
-  Q2 → STATUS QUO / INCUMBENT: What do labs currently do instead, and what named tools/workflows does this replace?
-       (e.g., manual USB export, MATLAB cloud connectors, Neuralynx/Plexon vendor-native cloud, Benchling ELN, LabArchives — name the specific incumbent)
-  Q3 → TECHNICAL NOVELTY: What does this do that existing research software or instrument vendor cloud solutions don't?
-       (passive vs. active sync, multi-vendor support, real-time closed-loop, instrument-agnostic protocol — be specific)
-  Q4 → ADOPTION EVIDENCE: How many labs are actively using it, and what is the usage pattern?
-       (beta users, publication mentions, grant acknowledgments, repeat daily users — what is the strongest current evidence of value?)
-  Q5 → BUYER & BUDGET: Who actually pays, and from which budget line?
-       (PI from R01/R21 supplies budget, core facility director, university IT, industry R&D lab — and approx. annual cost per lab)
-  Q6 → COMPETITIVE MOAT: vs the single most similar tool or vendor native solution, what is the measurable advantage?
-       (e.g., vs Spike2 cloud export: Hublink is instrument-agnostic across Noldus + Med Associates + TDT simultaneously)"""
-        options_rules = """RULES FOR OPTIONS:
-- Every option must be specific to THIS research tool and the lab ecosystem it serves — never abstract or clinical
-- Use real research software names (MATLAB, LabVIEW, Spike2, Benchling, LabArchives, Open Ephys, Med Associates, Noldus, etc.) and real lab workflows
-- Options should cover the realistic range a PI would recognize from their own lab
-- Include a "None of these — explain:" option when appropriate"""
+        param_block = """MARKET SIZING PARAMETER QUESTIONS — this is a NON-CLINICAL RESEARCH TOOL / DATA PLATFORM.
+Generate exactly 6 questions, one per parameter listed below. Each question text must be tailored to THIS specific product.
+Options MUST follow the numeric format shown — the backend extracts these numbers to override the market sizing formula.
+
+PARAMETER Q1 — field MUST be "seg.target_lab_count" (sets pop_lo/pop_hi in TAM = pop × price):
+  Topic: How many US research labs is this realistically targeting?
+  Write the question specific to this product's lab type (e.g. "How many US neuroscience labs actively run unattended SD card experiments where automated sync would save time?")
+  Options MUST be 4 lab-count tiers in this exact format:
+    "Fewer than 1,000 labs — [describe the specific niche]"
+    "1,000–5,000 labs — [describe the segment]"
+    "5,000–20,000 labs — [describe the broader category]"
+    "Over 20,000 labs — [describe the broad use case]"
+  hint: Explain that this is the TAM population multiplier — the single largest driver of market size.
+
+PARAMETER Q2 — field MUST be "price.annual_per_lab" (sets sp_lo/sp_hi in TAM = pop × price):
+  Topic: What annual subscription price per lab does this target?
+  Write the question specific to this product's pricing context.
+  Options MUST be 4 dollar-range tiers in this exact format:
+    "Under $500/yr — [describe: e.g. grant-incidental, consumable-level spend]"
+    "$500–$2,000/yr — [describe: e.g. standard research software tier]"
+    "$2,000–$8,000/yr — [describe: e.g. mid-tier lab infrastructure]"
+    "$8,000–$25,000/yr — [describe: e.g. core facility or site license]"
+  hint: Explain that TAM = lab count × this price, so a $500 vs $5,000 answer changes TAM by 10×.
+
+PARAMETER Q3 — field MUST be "seg.addressable_fraction" (sets SAM rate; SAM = TAM × this):
+  Topic: Of the target labs, what fraction has the problem badly enough to pay to solve it today?
+  Write the question specific to this product's pain point.
+  Options MUST be 4 percentage-range tiers in this exact format:
+    "Under 20% — [describe: e.g. niche pain, most labs have a workaround]"
+    "20–50% — [describe: e.g. common friction but labs tolerate manual process]"
+    "50–80% — [describe: e.g. near-universal for labs running long-duration unattended experiments]"
+    "Over 80% — [describe: e.g. virtually every target lab has this problem]"
+  hint: Explain this directly sets the SAM (Serviceable Addressable Market) as a fraction of TAM.
+
+PARAMETER Q4 — field MUST be "dev.paying_customers" (commercial traction; calibrates SOM):
+  Topic: How many labs are currently paying for or committed to this product?
+  Write the question specific to this product.
+  Options MUST be 4 count tiers:
+    "None yet — free beta / pilot stage; no revenue"
+    "1–10 labs paying or with signed LOIs"
+    "10–50 labs actively paying"
+    "50+ labs paying — validated product-market fit"
+  hint: Explain this calibrates the 5-yr SOM penetration rate in the model.
+
+PARAMETER Q5 — field MUST be "price.deal_structure" (revenue model; affects per-unit pricing):
+  Topic: How is this product sold — what is the unit of sale?
+  Write the question specific to this product.
+  Options (no numeric format required here — 4 distinct pricing models):
+    "Per-lab annual subscription (one flat price per PI lab regardless of instrument count)"
+    "Per-device/per-instrument connection (price scales with how many instruments are connected)"
+    "Per-institution site license (university pays once for all labs)"
+    "Hardware device with bundled software (one-time purchase + annual maintenance)"
+  hint: Explain this determines whether the sp (spend per lab) in the formula is per-lab or per-device.
+
+PARAMETER Q6 — field MUST be "seg.primary_domain" (refines which population reference to use):
+  Topic: Which specific research domain or instrument ecosystem is the primary go-to-market target?
+  Write the question specific to this product.
+  Options (4 named domains with approximate US lab count in parentheses):
+    "[Domain 1 specific to this product] (~X,000 US labs)"
+    "[Domain 2] (~X,000 US labs)"
+    "[Domain 3] (~X,000 US labs)"
+    "Domain-agnostic — any academic lab with [relevant instrument type] (~X0,000 US labs)"
+  hint: Explain this selects the reference population from NIH RePORTER grant data."""
+        options_rules = """RULES FOR ALL OPTIONS:
+- Every option must be specific to THIS product's context — never abstract or clinical
+- For Q1/Q2/Q3: options MUST follow the numeric format exactly (the backend parses these numbers)
+- For Q4/Q6: use real named domains and real count estimates
+- The hint for each question must explicitly state which formula parameter it controls (pop, sp, SAM rate, SOM, etc.)"""
     else:
         param_block = """REQUIRED FORMULA PARAMETERS TO UNLOCK (one question per parameter):
   Q1 → ELIGIBLE SUBPOPULATION: Which specific patient subset does this target?
