@@ -1119,32 +1119,40 @@ async def generate_clarifying_questions(
 - Options should cover the realistic range for this specific product
 - Include a "None of these — explain:" option when appropriate"""
     elif _is_research_tool:
-        param_block = """This is a NON-CLINICAL RESEARCH TOOL. Generate exactly 6 questions with these exact field values and option formats (the backend parses the numbers to set TAM/SAM/SOM):
+        param_block = """This is a NON-CLINICAL RESEARCH TOOL. Ask 6 questions about HOW THE PRODUCT WORKS — not about market size numbers the PI can't know. The backend derives TAM/SAM/SOM from the product-understanding answers automatically.
 
-Q1 field="seg.target_lab_count" — How many US labs of the relevant type does this realistically reach? Write the question specific to THIS product.
-Options (4 tiers, EXACT format — numbers are parsed): "Fewer than 1,000 labs — [niche]" | "1,000–5,000 labs — [segment]" | "5,000–20,000 labs — [broader]" | "Over 20,000 labs — [broad]"
-hint: "TAM = lab count × annual price — this number is the largest single driver of market size"
+CRITICAL PHILOSOPHY: Ask what the PI KNOWS (their product). Do NOT ask them to guess market size, lab counts, or adoption rates — the algorithm derives those from their answers.
 
-Q2 field="price.annual_per_lab" — What annual price per lab does this target? Write specific to THIS product.
-Options (4 tiers, EXACT format): "Under $500/yr — [budget tier]" | "$500–$2,000/yr — [standard software]" | "$2,000–$8,000/yr — [mid-tier]" | "$8,000–$25,000/yr — [enterprise/core facility]"
-hint: "TAM = pop × this price; a $500 vs $5,000 answer changes TAM 10×"
+Q1 field="buyer.persona" — Who is the primary decision-maker who adopts and pays? Write specific to THIS product.
+Options (pick 4 that fit): "Individual PI or lab director — purchases from discretionary lab budget" | "Graduate student / postdoc — bottom-up viral adoption, PI ratifies the spend later" | "Core facility director — institutional procurement, serves multiple labs" | "Industry R&D lab (pharma / biotech) — formal vendor qualification required"
 
-Q3 field="seg.addressable_fraction" — What fraction of target labs has this pain badly enough to pay now? Write specific to THIS product.
-Options (4 tiers, EXACT format): "Under 20% — [niche pain]" | "20–50% — [common but tolerated]" | "50–80% — [near-universal pain]" | "Over 80% — [everyone has this problem]"
-hint: "This sets the SAM rate (SAM = TAM × this fraction)"
+Q2 field="price.annual_per_lab" — What is the expected annual price per lab? Write specific to THIS product and its buyer.
+Options (EXACT format — numbers are parsed by backend): "Under $500/yr — consumable-level or grant-incidental spend" | "$500–$2,000/yr — standard research software subscription" | "$2,000–$8,000/yr — mid-tier lab infrastructure tool" | "$8,000–$25,000/yr — core facility or institutional license"
 
-Q4 field="dev.paying_customers" — Current paying or committed labs? Write specific to THIS product.
-Options: "None yet — free beta/pilot" | "1–10 labs paying or with LOIs" | "10–50 labs actively paying" | "50+ labs paying"
-hint: "Calibrates 5-yr SOM penetration rate"
+Q3 field="seg.instrument_requirement" — What does a research lab need to HAVE in order to use this product? This sets the addressable population ceiling — write it specific to THIS product's actual technical requirements.
+Options MUST embed lab-count ranges (backend parses these numbers to set TAM population):
+"Any internet-connected computer — no specialized instruments required (~30,000–80,000 US academic research labs)" | "Labs with specific data-generating instruments (describe the instrument type for this product) (~5,000–20,000 qualifying labs)" | "Labs running a particular instrument model or brand-specific workflow (~1,500–5,000 qualifying labs)" | "Core facilities or institutional shared-equipment deployments (~500–2,000 facilities)"
+Customize each option's description to match THIS product's actual requirements.
 
-Q5 field="price.deal_structure" — What is the unit of sale? Write specific to THIS product.
-Options: "Per-lab annual subscription" | "Per-device/instrument connection" | "Per-institution site license" | "Hardware + bundled software"
-hint: "Determines whether TAM formula uses per-lab or per-device pricing"
+Q4 field="seg.workflow_type" — What is the core workflow or problem this product addresses? Write specific to THIS product's function.
+Options MUST contain keywords the backend uses to set SAM rate:
+"Passive data sync or automated transfer — [describe what this product collects/moves automatically, without researcher action]" | "Active data analysis or visualization — [describe what the researcher does to process each experiment]" | "Lab operations or protocol coordination — [describe how teams use it to organize work]" | "Instrument integration or hardware control — [describe what instruments it connects or drives]"
+Customize descriptions for THIS product. Keep "passive"/"sync"/"automatic"/"without researcher" wording in option 1; keep "instrument"/"control"/"hardware" wording in option 4.
 
-Q6 field="seg.primary_domain" — Which research domain/instrument ecosystem is the primary GTM target? Write specific to THIS product with REAL named domains and approximate US lab counts.
-Options: "[domain 1] (~X,000 US labs)" | "[domain 2] (~X,000 US labs)" | "[domain 3] (~X,000 US labs)" | "Domain-agnostic (~XX,000 US labs)"
-hint: "Selects the NIH RePORTER population reference for the TAM calculation" """
-        options_rules = "OPTIONS RULE: Q1/Q2/Q3 options MUST include the exact numbers shown — the backend parses them. Use real domain names and lab counts for Q6. Never use clinical language."
+Q5 field="comp.status_quo" — What do labs currently use instead of this product? Write specific to THIS product's competitive landscape.
+Options: "Manual process by lab staff — [describe the specific manual task this replaces]" | "DIY scripts or home-built tools — [describe the typical custom solution]" | "Open-source alternative — [name a real open-source tool that competes]" | "Commercial incumbent — [name a real paid product they're currently using]"
+
+Q6 field="seg.adoption_pathway" — How do new labs typically discover and start using this product? Write specific to THIS product.
+Options MUST contain keywords the backend uses to set SOM penetration rate:
+"Peer-to-peer among researchers — a grad student or postdoc finds it and recommends it within their network" | "PI-led evaluation — the lab PI initiates a deliberate pilot after a referral or demo" | "Conference or publication-driven — labs adopt after seeing it in a talk, paper, or preprint" | "Core facility or IT roll-out — a facility director or university IT deploys it across multiple labs"
+Keep "peer"/"viral"/"grad student"/"recommend" wording in option 1; keep "conference"/"publication"/"paper" in option 3; keep "facility"/"roll-out"/"IT"/"deploy" in option 4."""
+        options_rules = """OPTIONS RULES for research tool questions:
+- Q2 options MUST include the exact dollar ranges shown — backend parses them to set price
+- Q3 options MUST include the exact lab-count ranges (~X,000–Y,000) — backend parses them to set TAM population
+- Q4 options MUST preserve the keyword phrases (passive/sync/automatic; instrument/control/hardware) — backend keyword-matches to set SAM rate
+- Q6 options MUST preserve the keyword phrases (peer/recommend; conference/publication/paper; facility/IT/deploy) — backend keyword-matches to set SOM rate
+- Customize every option's descriptive text to be specific to THIS product — but KEEP the parseable numbers and keywords
+- Never use clinical language (no patients, diseases, FDA, trials)"""
     else:
         param_block = """REQUIRED FORMULA PARAMETERS TO UNLOCK (one question per parameter):
   Q1 → ELIGIBLE SUBPOPULATION: Which specific patient subset does this target?
@@ -1240,7 +1248,7 @@ Return ONLY a valid JSON array of 6 objects. No markdown, no explanation, no oth
                 "status_quo": "comp.status_quo",
                 "target_sites": "seg.gate.facility_type",
                 "intended_use": "seg.primary_use_case",
-                # research-tool fields
+                # research-tool fields (legacy)
                 "lab_segment": "seg.primary_use_case",
                 "research_workflow_positioning": "seg.gate.use_case_depth",
                 "incumbent": "comp.status_quo",
@@ -1248,6 +1256,14 @@ Return ONLY a valid JSON array of 6 objects. No markdown, no explanation, no oth
                 "adoption_evidence": "dev.evidence_stage",
                 "competitive_moat": "comp.nearest_named_competitor",
                 "eligible_research_subpopulation": "seg.gate.eligible_population",
+                # research-tool product-understanding fields (F-17 redesign)
+                # field key == binds_to so _apply_user_params finds them directly
+                "seg.instrument_requirement": "seg.instrument_requirement",
+                "seg.workflow_type":          "seg.workflow_type",
+                "seg.adoption_pathway":       "seg.adoption_pathway",
+                "buyer.persona":              "buyer.persona",
+                "price.annual_per_lab":       "price.annual_per_lab",
+                "comp.status_quo":            "comp.status_quo",
             }
             for q in questions:
                 if "binds_to" not in q:
