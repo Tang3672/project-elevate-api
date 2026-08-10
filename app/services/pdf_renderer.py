@@ -1071,7 +1071,7 @@ def render_report_html(
 <div class="section" id="s-regulatory">
   <h2><span class="sec-num">4</span> Regulatory &amp; Compliance Overview</h2>
   <p><strong>FDA jurisdiction: not required.</strong> This product is a non-clinical research
-  tool sold exclusively to academic investigators. It falls outside 21 CFR § 201(h) — its
+  tool sold exclusively to academic investigators. It falls outside 21 U.S.C. § 321(h) — its
   intended use is data capture and analysis for research purposes, not to diagnose, treat,
   cure, or prevent disease in any patient. No 510(k), De Novo, PMA, NDA, or BLA is required.</p>
 

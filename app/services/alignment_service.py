@@ -2252,7 +2252,7 @@ If the exact guidance is not listed above, use the general FDA guidance search: 
     "first_commercial_step": "<under 150 chars>",
     "international_opportunities": ["<under 150 chars each, max 2>"]
   },
-  "market_geography": {"description":"<under 200 chars>","top_states":["<state>"],"scope":"<national|regional|concentrated>"},
+  "market_geography": {"description":"<under 200 chars — explain WHY these states lead, e.g. 'MA and CA lead due to concentration of R1 research universities and NIH funding'>","top_states":["<state name + one-phrase reason e.g. 'Massachusetts — 42 R1 universities, $3.2B NIH awards'>"],"scope":"<national|regional|concentrated>"},
   "recommended_next_steps": ["<under 150 chars each, max 5>"],
   "limitations": "<under 200 chars>",
 

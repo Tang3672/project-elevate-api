@@ -2029,7 +2029,7 @@ def _derive_research_tool_formula(
         ),
         DerivationStep(
             step_num=5,
-            title=f"Step 5 — Serviceable Obtainable Market (SOM = {som_mid:.0%} of SAM, 5-yr horizon)",
+            title=f"Step 5 — Serviceable Obtainable Market (SOM = SAM × 5-yr penetration, range {_som_lo:.0%}–{_som_hi:.0%})",
             formula=(
                 f"SOM = {_fmt(sam)} × [{_som_lo:.0%}–{_som_hi:.0%}] 5-yr penetration "
                 f"= {_fmt(sam * _som_lo)}–{_fmt(sam * _som_hi)}; midpoint {_fmt(som)}"

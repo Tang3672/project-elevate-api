@@ -195,7 +195,7 @@ def regulatory_directive(status: RegulatoryStatus, archetype: str = "") -> str:
             "Do NOT mention 510(k), De Novo, PMA, NDA, BLA, CPT codes, NTAP, or any FDA pathway. "
             "Title this section 'Regulatory & Compliance Overview', not 'Regulatory Pathway'. "
             "Open with: 'FDA jurisdiction: not required.' and explain why (non-clinical intended use, "
-            "outside 21 CFR § 201(h)). "
+            "outside 21 U.S.C. § 321(h)). "
             "Then list what DOES apply in a structured table: "
             "(1) IRB/IACUC if human- or animal-subjects research; "
             "(2) intended-use legal opinion before commercial launch ($15k–$40k); "
