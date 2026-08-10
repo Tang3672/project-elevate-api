@@ -25,13 +25,16 @@ app = FastAPI(
 # domain) can be added via the ALLOWED_ORIGINS env var (comma-separated).
 import os as _os
 _extra_origins = [o.strip() for o in _os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()]
-# "null" allows file:// local HTML (Origin: null) used during dev/staging
+# "null" allows file:// local HTML (Origin: null) used during dev/staging.
+# allow_credentials=False: frontend uses Bearer tokens in headers, not cookies,
+# so CORS credentials mode is not needed — and Chrome rejects Allow-Origin:null
+# combined with Allow-Credentials:true.
 _allow_origins = list({"null"} | set(_extra_origins))
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_allow_origins,
     allow_origin_regex=r"https://([a-z0-9-]+\.)*netlify\.app|http://localhost(:\d+)?|http://127\.0\.0\.1(:\d+)?",
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
