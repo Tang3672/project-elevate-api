@@ -1602,7 +1602,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
             return {}
 
     try:
-        raw  = await _call_claude(context, system, max_tokens=8192, model=_synthesis_model)
+        raw  = await _call_claude(context, system, max_tokens=16000, model=_synthesis_model)
     except Exception as _synth_e:
         logger.error("Synthesis call-1 HTTP error (model=%s ctx_len=%d): %s",
                      _synthesis_model, len(context), _synth_e)
@@ -1617,7 +1617,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
                 context,
                 system + "\n\nIMPORTANT: respond with ONLY one complete, valid JSON object "
                          "matching the schema. Do not truncate; include every top-level field.",
-                max_tokens=8192, model=_synthesis_model)
+                max_tokens=16000, model=_synthesis_model)
         except Exception as _synth2_e:
             logger.error("Synthesis call-2 HTTP error: %s", _synth2_e)
             raise
