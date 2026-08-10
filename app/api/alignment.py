@@ -184,6 +184,26 @@ async def get_pi_report_async(payload: PIReportRequest, current_user = Depends(g
             await set_done(job_id, rd)            # report is now viewable
             await _increment_usage(_user)
 
+            # Part C: persist buyer-model baseline (version 1) for editable recompute
+            try:
+                _msd = getattr(report, "market_sizing_derivation", None)
+                if _msd:
+                    from app.db.market_model_repository import init_market_model_table, save_baseline
+                    await init_market_model_table()
+                    _nodes = {
+                        k: _msd.get(k)
+                        for k in ("pop_lo", "pop_hi", "sp_lo", "sp_hi",
+                                  "sam_lo", "sam_hi", "som_lo", "som_hi",
+                                  "pop_src", "sp_src", "key_assumptions",
+                                  "archetype", "idea", "us_tam_usd", "us_sam_usd", "us_som_usd")
+                        if _msd.get(k) is not None
+                    }
+                    _nodes["_full_derivation"] = _msd
+                    await save_baseline(job_id, _nodes)
+                    logger.info("Part C: buyer-model baseline saved for job %s", job_id)
+            except Exception as _mmc_e:
+                logger.warning("Part C: baseline save failed (non-fatal): %s", _mmc_e)
+
             # Phase 2: run verification (validation + trust + self-correction) in the
             # background, then patch the job so the badges fill in client-side.
             try:
@@ -1911,3 +1931,242 @@ async def delete_market_sizing_override(report_id: str, segment_id: int):
     if not deleted:
         raise HTTPException(status_code=404, detail="No saved override to revert")
     return {"reverted": True}
+
+
+# ── Part C: MarketModel editable nodes (research tool buyer model) ─────────────
+#
+# POST /market-model/{report_id}/edit   — edit a node, recompute, save new version
+# GET  /market-model/{report_id}/versions  — list all versions + rationale
+# GET  /market-model/{report_id}/diff/{v1}/{v2}  — diff two versions
+# POST /market-model/{report_id}/revert/{version}  — restore a prior version
+
+
+class _NodeEdit(BaseModel):
+    node_id:    str = Field(..., description="pop | sp | sam_rate | som_rate")
+    value_lo:   Optional[float] = Field(default=None, gt=0)
+    value_hi:   Optional[float] = Field(default=None, gt=0)
+    value_mid:  Optional[float] = Field(default=None, gt=0)
+    rationale:  str = Field(..., min_length=1, max_length=500)
+    base_version: Optional[int] = Field(default=None, ge=1)
+
+
+def _recompute_buyer_model(nodes: dict) -> dict:
+    """
+    Deterministic recompute of the research-tool buyer model from editable nodes.
+    Inputs: pop_lo, pop_hi, sp_lo, sp_hi, sam_lo, sam_hi, som_lo, som_hi
+    Outputs: tam, sam, som + formatted strings
+    """
+    pop_lo  = float(nodes.get("pop_lo", 3000))
+    pop_hi  = float(nodes.get("pop_hi", 8000))
+    sp_lo   = float(nodes.get("sp_lo", 1000))
+    sp_hi   = float(nodes.get("sp_hi", 5000))
+    sam_lo  = float(nodes.get("sam_lo", 0.35))
+    sam_hi  = float(nodes.get("sam_hi", 0.65))
+    som_lo  = float(nodes.get("som_lo", 0.08))
+    som_hi  = float(nodes.get("som_hi", 0.25))
+
+    pop_mid = (pop_lo + pop_hi) / 2
+    sp_mid  = (sp_lo  + sp_hi)  / 2
+    sam_mid = (sam_lo + sam_hi) / 2
+    som_mid = (som_lo + som_hi) / 2
+
+    tam = pop_mid * sp_mid
+    sam = tam * sam_mid
+    som = sam * som_mid
+
+    def _fmt(v: float) -> str:
+        if v >= 1e9:  return f"${v/1e9:.1f}B"
+        if v >= 1e6:  return f"${v/1e6:.1f}M"
+        if v >= 1e3:  return f"${v/1e3:.0f}K"
+        return f"${v:,.0f}"
+
+    return {
+        **nodes,
+        "pop_lo": pop_lo, "pop_hi": pop_hi,
+        "sp_lo": sp_lo,   "sp_hi": sp_hi,
+        "sam_lo": sam_lo, "sam_hi": sam_hi,
+        "som_lo": som_lo, "som_hi": som_hi,
+        "us_tam_usd": tam,
+        "us_sam_usd": sam,
+        "us_som_usd": som,
+        "tam_fmt": _fmt(tam),
+        "sam_fmt": _fmt(sam),
+        "som_fmt": _fmt(som),
+        "steps": [
+            {"step_num": 1, "title": "Eligible buyer population",
+             "value": pop_mid, "unit": "labs",
+             "formula": f"{pop_lo:,.0f}–{pop_hi:,.0f} labs"},
+            {"step_num": 2, "title": "Annualised spend per lab",
+             "value": sp_mid, "unit": "USD/lab/yr",
+             "formula": f"${sp_lo:,.0f}–${sp_hi:,.0f}/yr"},
+            {"step_num": 3, "title": "Total Addressable Market (TAM)",
+             "value": tam, "unit": "USD",
+             "formula": f"{pop_mid:,.0f} × ${sp_mid:,.0f} = {_fmt(tam)}"},
+            {"step_num": 4, "title": "Serviceable Addressable Market (SAM)",
+             "value": sam, "unit": "USD",
+             "formula": f"{_fmt(tam)} × {sam_mid:.0%} = {_fmt(sam)}"},
+            {"step_num": 5, "title": "Serviceable Obtainable Market (SOM, 5-yr)",
+             "value": som, "unit": "USD",
+             "formula": f"{_fmt(sam)} × {som_mid:.0%} = {_fmt(som)}"},
+        ],
+    }
+
+
+def _diff_nodes(old: dict, new: dict) -> list:
+    """Return list of changed parameters with old/new values."""
+    diffs = []
+    for key in ("pop_lo", "pop_hi", "sp_lo", "sp_hi", "sam_lo", "sam_hi", "som_lo", "som_hi"):
+        ov = old.get(key)
+        nv = new.get(key)
+        if ov is not None and nv is not None and abs(float(ov) - float(nv)) > 1e-9:
+            diffs.append({"param": key, "old": ov, "new": nv})
+    for key in ("us_tam_usd", "us_sam_usd", "us_som_usd"):
+        ov = old.get(key)
+        nv = new.get(key)
+        if ov is not None and nv is not None and abs(float(ov) - float(nv)) > 0.01:
+            diffs.append({"param": key, "old": ov, "new": nv, "computed": True})
+    return diffs
+
+
+@router.post("/market-model/{report_id}/edit")
+async def market_model_node_edit(
+    report_id: str,
+    body: _NodeEdit,
+    current_user=Depends(get_current_user),
+):
+    """
+    Edit one input node of the research-tool buyer model, recompute downstream,
+    and save the result as a new immutable version. Returns the updated model + diff.
+    """
+    import app.db.market_model_repository as _mmr
+
+    await _mmr.init_market_model_table()
+
+    # Load the base version (user-specified or latest)
+    if body.base_version:
+        base = await _mmr.get_version(report_id, body.base_version)
+    else:
+        base = await _mmr.get_latest(report_id)
+
+    if not base:
+        raise HTTPException(status_code=404,
+            detail="No buyer model found for this report. "
+                   "Only research-tool reports (LIFE_SCIENCES_RESEARCH) have an editable buyer model.")
+
+    nodes = dict(base.get("nodes") or {})
+
+    # Apply the edit to the correct node(s)
+    node = body.node_id
+    if node == "pop":
+        if body.value_lo is not None: nodes["pop_lo"] = body.value_lo
+        if body.value_hi is not None: nodes["pop_hi"] = body.value_hi
+        if body.value_mid is not None:
+            spread = (nodes.get("pop_hi", 8000) - nodes.get("pop_lo", 3000)) / 2
+            nodes["pop_lo"] = max(1, body.value_mid - spread)
+            nodes["pop_hi"] = body.value_mid + spread
+        nodes["pop_src"] = f"User edit: {body.rationale}"
+    elif node == "sp":
+        if body.value_lo is not None: nodes["sp_lo"] = body.value_lo
+        if body.value_hi is not None: nodes["sp_hi"] = body.value_hi
+        if body.value_mid is not None:
+            spread = (nodes.get("sp_hi", 5000) - nodes.get("sp_lo", 1000)) / 2
+            nodes["sp_lo"] = max(1, body.value_mid - spread)
+            nodes["sp_hi"] = body.value_mid + spread
+        nodes["sp_src"] = f"User edit: {body.rationale}"
+    elif node == "sam_rate":
+        if body.value_lo is not None: nodes["sam_lo"] = min(1.0, body.value_lo)
+        if body.value_hi is not None: nodes["sam_hi"] = min(1.0, body.value_hi)
+        if body.value_mid is not None:
+            spread = (nodes.get("sam_hi", 0.65) - nodes.get("sam_lo", 0.35)) / 2
+            nodes["sam_lo"] = max(0.01, body.value_mid - spread)
+            nodes["sam_hi"] = min(1.0,  body.value_mid + spread)
+    elif node == "som_rate":
+        if body.value_lo is not None: nodes["som_lo"] = min(1.0, body.value_lo)
+        if body.value_hi is not None: nodes["som_hi"] = min(1.0, body.value_hi)
+        if body.value_mid is not None:
+            spread = (nodes.get("som_hi", 0.25) - nodes.get("som_lo", 0.08)) / 2
+            nodes["som_lo"] = max(0.01, body.value_mid - spread)
+            nodes["som_hi"] = min(1.0,  body.value_mid + spread)
+    else:
+        raise HTTPException(status_code=400,
+            detail=f"Unknown node_id '{node}'. Valid: pop | sp | sam_rate | som_rate")
+
+    # Recompute
+    new_nodes = _recompute_buyer_model(nodes)
+
+    # Save new version
+    parent_ver = base.get("version", 1)
+    new_ver = await _mmr.save_edit(
+        report_id=report_id,
+        parent_version=parent_ver,
+        nodes=new_nodes,
+        rationale=body.rationale,
+        user_id=getattr(current_user, "id", None),
+    )
+
+    # Diff against parent
+    parent_nodes = _recompute_buyer_model(base.get("nodes") or {})
+    diffs = _diff_nodes(parent_nodes, new_nodes)
+
+    return {
+        "version":       new_ver,
+        "parent_version": parent_ver,
+        "rationale":     body.rationale,
+        "nodes":         new_nodes,
+        "diff":          diffs,
+        "tam_fmt":       new_nodes["tam_fmt"],
+        "sam_fmt":       new_nodes["sam_fmt"],
+        "som_fmt":       new_nodes["som_fmt"],
+        "steps":         new_nodes.get("steps", []),
+    }
+
+
+@router.get("/market-model/{report_id}/versions")
+async def list_market_model_versions(report_id: str):
+    """List all saved versions of a report's buyer model (timeline + rationale)."""
+    import app.db.market_model_repository as _mmr
+    versions = await _mmr.list_versions(report_id)
+    return {"report_id": report_id, "versions": versions, "count": len(versions)}
+
+
+@router.get("/market-model/{report_id}/diff/{v1}/{v2}")
+async def diff_market_model_versions(report_id: str, v1: int, v2: int):
+    """Compare two model versions: what changed and by how much."""
+    import app.db.market_model_repository as _mmr
+    row1 = await _mmr.get_version(report_id, v1)
+    row2 = await _mmr.get_version(report_id, v2)
+    if not row1 or not row2:
+        raise HTTPException(status_code=404, detail="One or both versions not found")
+    n1 = _recompute_buyer_model(row1["nodes"])
+    n2 = _recompute_buyer_model(row2["nodes"])
+    return {
+        "from_version": v1,
+        "to_version":   v2,
+        "diff":         _diff_nodes(n1, n2),
+        "from": {"tam_fmt": n1["tam_fmt"], "sam_fmt": n1["sam_fmt"], "som_fmt": n1["som_fmt"]},
+        "to":   {"tam_fmt": n2["tam_fmt"], "sam_fmt": n2["sam_fmt"], "som_fmt": n2["som_fmt"]},
+        "rationale_from": row1.get("rationale"),
+        "rationale_to":   row2.get("rationale"),
+    }
+
+
+@router.post("/market-model/{report_id}/revert/{version}")
+async def revert_market_model(
+    report_id: str, version: int, current_user=Depends(get_current_user)
+):
+    """Fork from a prior version, making it the new latest. Returns the restored model."""
+    import app.db.market_model_repository as _mmr
+    row = await _mmr.get_version(report_id, version)
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Version {version} not found")
+    new_nodes = _recompute_buyer_model(row["nodes"])
+    new_ver = await _mmr.save_edit(
+        report_id=report_id,
+        parent_version=version,
+        nodes=new_nodes,
+        rationale=f"Reverted to version {version}",
+        user_id=getattr(current_user, "id", None),
+    )
+    return {"version": new_ver, "parent_version": version, "nodes": new_nodes,
+            "tam_fmt": new_nodes["tam_fmt"], "sam_fmt": new_nodes["sam_fmt"],
+            "som_fmt": new_nodes["som_fmt"]}

@@ -1827,6 +1827,11 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
     # SAM/SOM from clean displayed percentages off the deterministic derivation.
     if deriv is not None:
         _enforce_market_consistency(report, deriv)
+        # Part C: attach the structured derivation so the UI can make nodes editable
+        try:
+            report.market_sizing_derivation = deriv.model_dump(mode="json")
+        except Exception as _msd_e:
+            logger.warning("market_sizing_derivation attach failed (non-fatal): %s", _msd_e)
 
     # H-08/B-02: market math post-processing
     #   (a) Authored confidence phrases stripped from prose fields.

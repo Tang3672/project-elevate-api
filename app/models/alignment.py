@@ -275,6 +275,7 @@ class PIReport(BaseModel):
     triangulation:          Optional[dict] = None   # D.3: three methods + reconciliation
     sensitivity:            Optional[list] = None   # D.7: ranked sensitivity parameters
     axis_decisions:         Optional[dict] = None   # C.1/C.2: selected + rejected axis decisions with reasons
+    market_sizing_derivation: Optional[dict] = None  # Part C: persisted buyer-model nodes for editable recompute
 
 
 # ── Legacy AlignmentReport (kept for backward compat) ─────────────────────────
