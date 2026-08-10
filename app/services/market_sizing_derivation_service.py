@@ -1739,6 +1739,15 @@ def _apply_user_params(
         r = _parse_numeric_range(price_ans)
         if r:
             sp_lo, sp_hi = r
+            # B-03: "Under $X/yr" parses to (0, X) — a $0 floor produces wrong TAM.
+            # Clamp to $1 and note the assumption. Caller can detect the contradiction
+            # by comparing overrides["sp_note"] against the panel benchmark.
+            if sp_lo <= 0:
+                sp_lo = sp_hi * 0.5 if sp_hi > 0 else 250.0
+                overrides["sp_note"] = (
+                    f"Price floor clamped from $0 to ${int(sp_lo):,}/yr. "
+                    f"Consider whether the panel benchmark (see engine_estimate) is more reliable."
+                )
             overrides["sp"] = f"PI-provided: ${int(sp_lo):,}–${int(sp_hi):,}/yr per lab"
 
     # ── SAM rate: new field (workflow type → adoption friction)

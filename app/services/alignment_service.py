@@ -506,8 +506,24 @@ async def attach_competitive_landscape(report) -> None:
         from app.services.competitor_schema import normalize_landscape
         _sub_id = getattr(report, "expert_domain", "") or ""
         if _sub_id in _RESEARCH_TOOL_ARCHETYPES:
-            _idea = getattr(report, "idea_submitted", "") or ""
-            _comparators = await _extract_research_tool_comparators(_idea, _sub_id)
+            # B-04: use comparators already extracted by the main LLM call (competitive_alternatives)
+            # rather than a separate Haiku call that may return different or empty results.
+            _seed_alts = getattr(report, "competitive_alternatives", None) or []
+            if _seed_alts:
+                _comparators = [
+                    {
+                        "name": c.get("name", ""),
+                        "category": c.get("category", ""),
+                        "description": c.get("key_differentiator", ""),
+                        "source": "main_report",
+                    }
+                    for c in _seed_alts if c.get("name")
+                ]
+                logger.info("B-04: seeding §7 from %d main-report competitive_alternatives", len(_comparators))
+            else:
+                _idea = getattr(report, "idea_submitted", "") or ""
+                _comparators = await _extract_research_tool_comparators(_idea, _sub_id)
+                logger.info("B-04: competitive_alternatives empty — fell back to Haiku sweep (%d results)", len(_comparators))
             report.competitive_landscape = normalize_landscape({
                 "available": True,
                 "competitors": _comparators,
@@ -935,6 +951,25 @@ async def _generate_expert_report(idea, product_type, expert, demand_results, ho
         disease_name = disease_info.get("disease_name", "the indicated condition")
     except Exception as e:
         logger.warning(f"Disease classification failed: {e}")
+
+    # B-05: For research tools, the disease classifier returns negation phrases like
+    # "No specific disease targeted — cross-domain research data infrastructure tool".
+    # These poison all downstream PubMed queries and the §1 condition field.
+    # Replace with a product-derived scope term so searches target the actual domain.
+    _NEGATION_PHRASES = (
+        "no specific disease",
+        "not applicable",
+        "n/a",
+        "cross-domain",
+        "not disease-specific",
+        "no disease",
+    )
+    _is_negation = any(p in disease_name.lower() for p in _NEGATION_PHRASES)
+    if _resolved_domain == "LIFE_SCIENCES_RESEARCH" or _is_negation:
+        _pn = (product_name or idea.split("—")[0].split("-")[0].strip()[:50] or "research tool").strip()
+        disease_name = _pn
+        disease_info["disease_name"] = _pn
+        logger.info("B-05: research domain — replaced disease_name with product scope term: %r", _pn)
 
     # Layer 2: Knowledge Retriever → 5-6 parallel live searches
     # Uses sub_expert_id from router (v2) or domain_id (v1 fallback)
@@ -2260,7 +2295,11 @@ If the exact guidance is not listed above, use the general FDA guidance search: 
     "<specific risk from scope creep, mispricing, or unclear constraints — 3 to 5 bullets>"
   ],
 
-  "guiding_question": "<single decision test the team can apply to every future product choice, under 150 chars>"
+  "guiding_question": "<single decision test the team can apply to every future product choice, under 150 chars>",
+
+  "competitive_alternatives": [
+    {"name": "<product or approach name — e.g. 'DIY Python scripts', 'Empatica E4', 'REDCap'>", "category": "<software|hardware|DIY|service|open-source>", "key_differentiator": "<what this product does better than the alternative, under 100 chars>"}
+  ]
 }"""
 
 
@@ -2362,6 +2401,9 @@ def _parse_expert_response(data, idea, product_type, expert, demand_results, hos
     # S-09 Guiding Question
     guiding_q = data.get("guiding_question") or ""
 
+    # B-04: competitive_alternatives from main LLM call — seeds §7 without a separate Haiku call
+    _comp_alts = [c for c in data.get("competitive_alternatives", []) if isinstance(c, dict) and c.get("name")]
+
     return PIReport(
         product_type           = product_type,
         idea_submitted         = idea,
@@ -2391,6 +2433,7 @@ def _parse_expert_response(data, idea, product_type, expert, demand_results, hos
         guiding_question       = guiding_q or None,
         product_name           = product_name or None,
         institution            = institution or None,
+        competitive_alternatives = _comp_alts or None,
     )
 
 

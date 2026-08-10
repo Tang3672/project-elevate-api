@@ -251,6 +251,7 @@ class PIReport(BaseModel):
     routing_plan:           Optional[dict] = None     # cost-aware specialist routing plan (P3)
     grounded_context:       Optional[list] = None      # retrieved facts used by synthesis, for trust judging
     competitive_landscape:  Optional[dict] = None       # server-side competitor sweep (reliable, no client fetch)
+    competitive_alternatives: Optional[list] = None    # B-04: comparators extracted from main LLM call
     expert_domain:          Optional[str]  = None
     expert_name:            Optional[str]  = None
     expert_icon:            Optional[str]  = None
