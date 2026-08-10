@@ -112,38 +112,110 @@ def _is_non_clinical_product(sub_expert_id: str) -> bool:
     return "non_clinical" in s or s.startswith("research_tool") or "lab_software" in s
 
 
+def resolve_pmid(pmid: str) -> "dict | None":
+    """Verify a PMID via E-utilities efetch and return authoritative metadata.
+
+    Returns a dict with title, authors, journal, year from the API response,
+    or None if the PMID does not resolve. Title and metadata come entirely from
+    the API — never from generation. This is the Part A fix: a PMID only renders
+    in the report if it passes through this check.
+    """
+    import xml.etree.ElementTree as ET
+    try:
+        resp = httpx.get(
+            PUBMED_FETCH_URL,
+            params={"db": "pubmed", "id": pmid, "retmode": "xml"},
+            timeout=10.0,
+        )
+        if not resp.ok:
+            return None
+        root = ET.fromstring(resp.text)
+        article = root.find(".//PubmedArticle")
+        if article is None:
+            return None
+        title = article.findtext(".//ArticleTitle", default="")
+        journal = article.findtext(".//Journal/Title", default="")
+        year = (
+            article.findtext(".//PubDate/Year")
+            or article.findtext(".//PubDate/MedlineDate", default="")[:4]
+        )
+        last_names = [a.findtext("LastName", "") for a in article.findall(".//Author") if a.findtext("LastName")]
+        authors = (last_names[0] + " et al.") if last_names else ""
+        if not title:
+            return None
+        return {
+            "pmid":    pmid,
+            "title":   title,
+            "authors": authors,
+            "journal": journal,
+            "year":    year,
+            "url":     f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
+        }
+    except Exception as e:
+        logger.warning("resolve_pmid(%s) failed: %s", pmid, e)
+        return None
+
+
 def filter_literature_citations(
     citations: List[dict],
     idea: str,
     sub_expert_id: str,
 ) -> List[dict]:
     """
-    B-09: Drop literature citations whose titles signal a clearly off-domain
-    paper for non-clinical research tool products.
+    Part A + B-09: Verify each PMID via E-utilities and drop citations that
+    either don't resolve or whose title doesn't match the generated title
+    (catches the fabricated-PMID-on-real-paper defect from spec v6).
 
-    Off-domain detection: paper title contains a term from _OFF_DOMAIN_SIGNALS
-    AND that term is NOT present in the product idea (which would indicate the
-    product itself is in that domain, making the paper legitimate).
-
-    Only fires for non-clinical sub_expert_ids. Clinical products are unchanged.
+    Off-domain signal filtering (B-09) still applies for non-clinical products.
     """
-    if not citations or not _is_non_clinical_product(sub_expert_id):
+    if not citations:
         return citations
 
+    verified = []
+    for c in citations:
+        pmid = (c.get("pmid") or "").strip()
+        if not pmid:
+            verified.append(c)  # no PMID → pass through, off-domain gate still applies
+            continue
+
+        resolved = resolve_pmid(pmid)
+        if resolved is None:
+            logger.warning("Part A gate: PMID %s did not resolve — citation dropped", pmid)
+            continue
+
+        # Title match check: if the LLM-generated title differs substantially from
+        # the resolved title, the PMID was attached to the wrong paper.
+        gen_title = (c.get("title") or "").lower().strip()
+        real_title = resolved["title"].lower().strip()
+        if gen_title and real_title:
+            # Use word-overlap ratio: >30% of generated words must appear in real title
+            gen_words = set(gen_title.split())
+            real_words = set(real_title.split())
+            overlap = len(gen_words & real_words) / max(len(gen_words), 1)
+            if overlap < 0.30:
+                logger.warning(
+                    "Part A gate: PMID %s title mismatch — generated '%s...' vs real '%s...' — using real title",
+                    pmid, gen_title[:60], real_title[:60],
+                )
+                # Replace with authoritative metadata from E-utilities
+                c = {**c, **resolved, "relevance": c.get("relevance", "")}
+
+        verified.append(c)
+
+    # B-09: off-domain signal filter for non-clinical products
+    if not _is_non_clinical_product(sub_expert_id):
+        return verified
+
     idea_lower = (idea or "").lower()
-    # Signals the product itself operates in — these are NOT off-domain for it.
     product_own_signals = {sig for sig in _OFF_DOMAIN_SIGNALS if sig in idea_lower}
 
     kept = []
-    for c in citations:
+    for c in verified:
         title_lower = (c.get("title") or "").lower()
-        # Which blocked signals appear in this paper's title?
         paper_signals = {sig for sig in _OFF_DOMAIN_SIGNALS if sig in title_lower}
         if not paper_signals:
-            kept.append(c)  # no off-domain signal → pass
+            kept.append(c)
         elif paper_signals & product_own_signals:
-            # At least one paper signal also appears in the product idea →
-            # this domain IS the product's domain (e.g. RNA-seq tool citing DESeq2).
             kept.append(c)
         else:
             logger.debug(

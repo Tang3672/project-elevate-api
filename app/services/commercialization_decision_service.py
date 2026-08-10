@@ -287,9 +287,15 @@ def build_rationales(signals: dict, scores: dict, market: float, whitespace: flo
     _ip = ip_noun[0].upper() + ip_noun[1:]
     pat = list(ws) + [d(f"{_ip} are {'readily' if scores['patentability'] >= 0.6 else 'less reliably'} defensible", "modality")]
 
+    def _fmt_som(v: float) -> str:
+        if v >= 1e9:  return f"${v/1e9:.1f}B"
+        if v >= 1e6:  return f"${v/1e6:.1f}M"
+        if v >= 1e3:  return f"${v/1e3:.0f}K"
+        return f"${v:,.0f}"
+
     inv = []
     if som:
-        inv.append(d(f"~${som/1e6:.0f}M serviceable obtainable market (US)", "market"))
+        inv.append(d(f"{_fmt_som(som)} serviceable obtainable market (US)", "market"))
     if approval is not None:
         inv.append(d(f"{approval*100:.0f}% approval odds set the risk-adjusted value", "ptrs"))
     if moat is not None:
@@ -299,7 +305,7 @@ def build_rationales(signals: dict, scores: dict, market: float, whitespace: flo
     if moat is not None:
         lic.append(d(f"Competitive moat {moat*10:.1f}/10 (panel)", "moat"))
     if som:
-        lic.append(d(f"~${som/1e6:.0f}M serviceable market", "market"))
+        lic.append(d(f"{_fmt_som(som)} serviceable market", "market"))
 
     reimb = []
     if payer:

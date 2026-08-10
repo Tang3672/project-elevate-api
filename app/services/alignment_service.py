@@ -377,7 +377,17 @@ async def generate_pi_report(
             "OTHER" if (disease_domain or "").lower() in _NON_LS_DOMAINS
             else "LIFE_SCIENCES_RESEARCH"
         )
-        playbook = format_strategies_for_report(_sub_id, domain=_strategy_domain)
+        # B-01: build context so apply_template placeholders are substituted.
+        # modality = the classified sub_expert_id (e.g. "research_tool_non_clinical");
+        # buyer_type and funding_agency are derived from the router result when available.
+        _strategy_context = {
+            "product_name":   product_name or idea.split("—")[0].split("-")[0].strip()[:40] or "your product",
+            "modality":       (router_result.modality or _sub_id or "research tool").replace("_", " "),
+            "buyer_type":     getattr(router_result, "buyer_persona", None) or "academic PI",
+            "funding_agency": "NIH" if "nih" in (disease_domain or "").lower() else "NSF",
+            "company_name":   institution or "your company",
+        }
+        playbook = format_strategies_for_report(_sub_id, domain=_strategy_domain, context=_strategy_context)
         if not playbook:
             fallback_map = {
                 # Expert domain IDs from expert_profiles_v2
@@ -435,7 +445,7 @@ async def generate_pi_report(
                 "mental_health": "drug_mental_health",
             }
             fallback_id = fallback_map.get(_sub_id, "drug_amr")
-            playbook = format_strategies_for_report(fallback_id)
+            playbook = format_strategies_for_report(fallback_id, context=_strategy_context)
             logger.info(f"Used fallback sub_expert_id={fallback_id}")
         report.strategic_playbook = playbook
         logger.info(f"Strategic playbook: {len(report.strategic_playbook)} strategies")
@@ -1171,7 +1181,13 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
             fallback_intel = {
                 'competitor_trials': {'trials': [], 'total_found': 0},
                 'fda_precedents': {'approvals': []},
-                'strategic_playbook': format_strategies_for_report(sub_expert_id),
+                'strategic_playbook': format_strategies_for_report(sub_expert_id, context={
+                    "product_name": product_name or idea.split("—")[0].strip()[:40] or "your product",
+                    "modality": (sub_expert_id or "research tool").replace("_", " "),
+                    "buyer_type": "academic PI",
+                    "funding_agency": "NIH",
+                    "company_name": institution or "your company",
+                }),
             }
             researcher_ctx = researcher_ctx + format_intelligence_for_expert(fallback_intel, disease_name)
 
@@ -2117,7 +2133,7 @@ RULES:
    WRONG: https://www.fda.gov/drugs
    RIGHT: https://www.fda.gov/drugs/development-resources/qualified-infectious-disease-product-qidp-designation
    WRONG: https://pubmed.ncbi.nlm.nih.gov
-   RIGHT: https://pubmed.ncbi.nlm.nih.gov/35065702/
+   RIGHT: https://pubmed.ncbi.nlm.nih.gov/[PMID]/ where [PMID] is a real PMID from your context
 2. Every data_point source must include the specific report name and year in the source field.
    WRONG: source: "CDC"
    RIGHT: source: "CDC Antimicrobial Resistance Threats Report 2019, Table 1 (p.7)"
@@ -2167,7 +2183,7 @@ If the exact guidance is not listed above, use the general FDA guidance search: 
 
 {
   "executive_summary": "<2 sentences, under 300 chars>",
-  "literature_citations": [{"pmid":"<PMID from context>","title":"<under 120 chars>","authors":"<First author et al.>","journal":"<journal name>","year":"<year>","url":"<pubmed URL>","relevance":"<under 100 chars>"}],
+  "literature_citations": [{"pmid":"<PMID copied verbatim from the retrieved papers in your context — NEVER invent a PMID>","title":"<title copied from retrieved context — NEVER invent or paraphrase>","authors":"<authors from retrieved context>","journal":"<journal from retrieved context>","year":"<year from retrieved context>","url":"https://pubmed.ncbi.nlm.nih.gov/<PMID>/","relevance":"<under 100 chars>"}],
   "disease_intelligence": {
     "condition": "<condition name>",
     "data_points": [{"metric":"<>","value":"<>","year":"<>","source":"<name>","source_url":"<real URL>"}],
