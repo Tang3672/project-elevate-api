@@ -172,7 +172,8 @@ async def generate_pi_report(
     report = await _generate_expert_report(
         idea, pt, expert, demand_results, hospital_matches_raw, total_signals,
         pi_memory_context=pi_memory_context, funding_pathway=funding_pathway, user_id=user_id,
-        product_name=product_name, institution=institution, domain=_resolved_domain)
+        product_name=product_name, institution=institution, domain=_resolved_domain,
+        clarify_answers=clarify_answers)
 
     # H-01: Archetype render-time gate — validate vocabulary before any post-processing.
     # If a generator emits clinical vocabulary (510k, NTAP, CPT) for a research tool,
@@ -904,7 +905,7 @@ def _modality_directive(sub_expert_id: str, product_type) -> str:
     )
 
 
-async def _generate_expert_report(idea, product_type, expert, demand_results, hospital_matches_raw, total_signals, pi_memory_context="", funding_pathway="commercial", user_id=None, product_name=None, institution=None, domain: str = "LIFE_SCIENCES_CLINICAL"):
+async def _generate_expert_report(idea, product_type, expert, demand_results, hospital_matches_raw, total_signals, pi_memory_context="", funding_pathway="commercial", user_id=None, product_name=None, institution=None, domain: str = "LIFE_SCIENCES_CLINICAL", clarify_answers=None):
     """
     Generates a PI report using the selected Expert's domain knowledge.
     Injects expert system_prompt + knowledge_base into the researcher context.
