@@ -1658,17 +1658,40 @@ def _parse_numeric_range(text: str) -> "tuple[float, float] | None":
     """Extract (lo, hi) from option text like '1,000–5,000 labs' or '$2,000–$8,000/yr'.
     Returns None if no parseable range found."""
     import re
-    nums = [float(n.replace(",", "")) for n in re.findall(r"[\$]?([\d,]+(?:\.\d+)?)", text)]
+    nums = [float(n.replace(",", "")) for n in re.findall(r"[\$]?(\d[\d,]*(?:\.\d+)?)", text)]
     if len(nums) >= 2:
         return float(nums[0]), float(nums[1])
     if len(nums) == 1:
-        # "Under X" → (0, X); "Over X" → (X, X * 4)
         lo_text = text.lower()
         if any(w in lo_text for w in ("under", "fewer", "below", "less")):
             return 0.0, float(nums[0])
         if any(w in lo_text for w in ("over", "more", "above", "50+")):
             return float(nums[0]), float(nums[0]) * 4.0
     return None
+
+
+def _workflow_sam(answer: str) -> "tuple[float, float] | None":
+    """Derive SAM rate (lo, hi) from the rq_primary_workflow answer text."""
+    a = answer.lower()
+    if any(w in a for w in ("passive", "sync", "transfer", "automatic", "without researcher")):
+        return 0.45, 0.75   # high SAM — low friction, runs in background
+    if any(w in a for w in ("instrument", "control", "hardware", "feedback loop")):
+        return 0.20, 0.45   # low SAM — deep integration barrier
+    if any(w in a for w in ("active", "analysis", "visualization", "researcher initiates")):
+        return 0.25, 0.55   # medium SAM — workflow change required
+    return None             # lab ops / coordination — use default
+
+
+def _adoption_som(answer: str) -> "tuple[float, float] | None":
+    """Derive 5-yr SOM penetration rate (lo, hi) from rq_adoption_pathway answer text."""
+    a = answer.lower()
+    if any(w in a for w in ("peer", "viral", "grad student", "postdoc", "recommend", "network")):
+        return 0.15, 0.30   # fast peer-viral spread
+    if any(w in a for w in ("conference", "publication", "paper", "preprint", "talk")):
+        return 0.05, 0.15   # slow — depends on publication cycle
+    if any(w in a for w in ("facility", "roll-out", "rollout", "it deploy", "university it", "departments")):
+        return 0.10, 0.22   # moderate — batch institutional deployment
+    return None             # PI evaluation — use default 0.08–0.18
 
 
 def _apply_user_params(
@@ -1679,21 +1702,38 @@ def _apply_user_params(
 ) -> "tuple[float, float, float, float, float, float, dict]":
     """Apply PI-provided intake answers to override default market sizing parameters.
 
+    Accepts new product-understanding fields:
+      seg.instrument_requirement → pop_lo/hi  (derived from embedded lab-count range in option text)
+      seg.workflow_type          → sam_lo/hi  (keyword-matched to adoption friction)
+      seg.adoption_pathway       → overrides["som"] tuple for 5-yr SOM penetration
+
+    Legacy fields still work:
+      seg.target_lab_count       → pop_lo/hi
+      price.annual_per_lab       → sp_lo/hi
+      seg.addressable_fraction   → sam_lo/hi
+
     Returns (pop_lo, pop_hi, sp_lo, sp_hi, sam_lo, sam_hi, override_notes) where
     override_notes records which params were actually changed and why.
     """
     import re
     overrides: dict = {}
 
-    # Q1 — target lab population
-    lab_ans = user_params.get("seg.target_lab_count", "")
-    if lab_ans:
+    # ── population: new field (instrument requirement, range embedded in option text)
+    instr_ans = user_params.get("seg.instrument_requirement", "")
+    if instr_ans:
+        r = _parse_numeric_range(instr_ans)
+        if r:
+            pop_lo, pop_hi = r
+            overrides["pop"] = f"instrument requirement: {int(pop_lo):,}–{int(pop_hi):,} qualifying labs"
+
+    # ── population: legacy field (PI-estimated lab count)
+    elif (lab_ans := user_params.get("seg.target_lab_count", "")):
         r = _parse_numeric_range(lab_ans)
         if r:
             pop_lo, pop_hi = r
             overrides["pop"] = f"PI-provided: {int(pop_lo):,}–{int(pop_hi):,} labs"
 
-    # Q2 — annual price per lab
+    # ── price: annual per lab
     price_ans = user_params.get("price.annual_per_lab", "")
     if price_ans:
         r = _parse_numeric_range(price_ans)
@@ -1701,9 +1741,16 @@ def _apply_user_params(
             sp_lo, sp_hi = r
             overrides["sp"] = f"PI-provided: ${int(sp_lo):,}–${int(sp_hi):,}/yr per lab"
 
-    # Q3 — addressable fraction (SAM rate)
-    sam_ans = user_params.get("seg.addressable_fraction", "")
-    if sam_ans:
+    # ── SAM rate: new field (workflow type → adoption friction)
+    workflow_ans = user_params.get("seg.workflow_type", "")
+    if workflow_ans:
+        r = _workflow_sam(workflow_ans)
+        if r:
+            sam_lo, sam_hi = r
+            overrides["sam"] = f"workflow type: SAM {sam_lo:.0%}–{sam_hi:.0%}"
+
+    # ── SAM rate: legacy field (explicit percentage range)
+    elif (sam_ans := user_params.get("seg.addressable_fraction", "")):
         pcts = re.findall(r"(\d+)(?:\s*[–-]\s*(\d+))?\s*%", sam_ans)
         if pcts:
             lo_pct = float(pcts[0][0]) / 100
@@ -1711,6 +1758,13 @@ def _apply_user_params(
             sam_lo = min(lo_pct, hi_pct)
             sam_hi = max(lo_pct, hi_pct)
             overrides["sam"] = f"PI-provided: {sam_lo:.0%}–{sam_hi:.0%} addressable"
+
+    # ── SOM penetration rate: adoption pathway → 5-yr market capture speed
+    adoption_ans = user_params.get("seg.adoption_pathway", "")
+    if adoption_ans:
+        r = _adoption_som(adoption_ans)
+        if r:
+            overrides["som"] = r   # tuple (som_lo, som_hi) — consumed by the formula
 
     return pop_lo, pop_hi, sp_lo, sp_hi, sam_lo, sam_hi, overrides
 
@@ -1845,6 +1899,7 @@ def _derive_research_tool_formula(
 
     # Override defaults with PI-provided intake answers (from /clarify questions).
     _sam_lo, _sam_hi = _SAM_LO, _SAM_HI
+    _som_lo, _som_hi = _SOM_LO, _SOM_HI
     _user_overrides: dict = {}
     if user_params:
         pop_lo, pop_hi, sp_lo, sp_hi, _sam_lo, _sam_hi, _user_overrides = _apply_user_params(
@@ -1854,18 +1909,23 @@ def _derive_research_tool_formula(
             pop_src = "PI intake answer — " + _user_overrides["pop"]
         if _user_overrides.get("sp"):
             sp_src = "PI intake answer — " + _user_overrides["sp"]
+        # Adoption pathway overrides SOM penetration rate
+        if _user_overrides.get("som"):
+            _som_lo, _som_hi = _user_overrides["som"]
 
     # Recompute midpoints after any overrides
     sam_mid = (_sam_lo + _sam_hi) / 2
+    som_mid = (_som_lo + _som_hi) / 2
     tam  = ((pop_lo + pop_hi) / 2) * ((sp_lo + sp_hi) / 2)
     sam  = tam * sam_mid
-    som  = sam * _SOM_MID
+    som  = sam * som_mid
 
     # Monte Carlo over the full parameter space (population × spend × SAM rate × SOM rate).
     _mc: Optional[MonteCarloResult] = None
     try:
         _mc = _run_research_tool_sensitivity(pop_lo, pop_hi, sp_lo, sp_hi,
-                                              sam_lo=_sam_lo, sam_hi=_sam_hi)
+                                              sam_lo=_sam_lo, sam_hi=_sam_hi,
+                                              som_lo=_som_lo, som_hi=_som_hi)
     except Exception as _mc_e:
         logger.warning("Monte Carlo sensitivity failed (non-fatal): %s", _mc_e)
 
@@ -1935,48 +1995,50 @@ def _derive_research_tool_formula(
         ),
         DerivationStep(
             step_num=4,
-            title=f"Step 4 — Serviceable Addressable Market (SAM = {_SAM_MID:.0%} of TAM, midpoint)",
+            title=f"Step 4 — Serviceable Addressable Market (SAM = {sam_mid:.0%} of TAM, midpoint)",
             formula=(
-                f"SAM = {_fmt(tam)} × [{_SAM_LO:.0%}–{_SAM_HI:.0%}] early-adopter fraction "
-                f"= {_fmt(tam * _SAM_LO)}–{_fmt(tam * _SAM_HI)}; midpoint {_fmt(sam)}"
+                f"SAM = {_fmt(tam)} × [{_sam_lo:.0%}–{_sam_hi:.0%}] early-adopter fraction "
+                f"= {_fmt(tam * _sam_lo)}–{_fmt(tam * _sam_hi)}; midpoint {_fmt(sam)}"
             ),
             value=float(sam),
             unit="USD",
-            source_paper="Assumed — early-adopter fraction (method=assumed; validate with n≥30 PI interviews)",
+            source_paper="Derived from product workflow type" if _user_overrides.get("sam") else "Assumed — early-adopter fraction (method=assumed; validate with n≥30 PI interviews)",
             source_url="",
             explanation=(
-                f"Primary competition is status quo (manual SD cards, lab-built scripts). "
-                f"The early-adopter fraction [{_SAM_LO:.0%}–{_SAM_HI:.0%}] encodes genuine uncertainty "
-                f"about how many eligible labs would switch within 5 years. "
-                f"Midpoint {_SAM_MID:.0%} used as the planning base. "
+                f"The early-adopter fraction [{_sam_lo:.0%}–{_sam_hi:.0%}] encodes the "
+                f"fraction of eligible labs expected to adopt within 5 years given the product's "
+                f"workflow fit and switching friction. "
+                + (f"Derived from intake answer: {_user_overrides['sam']}. " if _user_overrides.get("sam") else "")
+                + f"Midpoint {sam_mid:.0%} used as the planning base. "
                 f"This is the second-largest source of uncertainty in the model — see sensitivity ranking."
             ),
-            data_source="Assumed (method=assumed); target: structured PI interviews n≥30",
+            data_source=_user_overrides.get("sam") or "Assumed (method=assumed); target: structured PI interviews n≥30",
             assumptions=[
-                f"Early-adopter fraction range: {_SAM_LO:.0%}–{_SAM_HI:.0%} (midpoint {_SAM_MID:.0%})",
+                f"Early-adopter fraction range: {_sam_lo:.0%}–{_sam_hi:.0%} (midpoint {sam_mid:.0%})",
                 "Validate with structured interview data before fundraising",
             ],
         ),
         DerivationStep(
             step_num=5,
-            title=f"Step 5 — Serviceable Obtainable Market (SOM = {_SOM_MID:.0%} of SAM, 5-yr horizon)",
+            title=f"Step 5 — Serviceable Obtainable Market (SOM = {som_mid:.0%} of SAM, 5-yr horizon)",
             formula=(
-                f"SOM = {_fmt(sam)} × [{_SOM_LO:.0%}–{_SOM_HI:.0%}] 5-yr penetration "
-                f"= {_fmt(sam * _SOM_LO)}–{_fmt(sam * _SOM_HI)}; midpoint {_fmt(som)}"
+                f"SOM = {_fmt(sam)} × [{_som_lo:.0%}–{_som_hi:.0%}] 5-yr penetration "
+                f"= {_fmt(sam * _som_lo)}–{_fmt(sam * _som_hi)}; midpoint {_fmt(som)}"
             ),
             value=float(som),
             unit="USD",
-            source_paper="Assumed — 5-yr SAM ramp rate (method=assumed; validate with comparable research-tool launches)",
+            source_paper="Derived from adoption pathway" if _user_overrides.get("som") else "Assumed — 5-yr SAM ramp rate (method=assumed; validate with comparable research-tool launches)",
             source_url="",
             explanation=(
-                f"5-yr penetration [{_SOM_LO:.0%}–{_SOM_HI:.0%}] of SAM assumes: (1) 12–18 month sales cycle per lab, "
+                f"5-yr penetration [{_som_lo:.0%}–{_som_hi:.0%}] of SAM assumes: (1) 12–18 month sales cycle per lab, "
                 f"(2) referral-driven growth from early adopters, (3) pricing at or below observed spend band. "
-                f"Midpoint {_SOM_MID:.0%} used as planning base. "
+                + (f"Adoption pathway answer adjusts the penetration rate range. " if _user_overrides.get("som") else "")
+                + f"Midpoint {som_mid:.0%} used as planning base. "
                 f"This is the largest single source of uncertainty in the model — see sensitivity ranking."
             ),
-            data_source="Assumed (method=assumed); target: comparable research-tool SaaS launch benchmarks",
+            data_source="Derived from adoption pathway answer" if _user_overrides.get("som") else "Assumed (method=assumed); target: comparable research-tool SaaS launch benchmarks",
             assumptions=[
-                f"5-yr penetration range: {_SOM_LO:.0%}–{_SOM_HI:.0%} of SAM (midpoint {_SOM_MID:.0%})",
+                f"5-yr penetration range: {_som_lo:.0%}–{_som_hi:.0%} of SAM (midpoint {som_mid:.0%})",
                 "No Bass diffusion calibration yet; ranges from early-stage SaaS benchmarks",
             ],
         ),
@@ -2011,8 +2073,8 @@ def _derive_research_tool_formula(
             "Buyer = academic PI on grant cycle (not hospital enterprise)",
             f"Lab population: {pop_lo:,}–{pop_hi:,} eligible labs ({pop_src})",
             f"Annualised spend: ${sp_lo:,.0f}–${sp_hi:,.0f}/lab/yr ({sp_src})",
-            f"SAM adoption rate: {_SAM_LO:.0%}–{_SAM_HI:.0%} (midpoint {_SAM_MID:.0%}) — assumed",
-            f"SOM 5-yr penetration: {_SOM_LO:.0%}–{_SOM_HI:.0%} (midpoint {_SOM_MID:.0%}) — assumed",
+            f"SAM adoption rate: {_sam_lo:.0%}–{_sam_hi:.0%} (midpoint {sam_mid:.0%})" + (" — from workflow type" if _user_overrides.get("sam") else " — assumed"),
+            f"SOM 5-yr penetration: {_som_lo:.0%}–{_som_hi:.0%} (midpoint {som_mid:.0%})" + (" — from adoption pathway" if _user_overrides.get("som") else " — assumed"),
         ],
         confidence_note=(
             f"Lab count unverified (NIH RePORTER queries, not executed); "
