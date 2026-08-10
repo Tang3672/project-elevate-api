@@ -25,9 +25,11 @@ app = FastAPI(
 # domain) can be added via the ALLOWED_ORIGINS env var (comma-separated).
 import os as _os
 _extra_origins = [o.strip() for o in _os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()]
+# "null" allows file:// local HTML (Origin: null) used during dev/staging
+_allow_origins = list({"null"} | set(_extra_origins))
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_extra_origins,
+    allow_origins=_allow_origins,
     allow_origin_regex=r"https://([a-z0-9-]+\.)*netlify\.app|http://localhost(:\d+)?|http://127\.0\.0\.1(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
