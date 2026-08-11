@@ -1317,7 +1317,7 @@ def sensitivity_analysis(tree: SegmentTree) -> List[Dict[str, Any]]:
             "tam_low_usd":   tam_low,
             "tam_high_usd":  tam_high,
             "impact_usd":    impact,
-            "impact_pct":    round((impact / base_tam * 100) if base_tam > 0 else 0.0, 2),
+            "impact_pct":    round(min((impact / base_tam * 100) if base_tam > 0 else 0.0, 500.0), 2),
         })
 
     results.sort(key=lambda x: x["impact_usd"], reverse=True)

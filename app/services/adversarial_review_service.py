@@ -98,17 +98,10 @@ def _extract_recommendations(report_dict: dict, idea: str) -> list[str]:
 
 
 def _fallback_review(recommendations: list[str]) -> list[dict]:
-    """Deterministic fallback when the Haiku call is unavailable."""
-    return [
-        {
-            "recommendation": r,
-            "supporting_case": "See supporting analysis in the report.",
-            "structural_risk": "Independent adversarial review unavailable (API key not set). Manual review required.",
-            "disconfirming_evidence": "Not assessed.",
-            "what_would_change_this": "Not assessed.",
-        }
-        for r in recommendations
-    ]
+    """Adversarial review unavailable — return empty so the section is suppressed.
+    Never render internal error strings ('API key not set', 'Not assessed') to users.
+    """
+    return []
 
 
 async def run_adversarial_review(

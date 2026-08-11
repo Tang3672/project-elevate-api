@@ -1818,9 +1818,17 @@ def _run_research_tool_sensitivity(
     sam_mid = (sam_lo + sam_hi) / 2
     som_mid = (som_lo + som_hi) / 2
     som_base = pop_mid * sp_mid * sam_mid * som_mid
+    if som_base <= 0:
+        raise ValueError(
+            f"sensitivity: degenerate baseline (pop_mid={pop_mid}, sp_mid={sp_mid}, "
+            f"sam_mid={sam_mid}, som_mid={som_mid}) — all midpoints must be positive"
+        )
 
     def _entry(param, lo_lbl, hi_lbl, som_lo_val, som_hi_val) -> SensitivityEntry:
-        swing = (som_hi_val - som_lo_val) / som_base * 100
+        raw_swing = (som_hi_val - som_lo_val) / som_base * 100
+        # Clamp to a meaningful range: if the swing exceeds 500% something is
+        # degenerate upstream (divide-by-near-zero). Cap rather than explode.
+        swing = max(0.0, min(raw_swing, 500.0))
         return SensitivityEntry(
             parameter=param, lo_label=lo_lbl, hi_label=hi_lbl,
             som_at_lo=som_lo_val, som_at_hi=som_hi_val, swing_pct=round(swing, 1),
