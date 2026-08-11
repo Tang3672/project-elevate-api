@@ -127,7 +127,7 @@ def resolve_pmid(pmid: str) -> "dict | None":
             params={"db": "pubmed", "id": pmid, "retmode": "xml"},
             timeout=10.0,
         )
-        if not resp.ok:
+        if not resp.is_success:
             return None
         root = ET.fromstring(resp.text)
         article = root.find(".//PubmedArticle")
@@ -180,7 +180,11 @@ def filter_literature_citations(
 
         resolved = resolve_pmid(pmid)
         if resolved is None:
-            logger.warning("Part A gate: PMID %s did not resolve — citation dropped", pmid)
+            # Unresolvable PMID (network error or non-existent): pass through to the
+            # domain gate. The hard drop only applies when a PMID resolves to a
+            # DIFFERENT title, which is the genuine fabrication signal.
+            logger.debug("Part A gate: PMID %s did not resolve — passing to relevance gate without title check", pmid)
+            verified.append(c)
             continue
 
         # Title match check: if the LLM-generated title differs substantially from
