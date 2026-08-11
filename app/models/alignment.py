@@ -251,6 +251,7 @@ class PIReport(BaseModel):
     routing_plan:           Optional[dict] = None     # cost-aware specialist routing plan (P3)
     grounded_context:       Optional[list] = None      # retrieved facts used by synthesis, for trust judging
     competitive_landscape:  Optional[dict] = None       # server-side competitor sweep (reliable, no client fetch)
+    competitive_alternatives: Optional[list] = None    # B-04: comparators extracted from main LLM call
     expert_domain:          Optional[str]  = None
     expert_name:            Optional[str]  = None
     expert_icon:            Optional[str]  = None
@@ -274,6 +275,7 @@ class PIReport(BaseModel):
     triangulation:          Optional[dict] = None   # D.3: three methods + reconciliation
     sensitivity:            Optional[list] = None   # D.7: ranked sensitivity parameters
     axis_decisions:         Optional[dict] = None   # C.1/C.2: selected + rejected axis decisions with reasons
+    market_sizing_derivation: Optional[dict] = None  # Part C: persisted buyer-model nodes for editable recompute
 
 
 # ── Legacy AlignmentReport (kept for backward compat) ─────────────────────────

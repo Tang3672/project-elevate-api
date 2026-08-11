@@ -12,6 +12,28 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
+# B-06: search/query URLs are not citable sources — they are ephemeral API calls.
+# Any URL matching these patterns is excluded from the sources list.
+_QUERY_URL_PATTERNS = (
+    "reporter.nih.gov/search",
+    "reporter.nih.gov/v2/projects/search",
+    "eutils.ncbi.nlm.nih.gov",
+    "pubmed.ncbi.nlm.nih.gov/search",
+    "ncbi.nlm.nih.gov/pmc/search",
+    "medrxiv.org/search",
+    "biorxiv.org/search",
+    "clinicaltrials.gov/search",
+    "scholar.google.com/scholar?",
+    "semanticscholar.org/search",
+)
+
+def _is_query_url(url: str) -> bool:
+    """Return True if the URL is a search/query endpoint rather than a specific page."""
+    if not url:
+        return False
+    url_l = url.lower()
+    return any(p in url_l for p in _QUERY_URL_PATTERNS)
+
 
 def extract_and_format_sources(report: dict) -> dict:
     """
@@ -47,6 +69,10 @@ def extract_and_format_sources(report: dict) -> dict:
                     url  = ""
             else:
                 name = name_or_url
+
+            # B-06: skip search/query endpoints — they are not citable sources
+            if _is_query_url(url):
+                return ""
 
             # Deduplicate by URL
             key = url or name
@@ -137,6 +163,9 @@ def build_sources_from_report(report: dict) -> dict:
 
     def add_source(name: str, url: str):
         if not url or url == "None":
+            return
+        # B-06: skip search/query endpoints — they are not citable sources
+        if _is_query_url(url):
             return
         key = url.strip()
         if key not in url_to_idx:

@@ -398,7 +398,11 @@ def get_strategies_for_domain(sub_expert_id: str, max_strategies: int = 4) -> li
 _TYPED_ARCHETYPES = {"research_tool_non_clinical", "research_infrastructure_saas"}
 
 
-def format_strategies_for_report(sub_expert_id: str, domain: str = "LIFE_SCIENCES_RESEARCH") -> list:
+def format_strategies_for_report(
+    sub_expert_id: str,
+    domain: str = "LIFE_SCIENCES_RESEARCH",
+    context: "dict | None" = None,
+) -> list:
     """
     Format strategies as list of dicts for report strategic_playbook field.
 
@@ -409,13 +413,16 @@ def format_strategies_for_report(sub_expert_id: str, domain: str = "LIFE_SCIENCE
 
     F-3: domain param gates typed strategies by product domain so non-LS products
     (e.g. agronomy, IoT) don't receive LS-specific strategies (R01 timing, LabArchives).
+
+    B-01: context dict is forwarded so apply_template placeholders (product_name,
+    modality, buyer_type, etc.) are substituted rather than left as raw {vars}.
     """
     if (sub_expert_id or "").lower() in _TYPED_ARCHETYPES:
         from app.services.strategy_model import format_typed_strategies_for_report
         return format_typed_strategies_for_report(
             archetype=sub_expert_id,
             domain=domain,
-            context={},
+            context=context or {},
             max_strategies=4,
         )
 

@@ -377,7 +377,17 @@ async def generate_pi_report(
             "OTHER" if (disease_domain or "").lower() in _NON_LS_DOMAINS
             else "LIFE_SCIENCES_RESEARCH"
         )
-        playbook = format_strategies_for_report(_sub_id, domain=_strategy_domain)
+        # B-01: build context so apply_template placeholders are substituted.
+        # modality = the classified sub_expert_id (e.g. "research_tool_non_clinical");
+        # buyer_type and funding_agency are derived from the router result when available.
+        _strategy_context = {
+            "product_name":   product_name or idea.split("—")[0].split("-")[0].strip()[:40] or "your product",
+            "modality":       (router_result.modality or _sub_id or "research tool").replace("_", " "),
+            "buyer_type":     getattr(router_result, "buyer_persona", None) or "academic PI",
+            "funding_agency": "NIH" if "nih" in (disease_domain or "").lower() else "NSF",
+            "company_name":   institution or "your company",
+        }
+        playbook = format_strategies_for_report(_sub_id, domain=_strategy_domain, context=_strategy_context)
         if not playbook:
             fallback_map = {
                 # Expert domain IDs from expert_profiles_v2
@@ -435,7 +445,7 @@ async def generate_pi_report(
                 "mental_health": "drug_mental_health",
             }
             fallback_id = fallback_map.get(_sub_id, "drug_amr")
-            playbook = format_strategies_for_report(fallback_id)
+            playbook = format_strategies_for_report(fallback_id, context=_strategy_context)
             logger.info(f"Used fallback sub_expert_id={fallback_id}")
         report.strategic_playbook = playbook
         logger.info(f"Strategic playbook: {len(report.strategic_playbook)} strategies")
@@ -496,8 +506,24 @@ async def attach_competitive_landscape(report) -> None:
         from app.services.competitor_schema import normalize_landscape
         _sub_id = getattr(report, "expert_domain", "") or ""
         if _sub_id in _RESEARCH_TOOL_ARCHETYPES:
-            _idea = getattr(report, "idea_submitted", "") or ""
-            _comparators = await _extract_research_tool_comparators(_idea, _sub_id)
+            # B-04: use comparators already extracted by the main LLM call (competitive_alternatives)
+            # rather than a separate Haiku call that may return different or empty results.
+            _seed_alts = getattr(report, "competitive_alternatives", None) or []
+            if _seed_alts:
+                _comparators = [
+                    {
+                        "name": c.get("name", ""),
+                        "category": c.get("category", ""),
+                        "description": c.get("key_differentiator", ""),
+                        "source": "main_report",
+                    }
+                    for c in _seed_alts if c.get("name")
+                ]
+                logger.info("B-04: seeding §7 from %d main-report competitive_alternatives", len(_comparators))
+            else:
+                _idea = getattr(report, "idea_submitted", "") or ""
+                _comparators = await _extract_research_tool_comparators(_idea, _sub_id)
+                logger.info("B-04: competitive_alternatives empty — fell back to Haiku sweep (%d results)", len(_comparators))
             report.competitive_landscape = normalize_landscape({
                 "available": True,
                 "competitors": _comparators,
@@ -926,6 +952,25 @@ async def _generate_expert_report(idea, product_type, expert, demand_results, ho
     except Exception as e:
         logger.warning(f"Disease classification failed: {e}")
 
+    # B-05: For research tools, the disease classifier returns negation phrases like
+    # "No specific disease targeted — cross-domain research data infrastructure tool".
+    # These poison all downstream PubMed queries and the §1 condition field.
+    # Replace with a product-derived scope term so searches target the actual domain.
+    _NEGATION_PHRASES = (
+        "no specific disease",
+        "not applicable",
+        "n/a",
+        "cross-domain",
+        "not disease-specific",
+        "no disease",
+    )
+    _is_negation = any(p in disease_name.lower() for p in _NEGATION_PHRASES)
+    if _resolved_domain == "LIFE_SCIENCES_RESEARCH" or _is_negation:
+        _pn = (product_name or idea.split("—")[0].split("-")[0].strip()[:50] or "research tool").strip()
+        disease_name = _pn
+        disease_info["disease_name"] = _pn
+        logger.info("B-05: research domain — replaced disease_name with product scope term: %r", _pn)
+
     # Layer 2: Knowledge Retriever → 5-6 parallel live searches
     # Uses sub_expert_id from router (v2) or domain_id (v1 fallback)
     sub_expert_id = getattr(expert, "sub_expert_id", getattr(expert, "domain_id", "drug_amr"))
@@ -1171,7 +1216,13 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
             fallback_intel = {
                 'competitor_trials': {'trials': [], 'total_found': 0},
                 'fda_precedents': {'approvals': []},
-                'strategic_playbook': format_strategies_for_report(sub_expert_id),
+                'strategic_playbook': format_strategies_for_report(sub_expert_id, context={
+                    "product_name": product_name or idea.split("—")[0].strip()[:40] or "your product",
+                    "modality": (sub_expert_id or "research tool").replace("_", " "),
+                    "buyer_type": "academic PI",
+                    "funding_agency": "NIH",
+                    "company_name": institution or "your company",
+                }),
             }
             researcher_ctx = researcher_ctx + format_intelligence_for_expert(fallback_intel, disease_name)
 
@@ -1602,7 +1653,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
             return {}
 
     try:
-        raw  = await _call_claude(context, system, max_tokens=8192, model=_synthesis_model)
+        raw  = await _call_claude(context, system, max_tokens=16000, model=_synthesis_model)
     except Exception as _synth_e:
         logger.error("Synthesis call-1 HTTP error (model=%s ctx_len=%d): %s",
                      _synthesis_model, len(context), _synth_e)
@@ -1617,7 +1668,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
                 context,
                 system + "\n\nIMPORTANT: respond with ONLY one complete, valid JSON object "
                          "matching the schema. Do not truncate; include every top-level field.",
-                max_tokens=8192, model=_synthesis_model)
+                max_tokens=16000, model=_synthesis_model)
         except Exception as _synth2_e:
             logger.error("Synthesis call-2 HTTP error: %s", _synth2_e)
             raise
@@ -1769,13 +1820,18 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
 
     # Parse into PIReport
     report = _parse_expert_response(data, idea, product_type, expert, demand_results, hospital_matches_raw, total_signals,
-                                    product_name=product_name, institution=institution)
+                                    product_name=product_name, institution=institution, sub_expert_id=sub_expert_id)
 
     # Fix 1 — make market sizing arithmetically self-consistent so the Math Verifier
     # can't flag rounding drift (LLMs round $99.45M->$99M inconsistently). Recompute
     # SAM/SOM from clean displayed percentages off the deterministic derivation.
     if deriv is not None:
         _enforce_market_consistency(report, deriv)
+        # Part C: attach the structured derivation so the UI can make nodes editable
+        try:
+            report.market_sizing_derivation = deriv.model_dump(mode="json")
+        except Exception as _msd_e:
+            logger.warning("market_sizing_derivation attach failed (non-fatal): %s", _msd_e)
 
     # H-08/B-02: market math post-processing
     #   (a) Authored confidence phrases stripped from prose fields.
@@ -2117,7 +2173,7 @@ RULES:
    WRONG: https://www.fda.gov/drugs
    RIGHT: https://www.fda.gov/drugs/development-resources/qualified-infectious-disease-product-qidp-designation
    WRONG: https://pubmed.ncbi.nlm.nih.gov
-   RIGHT: https://pubmed.ncbi.nlm.nih.gov/35065702/
+   RIGHT: https://pubmed.ncbi.nlm.nih.gov/[PMID]/ where [PMID] is a real PMID from your context
 2. Every data_point source must include the specific report name and year in the source field.
    WRONG: source: "CDC"
    RIGHT: source: "CDC Antimicrobial Resistance Threats Report 2019, Table 1 (p.7)"
@@ -2167,7 +2223,7 @@ If the exact guidance is not listed above, use the general FDA guidance search: 
 
 {
   "executive_summary": "<2 sentences, under 300 chars>",
-  "literature_citations": [{"pmid":"<PMID from context>","title":"<under 120 chars>","authors":"<First author et al.>","journal":"<journal name>","year":"<year>","url":"<pubmed URL>","relevance":"<under 100 chars>"}],
+  "literature_citations": [{"pmid":"<PMID copied verbatim from the retrieved papers in your context — NEVER invent a PMID>","title":"<title copied from retrieved context — NEVER invent or paraphrase>","authors":"<authors from retrieved context>","journal":"<journal from retrieved context>","year":"<year from retrieved context>","url":"https://pubmed.ncbi.nlm.nih.gov/<PMID>/","relevance":"<under 100 chars>"}],
   "disease_intelligence": {
     "condition": "<condition name>",
     "data_points": [{"metric":"<>","value":"<>","year":"<>","source":"<name>","source_url":"<real URL>"}],
@@ -2201,7 +2257,7 @@ If the exact guidance is not listed above, use the general FDA guidance search: 
     "first_commercial_step": "<under 150 chars>",
     "international_opportunities": ["<under 150 chars each, max 2>"]
   },
-  "market_geography": {"description":"<under 200 chars>","top_states":["<state>"],"scope":"<national|regional|concentrated>"},
+  "market_geography": {"description":"<under 200 chars — explain WHY these states lead, e.g. 'MA and CA lead due to concentration of R1 research universities and NIH funding'>","top_states":["<state name + one-phrase reason e.g. 'Massachusetts — 42 R1 universities, $3.2B NIH awards'>"],"scope":"<national|regional|concentrated>"},
   "recommended_next_steps": ["<under 150 chars each, max 5>"],
   "limitations": "<under 200 chars>",
 
@@ -2244,11 +2300,15 @@ If the exact guidance is not listed above, use the general FDA guidance search: 
     "<specific risk from scope creep, mispricing, or unclear constraints — 3 to 5 bullets>"
   ],
 
-  "guiding_question": "<single decision test the team can apply to every future product choice, under 150 chars>"
+  "guiding_question": "<single decision test the team can apply to every future product choice, under 150 chars>",
+
+  "competitive_alternatives": [
+    {"name": "<product or approach name — e.g. 'DIY Python scripts', 'Empatica E4', 'REDCap'>", "category": "<software|hardware|DIY|service|open-source>", "key_differentiator": "<what this product does better than the alternative, under 100 chars>"}
+  ]
 }"""
 
 
-def _parse_expert_response(data, idea, product_type, expert, demand_results, hospital_matches_raw, total_signals, product_name=None, institution=None):
+def _parse_expert_response(data, idea, product_type, expert, demand_results, hospital_matches_raw, total_signals, product_name=None, institution=None, sub_expert_id=None):
     """Parse Claude JSON response into PIReport regardless of domain."""
     di_data = data.get("disease_intelligence", {})
     disease_intel = DiseaseIntelligence(
@@ -2346,6 +2406,9 @@ def _parse_expert_response(data, idea, product_type, expert, demand_results, hos
     # S-09 Guiding Question
     guiding_q = data.get("guiding_question") or ""
 
+    # B-04: competitive_alternatives from main LLM call — seeds §7 without a separate Haiku call
+    _comp_alts = [c for c in data.get("competitive_alternatives", []) if isinstance(c, dict) and c.get("name")]
+
     return PIReport(
         product_type           = product_type,
         idea_submitted         = idea,
@@ -2375,6 +2438,7 @@ def _parse_expert_response(data, idea, product_type, expert, demand_results, hos
         guiding_question       = guiding_q or None,
         product_name           = product_name or None,
         institution            = institution or None,
+        competitive_alternatives = _comp_alts or None,
     )
 
 
@@ -2923,7 +2987,7 @@ async def _call_claude(context: str, system_prompt: str, max_tokens: int = 2000,
     anthropic_api_key = os.getenv("ANTHROPIC_API_KEY") or settings.ANTHROPIC_API_KEY
     if not anthropic_api_key:
         raise ValueError("ANTHROPIC_API_KEY not set in Railway environment variables")
-    async with httpx.AsyncClient(timeout=180.0) as client:
+    async with httpx.AsyncClient(timeout=300.0) as client:
         r = await client.post(
             ANTHROPIC_API_URL,
             headers={
