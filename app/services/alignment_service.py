@@ -2926,7 +2926,8 @@ def _enforce_market_consistency(report, deriv) -> None:
         som = round(sam * cap / 100)                   # exactly SAM × cap%
 
         def _fmt(v):
-            return f"${v/1e9:.2f}B" if v >= 1e9 else f"${v/1e6:.1f}M"
+            from app.utils import fmt_usd
+            return fmt_usd(v)
 
         # Describe TAM in the unit the derivation actually used — a SaMD is priced per
         # hospital site, a diagnostic per test, a device per procedure — NOT per patient.
