@@ -1216,13 +1216,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
             fallback_intel = {
                 'competitor_trials': {'trials': [], 'total_found': 0},
                 'fda_precedents': {'approvals': []},
-                'strategic_playbook': format_strategies_for_report(sub_expert_id, context={
-                    "product_name": product_name or idea.split("—")[0].strip()[:40] or "your product",
-                    "modality": (sub_expert_id or "research tool").replace("_", " "),
-                    "buyer_type": "academic PI",
-                    "funding_agency": "NIH",
-                    "company_name": institution or "your company",
-                }),
+                'strategic_playbook': format_strategies_for_report(sub_expert_id),
             }
             researcher_ctx = researcher_ctx + format_intelligence_for_expert(fallback_intel, disease_name)
 
