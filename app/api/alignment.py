@@ -199,6 +199,11 @@ async def get_pi_report_async(payload: PIReportRequest, current_user = Depends(g
                         if _msd.get(k) is not None
                     }
                     _nodes["_full_derivation"] = _msd
+                    # Item 9: freeze commercialization signals so recommendation can recompute on edit
+                    _cs_raw = getattr(report, "commercialization_scores", None) or {}
+                    _comm_sigs = _cs_raw.get("_input_signals") if isinstance(_cs_raw, dict) else None
+                    if _comm_sigs:
+                        _nodes["_comm_signals"] = _comm_sigs
                     await save_baseline(job_id, _nodes)
                     logger.info("Part C: buyer-model baseline saved for job %s", job_id)
             except Exception as _mmc_e:
@@ -2094,6 +2099,24 @@ async def market_model_node_edit(
     # Recompute
     new_nodes = _recompute_buyer_model(nodes)
 
+    # Item 9: deterministic recommendation recompute — only SOM/TAM change; all other signals frozen
+    _recommendation_update = None
+    try:
+        _comm_sigs = (base.get("nodes") or {}).get("_comm_signals")
+        if _comm_sigs and isinstance(_comm_sigs, dict):
+            from app.services.commercialization_decision_service import score_commercialization as _score_comm
+            _sigs = dict(_comm_sigs)
+            _sigs["som_usd"] = new_nodes.get("us_som_usd")
+            _sigs["tam_usd"] = new_nodes.get("us_tam_usd")
+            _cr = _score_comm(_sigs)
+            _recommendation_update = {
+                "recommendation":   _cr["recommendation"],
+                "overall_priority": _cr["commercialization_scores"]["overall_priority"],
+                "top_drivers":      _cr["top_drivers"],
+            }
+    except Exception as _rec_e:
+        logger.warning("Item 9: recommendation recompute failed (non-fatal): %s", _rec_e)
+
     # Save new version
     parent_ver = base.get("version", 1)
     new_ver = await _mmr.save_edit(
@@ -2109,15 +2132,16 @@ async def market_model_node_edit(
     diffs = _diff_nodes(parent_nodes, new_nodes)
 
     return {
-        "version":       new_ver,
-        "parent_version": parent_ver,
-        "rationale":     body.rationale,
-        "nodes":         new_nodes,
-        "diff":          diffs,
-        "tam_fmt":       new_nodes["tam_fmt"],
-        "sam_fmt":       new_nodes["sam_fmt"],
-        "som_fmt":       new_nodes["som_fmt"],
-        "steps":         new_nodes.get("steps", []),
+        "version":              new_ver,
+        "parent_version":       parent_ver,
+        "rationale":            body.rationale,
+        "nodes":                new_nodes,
+        "diff":                 diffs,
+        "tam_fmt":              new_nodes["tam_fmt"],
+        "sam_fmt":              new_nodes["sam_fmt"],
+        "som_fmt":              new_nodes["som_fmt"],
+        "steps":                new_nodes.get("steps", []),
+        "recommendation_update": _recommendation_update,  # Item 9
     }
 
 

@@ -201,6 +201,9 @@ def score_commercialization(signals: dict) -> dict:
         "recommendation": _recommendation(scores),
         "modality": modality,
         "method": "rules+calibrated_tables_v1",
+        # Stored for deterministic recompute when buyer-model nodes are edited (Item 9).
+        # Only the market/SOM signal changes on a price or population edit; all others are frozen.
+        "_input_signals": signals,
     }
 
 
