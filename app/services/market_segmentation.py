@@ -38,6 +38,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+import time
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Literal, Optional, Tuple
@@ -46,6 +47,18 @@ import httpx
 import numpy as np
 
 logger = logging.getLogger(__name__)
+
+
+def _log_fetch_seg(service: str, url: str, method: str, status, latency_ms: float,
+                   response_bytes: int, parsed_records: int, query_summary: str) -> None:
+    """Emit a FETCH_AUDIT record for market_segmentation outbound calls."""
+    logger.debug(
+        "FETCH_AUDIT service=%s method=%s status=%s latency_ms=%.0f bytes=%d "
+        "records=%d url=%s query=%r",
+        service, method, status, latency_ms, response_bytes, parsed_records,
+        url, query_summary,
+    )
+
 
 # ── Template identifier ────────────────────────────────────────────────────────
 
@@ -514,6 +527,7 @@ async def query_nsf_awards(keyword: str, directorates: list[str] | tuple[str, ..
     if directorates:
         params["fundProgramName"] = ",".join(directorates)
 
+    _t0 = time.monotonic()
     try:
         async with httpx.AsyncClient(timeout=NSF_AWARDS_TIMEOUT) as client:
             resp = await client.get(NSF_AWARDS_URL, params=params)
@@ -522,6 +536,11 @@ async def query_nsf_awards(keyword: str, directorates: list[str] | tuple[str, ..
         awards = data.get("response", {}).get("award", []) or []
         count = len(awards)
         dir_note = f" directorates={directorates}" if directorates else ""
+        _log_fetch_seg(
+            "nsf_awards", NSF_AWARDS_URL, "GET", resp.status_code,
+            (time.monotonic() - _t0) * 1000, len(resp.content), count,
+            f"keyword={keyword!r}{dir_note}",
+        )
         if count == 0:
             logger.info(
                 "NSF Awards returned 0 results for keyword '%s'%s; using static fallback.",
@@ -540,6 +559,11 @@ async def query_nsf_awards(keyword: str, directorates: list[str] | tuple[str, ..
             "fallback_used": False,
         }
     except Exception as exc:
+        _log_fetch_seg(
+            "nsf_awards", NSF_AWARDS_URL, "GET", None,
+            (time.monotonic() - _t0) * 1000, 0, 0,
+            f"keyword={keyword!r}",
+        )
         logger.warning("NSF Awards API failed (%s); using static fallback.", exc)
         return fallback
 
@@ -605,6 +629,7 @@ async def query_nih_reporter(keyword: str, agency_codes: tuple[str, ...] | list[
         "fields": ["principal_investigators"],
     }
 
+    _t0 = time.monotonic()
     try:
         async with httpx.AsyncClient(timeout=NIH_REPORTER_TIMEOUT) as client:
             response = await client.post(NIH_REPORTER_URL, json=payload)
@@ -614,6 +639,12 @@ async def query_nih_reporter(keyword: str, agency_codes: tuple[str, ...] | list[
         results: list = data.get("results", [])
         meta:    dict = data.get("meta", {})
         total_projects: int = meta.get("total", 0)
+        ic_note = f" ics={list(agency_codes)}" if agency_codes else ""
+        _log_fetch_seg(
+            "nih_reporter", NIH_REPORTER_URL, "POST", response.status_code,
+            (time.monotonic() - _t0) * 1000, len(response.content), total_projects,
+            f"keyword={keyword!r}{ic_note}",
+        )
 
         # Count distinct PI profile_ids from the 500-record sample
         pi_ids: set = set()
@@ -671,6 +702,11 @@ async def query_nih_reporter(keyword: str, agency_codes: tuple[str, ...] | list[
         }
 
     except Exception as exc:  # network error, timeout, bad JSON, etc.
+        _log_fetch_seg(
+            "nih_reporter", NIH_REPORTER_URL, "POST", None,
+            (time.monotonic() - _t0) * 1000, 0, 0,
+            f"keyword={keyword!r}",
+        )
         logger.warning("NIH RePORTER API failed (%s); using static fallback.", exc)
         return fallback
 

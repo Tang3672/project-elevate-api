@@ -20,10 +20,21 @@ import asyncio
 import logging
 import json
 import re
+import time
 from typing import List, Dict, Optional
 import httpx
 
 logger = logging.getLogger(__name__)
+
+# Import the shared audit logger; avoid circular at module load time
+def _log_fetch_pubmed(url: str, method: str, status, latency_ms: float,
+                      response_bytes: int, parsed_records: int, query_summary: str) -> None:
+    """Emit a FETCH_AUDIT record for PubMed/E-utilities calls."""
+    logger.debug(
+        "FETCH_AUDIT service=pubmed method=%s status=%s latency_ms=%.0f bytes=%d "
+        "records=%d url=%s query=%r",
+        method, status, latency_ms, response_bytes, parsed_records, url, query_summary,
+    )
 
 PUBMED_SEARCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
 PUBMED_FETCH_URL  = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
@@ -126,10 +137,17 @@ def resolve_pmid(pmid: str) -> "dict | None":
     """
     import xml.etree.ElementTree as ET
     try:
+        _t0 = time.monotonic()
         resp = httpx.get(
             PUBMED_FETCH_URL,
             params={"db": "pubmed", "id": pmid, "retmode": "xml"},
             timeout=10.0,
+        )
+        _log_fetch_pubmed(
+            PUBMED_FETCH_URL, "GET", resp.status_code,
+            (time.monotonic() - _t0) * 1000, len(resp.content),
+            0 if not resp.is_success else 1,
+            f"efetch pmid={pmid}",
         )
         if not resp.is_success:
             return None
@@ -328,6 +346,7 @@ def _build_pubmed_queries(disease_name: str, sub_expert_id: str) -> List[str]:
 
 async def _search_pubmed(query: str, max_results: int = 5) -> List[str]:
     """Search PubMed and return list of PMIDs."""
+    _t0 = time.monotonic()
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:
             r = await client.get(PUBMED_SEARCH_URL, params={
@@ -337,10 +356,21 @@ async def _search_pubmed(query: str, max_results: int = 5) -> List[str]:
                 "retmode": "json",
                 "sort": "relevance",
             })
+            ids = []
             if r.status_code == 200:
-                data = r.json()
-                return data.get("esearchresult", {}).get("idlist", [])
+                ids = r.json().get("esearchresult", {}).get("idlist", [])
+            _log_fetch_pubmed(
+                PUBMED_SEARCH_URL, "GET", r.status_code,
+                (time.monotonic() - _t0) * 1000, len(r.content), len(ids),
+                f"esearch {query[:80]}",
+            )
+            return ids
     except Exception as e:
+        _log_fetch_pubmed(
+            PUBMED_SEARCH_URL, "GET", None,
+            (time.monotonic() - _t0) * 1000, 0, 0,
+            f"esearch {query[:80]}",
+        )
         logger.warning(f"PubMed search failed: {e}")
     return []
 
@@ -352,11 +382,17 @@ async def _fetch_paper_summaries(pmids: List[str]) -> List[Dict]:
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:
             # Get summary data
+            _t0 = time.monotonic()
             r = await client.get(PUBMED_SUMMARY_URL, params={
                 "db": "pubmed",
                 "id": ",".join(pmids),
                 "retmode": "json",
             })
+            _log_fetch_pubmed(
+                PUBMED_SUMMARY_URL, "GET", r.status_code,
+                (time.monotonic() - _t0) * 1000, len(r.content), len(pmids),
+                f"esummary ids={','.join(pmids[:5])}{'...' if len(pmids) > 5 else ''}",
+            )
             if r.status_code != 200:
                 return []
 
@@ -392,12 +428,18 @@ async def _fetch_paper_summaries(pmids: List[str]) -> List[Dict]:
             # Fetch abstracts in one batch call
             await asyncio.sleep(RATE_LIMIT_DELAY)
             try:
+                _ta0 = time.monotonic()
                 ra = await client.get(PUBMED_FETCH_URL, params={
                     "db": "pubmed",
                     "id": ",".join(pmids),
                     "rettype": "abstract",
                     "retmode": "text",
                 })
+                _log_fetch_pubmed(
+                    PUBMED_FETCH_URL, "GET", ra.status_code,
+                    (time.monotonic() - _ta0) * 1000, len(ra.content), len(pmids),
+                    f"efetch abstracts ids={','.join(pmids[:5])}{'...' if len(pmids) > 5 else ''}",
+                )
                 if ra.status_code == 200:
                     abstract_text = ra.text
                     # Parse individual abstracts by PMID

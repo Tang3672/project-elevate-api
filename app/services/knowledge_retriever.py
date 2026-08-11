@@ -18,12 +18,37 @@ ready to inject into the Researcher Claude's prompt.
 
 import asyncio
 import logging
+import time
+from dataclasses import dataclass, field
 from typing import List, Dict, Optional
 import httpx
 
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+# ── Retrieval audit (G.1) ─────────────────────────────────────────────────────
+
+@dataclass
+class FetchLog:
+    """One outbound HTTP call record, emitted at DEBUG level per generation."""
+    service:        str          # "knowledge_retriever" | "pubmed" | "nih_reporter" | "nsf_awards"
+    url:            str
+    method:         str          # "GET" | "POST"
+    status:         int | None   # HTTP status code; None if connection error
+    latency_ms:     float
+    response_bytes: int          # len(response.content); 0 on error
+    parsed_records: int          # meaningful items parsed (hits, papers, entries)
+    query_summary:  str          # ≤120-char human-readable summary of what was queried
+
+
+def _log_fetch(log: FetchLog) -> None:
+    """Emit the fetch record to the audit logger."""
+    logger.debug(
+        "FETCH_AUDIT service=%s method=%s status=%s latency_ms=%.0f bytes=%d records=%d url=%s query=%r",
+        log.service, log.method, log.status, log.latency_ms,
+        log.response_bytes, log.parsed_records, log.url, log.query_summary,
+    )
 
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 SEARCH_MODEL      = "claude-sonnet-4-6"
@@ -323,6 +348,7 @@ async def _run_single_search(
     session_id:  str,
 ) -> str:
     """Run a single web search via Claude and return formatted results."""
+    t0 = time.monotonic()
     try:
         async with httpx.AsyncClient(timeout=SEARCH_TIMEOUT) as client:
             r = await client.post(
@@ -350,12 +376,34 @@ async def _run_single_search(
                 }
             )
             r.raise_for_status()
+            body = r.json()
             text = ""
-            for block in r.json().get("content", []):
+            for block in body.get("content", []):
                 if block.get("type") == "text":
                     text += block.get("text", "")
+            fact_count = text.count("FACT:")
+            _log_fetch(FetchLog(
+                service="knowledge_retriever",
+                url=ANTHROPIC_API_URL,
+                method="POST",
+                status=r.status_code,
+                latency_ms=(time.monotonic() - t0) * 1000,
+                response_bytes=len(r.content),
+                parsed_records=fact_count,
+                query_summary=query[:120],
+            ))
             return f"\n--- Search: {query} ---\n{text}\n"
     except Exception as e:
+        _log_fetch(FetchLog(
+            service="knowledge_retriever",
+            url=ANTHROPIC_API_URL,
+            method="POST",
+            status=None,
+            latency_ms=(time.monotonic() - t0) * 1000,
+            response_bytes=0,
+            parsed_records=0,
+            query_summary=query[:120],
+        ))
         logger.warning(f"Search failed for '{query}': {e}")
         return f"\n--- Search: {query} ---\n[Search unavailable: {str(e)[:100]}]\n"
 
