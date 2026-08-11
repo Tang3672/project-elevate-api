@@ -212,6 +212,7 @@ class SegmentTree:
         idea: str = "",
         nih_labs_retrieved: Optional[int] = None,
         nih_query_keyword: Optional[str] = None,
+        dimension_report: Optional[dict] = None,
     ) -> None:
         self.nodes: Dict[str, SegmentNode] = {n.id: n for n in nodes}
         self.root_id            = root_id
@@ -219,6 +220,7 @@ class SegmentTree:
         self.idea               = idea
         self.nih_labs_retrieved = nih_labs_retrieved
         self.nih_query_keyword  = nih_query_keyword
+        self.dimension_report   = dimension_report
 
     # ── Tree navigation ───────────────────────────────────────────────────────
 
@@ -301,6 +303,7 @@ class SegmentTree:
                 }
                 for nid, n in self.nodes.items()
             },
+            "dimension_report": self.dimension_report,
         }
 
 
@@ -929,6 +932,33 @@ async def build_life_sciences_research_tree(
         ),
     ]
 
+    # Part D Revised: dimension selection report
+    _dim_report_dict = None
+    try:
+        from app.services.dimension_selection import build_dimension_report as _build_dr
+        _cls = {"archetype": "research_tool"}
+        _itn = {"domain": "LIFE_SCIENCES_RESEARCH", "therapeutic_area": ta or ""}
+        _proxy_cells = [
+            {"funding_agency":"NIH",       "award_size_band":"large", "current_solution":"manual",    "adoption":0.20,"price":PRICE_ACADEMIC_USD},
+            {"funding_agency":"NIH",       "award_size_band":"mid",   "current_solution":"diy_scripts","adoption":0.14,"price":PRICE_ACADEMIC_USD},
+            {"funding_agency":"NIH",       "award_size_band":"small", "current_solution":"manual",    "adoption":0.07,"price":PRICE_ACADEMIC_USD},
+            {"funding_agency":"NSF",       "award_size_band":"large", "current_solution":"commercial","adoption":0.10,"price":PRICE_ACADEMIC_USD*0.9},
+            {"funding_agency":"NSF",       "award_size_band":"mid",   "current_solution":"manual",    "adoption":0.08,"price":PRICE_ACADEMIC_USD*0.9},
+            {"funding_agency":"DoD",       "award_size_band":"large", "current_solution":"manual",    "adoption":0.16,"price":PRICE_ACADEMIC_USD},
+            {"funding_agency":"Foundation","award_size_band":"mid",   "current_solution":"diy_scripts","adoption":0.06,"price":PRICE_ACADEMIC_USD*0.8},
+        ]
+        _dr = _build_dr(_cls, _itn, cells=_proxy_cells, param="adoption")
+        _dim_report_dict = {
+            "dimensions_considered": _dr.dimensions_considered_count,
+            "dimensions_selected":   len(_dr.dimensions_selected),
+            "dimensions_rejected":   len(_dr.dimensions_rejected),
+            "selected":              _dr.dimensions_selected,
+            "rejected":              _dr.dimensions_rejected[:10],
+            "renders_considered_count": _dr.renders_considered_count,
+        }
+    except Exception as _dr_e:
+        logger.warning("Part D: dimension_report failed (non-fatal): %s", _dr_e)
+
     return SegmentTree(
         nodes=nodes,
         root_id="us_institutions",
@@ -936,6 +966,7 @@ async def build_life_sciences_research_tree(
         idea=idea,
         nih_labs_retrieved=nih_result.get("lab_count"),
         nih_query_keyword=keyword,
+        dimension_report=_dim_report_dict,
     )
 
 
