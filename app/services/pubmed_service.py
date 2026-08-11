@@ -115,10 +115,14 @@ def _is_non_clinical_product(sub_expert_id: str) -> bool:
 def resolve_pmid(pmid: str) -> "dict | None":
     """Verify a PMID via E-utilities efetch and return authoritative metadata.
 
-    Returns a dict with title, authors, journal, year from the API response,
-    or None if the PMID does not resolve. Title and metadata come entirely from
-    the API — never from generation. This is the Part A fix: a PMID only renders
-    in the report if it passes through this check.
+    Returns a dict with title, authors, journal, year, and abstract from the
+    API response, or None if the PMID does not resolve. All fields come from
+    the API — never from generation. This is the Part A fix: a PMID only
+    renders in the report if it passes through this check.
+
+    The abstract field is used by filter_literature_citations to verify that
+    any statistics attributed to the paper actually appear in the abstract
+    rather than being generated claims wearing a valid PMID.
     """
     import xml.etree.ElementTree as ET
     try:
@@ -143,17 +147,61 @@ def resolve_pmid(pmid: str) -> "dict | None":
         authors = (last_names[0] + " et al.") if last_names else ""
         if not title:
             return None
+        # Structured abstracts have multiple <AbstractText> elements; join them all.
+        abstract_parts = [el.text or "" for el in article.findall(".//AbstractText") if el.text]
+        abstract = " ".join(abstract_parts)
         return {
-            "pmid":    pmid,
-            "title":   title,
-            "authors": authors,
-            "journal": journal,
-            "year":    year,
-            "url":     f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
+            "pmid":     pmid,
+            "title":    title,
+            "authors":  authors,
+            "journal":  journal,
+            "year":     year,
+            "abstract": abstract,
+            "url":      f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
         }
     except Exception as e:
         logger.warning("resolve_pmid(%s) failed: %s", pmid, e)
         return None
+
+
+# Matches numeric statistics likely to be generated rather than quoted:
+# percentages, dollar amounts, counts with + or ×, hour/minute counts.
+_STAT_RE = re.compile(
+    r"""
+    (?:
+      \d+(?:\.\d+)?\s*%          # percentages: 15%, 0.5%
+    | \$\s*\d[\d,\.]*            # dollar amounts: $40K, $1.2M
+    | \d+\+\s*(?:hours?|hrs?)    # hour counts: 40+ hours
+    | \d{2,}\s*(?:hours?|hrs?)   # bare hours: 48 hours
+    | \d+\s*[×x]\s*\d+           # multiplications: 2×, 3x
+    )
+    """,
+    re.VERBOSE | re.IGNORECASE,
+)
+
+
+def _verify_claims_against_abstract(relevance: str, abstract: str) -> str:
+    """Part A abstract guard: if relevance contains numeric claims that don't
+    appear in the retrieved abstract, return 'claim not verifiable from abstract'.
+
+    Only triggers when there IS an abstract (not for no-abstract PMIDs).
+    """
+    if not abstract:
+        return relevance
+    stats = _STAT_RE.findall(relevance or "")
+    if not stats:
+        return relevance
+    abstract_lower = abstract.lower()
+    for stat in stats:
+        # Normalise whitespace for comparison
+        needle = " ".join(stat.lower().split())
+        if needle not in abstract_lower:
+            logger.debug(
+                "Part A abstract guard: stat %r not found in abstract — marking unverifiable",
+                stat,
+            )
+            return "claim not verifiable from abstract"
+    return relevance
 
 
 def filter_literature_citations(
@@ -203,6 +251,14 @@ def filter_literature_citations(
                 )
                 # Replace with authoritative metadata from E-utilities
                 c = {**c, **resolved, "relevance": c.get("relevance", "")}
+
+        # Part A abstract guard: verify that any statistics in the relevance field
+        # can actually be found in the paper's abstract. If not, flag as unverifiable
+        # so the report surface can show a disclaimer rather than a false citation.
+        abstract = resolved.get("abstract", "")
+        checked_relevance = _verify_claims_against_abstract(c.get("relevance", ""), abstract)
+        if checked_relevance != c.get("relevance", ""):
+            c = {**c, "relevance": checked_relevance}
 
         verified.append(c)
 

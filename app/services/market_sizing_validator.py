@@ -159,7 +159,7 @@ def _fmt(v: float) -> str:
     if v >= 1e9:
         return f"${v/1e9:.2f}B"
     if v >= 1e6:
-        return f"${v/1e6:.0f}M"
+        return f"${v/1e6:.1f}M"
     return f"${v:,.0f}"
 
 

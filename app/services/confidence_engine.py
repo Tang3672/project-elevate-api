@@ -214,7 +214,7 @@ def _build_honesty_statement(
         if v >= 1e9:
             return f"${v/1e9:.1f}B"
         if v >= 1e6:
-            return f"${v/1e6:.0f}M"
+            return f"${v/1e6:.1f}M"
         return f"${v:,.0f}"
 
     lines = [

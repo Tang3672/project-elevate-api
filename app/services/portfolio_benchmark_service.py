@@ -48,7 +48,7 @@ def _fmt_usd(v) -> str:
         return "—"
     v = float(v)
     if v >= 1e9: return f"${v/1e9:.1f}B"
-    if v >= 1e6: return f"${v/1e6:.0f}M"
+    if v >= 1e6: return f"${v/1e6:.1f}M"
     return f"${v/1e3:.0f}K"
 
 
