@@ -123,6 +123,151 @@ def _is_non_clinical_product(sub_expert_id: str) -> bool:
     return "non_clinical" in s or s.startswith("research_tool") or "lab_software" in s
 
 
+# ── G.3 OpenAlex / Crossref fallback for null-PMID citations ─────────────────
+
+_OPENALEX_URL  = "https://api.openalex.org/works"
+_CROSSREF_URL  = "https://api.crossref.org/works"
+_CONTACT_EMAIL = "oneonesie100@gmail.com"   # required by OpenAlex polite pool
+
+
+def _openalex_result_to_meta(w: dict, query_title: str) -> "dict | None":
+    """Convert a raw OpenAlex work dict to our normalised metadata format."""
+    w_title = (w.get("display_name") or "").lower()
+    q_words = set(query_title.lower().split())
+    w_words = set(w_title.split())
+    if not q_words or len(q_words & w_words) / len(q_words) < 0.40:
+        return None
+    doi = (w.get("doi") or "").replace("https://doi.org/", "")
+    authors_raw = w.get("authorships") or []
+    last_names = [
+        a.get("author", {}).get("display_name", "").split()[-1]
+        for a in authors_raw[:3]
+        if a.get("author", {}).get("display_name")
+    ]
+    authors_str = (last_names[0] + " et al.") if len(last_names) > 1 else (last_names[0] if last_names else "")
+    journal = ((w.get("primary_location") or {}).get("source") or {})
+    return {
+        "title":        w.get("display_name", ""),
+        "authors":      authors_str,
+        "journal":      journal.get("display_name", ""),
+        "year":         str(w.get("publication_year", "")),
+        "doi":          doi,
+        "url":          f"https://doi.org/{doi}" if doi else "",
+        "verified_via": "openAlex",
+    }
+
+
+def resolve_via_openalex(title: str) -> "dict | None":
+    """Query OpenAlex by title (sync). Returns normalised metadata dict or None."""
+    if not title or len(title) < 10:
+        return None
+    try:
+        t0 = time.monotonic()
+        r = httpx.get(
+            _OPENALEX_URL,
+            params={
+                "filter":   f"title.search:{title[:120]}",
+                "per-page": "1",
+                "select":   "id,doi,display_name,authorships,primary_location,publication_year",
+                "mailto":   _CONTACT_EMAIL,
+            },
+            timeout=8.0,
+        )
+        _log_fetch_pubmed(
+            _OPENALEX_URL, "GET", r.status_code,
+            (time.monotonic() - t0) * 1000, len(r.content),
+            1 if r.status_code == 200 else 0,
+            f"openalex title={title[:60]}",
+        )
+        if r.status_code != 200:
+            return None
+        items = r.json().get("results", [])
+        if not items:
+            return None
+        return _openalex_result_to_meta(items[0], title)
+    except Exception as exc:
+        logger.debug("OpenAlex lookup failed for %r: %s", title[:60], exc)
+        return None
+
+
+def resolve_via_crossref(title: str) -> "dict | None":
+    """Query Crossref by title (sync). Returns normalised metadata dict or None."""
+    if not title or len(title) < 10:
+        return None
+    try:
+        t0 = time.monotonic()
+        r = httpx.get(
+            _CROSSREF_URL,
+            params={
+                "query.title": title[:120],
+                "rows":        "1",
+                "select":      "DOI,title,author,published,container-title",
+            },
+            timeout=8.0,
+        )
+        _log_fetch_pubmed(
+            _CROSSREF_URL, "GET", r.status_code,
+            (time.monotonic() - t0) * 1000, len(r.content),
+            1 if r.status_code == 200 else 0,
+            f"crossref title={title[:60]}",
+        )
+        if r.status_code != 200:
+            return None
+        items = (r.json().get("message") or {}).get("items") or []
+        if not items:
+            return None
+        item = items[0]
+        cr_title = (item.get("title") or [""])[0]
+        q_words = set(title.lower().split())
+        c_words = set(cr_title.lower().split())
+        if not q_words or len(q_words & c_words) / len(q_words) < 0.40:
+            return None
+        doi = item.get("DOI", "")
+        authors_raw = item.get("author") or []
+        last_names = [a.get("family", "") for a in authors_raw[:3] if a.get("family")]
+        authors_str = (last_names[0] + " et al.") if len(last_names) > 1 else (last_names[0] if last_names else "")
+        pub_date = item.get("published", {}).get("date-parts") or [[""]]
+        year = str(pub_date[0][0]) if pub_date[0] else ""
+        container = (item.get("container-title") or [""])[0]
+        return {
+            "title":        cr_title,
+            "authors":      authors_str,
+            "journal":      container,
+            "year":         year,
+            "doi":          doi,
+            "url":          f"https://doi.org/{doi}" if doi else "",
+            "verified_via": "crossref",
+        }
+    except Exception as exc:
+        logger.debug("Crossref lookup failed for %r: %s", title[:60], exc)
+        return None
+
+
+# ── G.3 Relevance gate ─────────────────────────────────────────────────────────
+
+def _keyword_relevance_score(title: str, abstract: str, idea: str) -> int:
+    """
+    Heuristic 0-10 relevance score: how well does a paper match the product idea?
+    Counts distinct idea-word matches in title+abstract; scales to 0-10.
+
+    A score < 6 indicates the paper is probably off-topic for this product.
+    """
+    if not idea:
+        return 10  # no idea text → can't filter, pass everything
+    # Extract meaningful words from idea (≥4 chars, skip stopwords)
+    _STOP = {"with", "that", "this", "from", "have", "been", "will", "which",
+              "their", "using", "based", "into", "more", "than", "also",
+              "about", "some", "such", "when", "where", "what", "each"}
+    idea_words = {w for w in idea.lower().split() if len(w) >= 4 and w not in _STOP}
+    if not idea_words:
+        return 10
+    corpus = (title + " " + abstract).lower()
+    matched = sum(1 for w in idea_words if w in corpus)
+    # Scale: 0 matches → 0, all matches → 10; anything ≥ 30% of idea words → ≥ 6
+    score = min(10, round(matched / len(idea_words) * 10 * 2))  # ×2 so 30% → 6
+    return score
+
+
 def resolve_pmid(pmid: str) -> "dict | None":
     """Verify a PMID via E-utilities efetch and return authoritative metadata.
 
@@ -222,15 +367,22 @@ def _verify_claims_against_abstract(relevance: str, abstract: str) -> str:
     return relevance
 
 
+_RELEVANCE_THRESHOLD = 6   # G.3: drop papers scoring below this (0-10 scale)
+
+
 def filter_literature_citations(
     citations: List[dict],
     idea: str,
     sub_expert_id: str,
 ) -> List[dict]:
     """
-    Part A + B-09: Verify each PMID via E-utilities and drop citations that
-    either don't resolve or whose title doesn't match the generated title
-    (catches the fabricated-PMID-on-real-paper defect from spec v6).
+    Part A + B-09 + G.3: Verify each citation and gate on relevance.
+
+    Changes in G.3:
+    - Null-PMID citations → try OpenAlex then Crossref by title.
+      If neither resolves, the citation is an LLM hallucination and is dropped.
+    - All citations (PMID and non-PMID alike) are scored for relevance to the
+      idea using _keyword_relevance_score. Score < 6 → dropped before display.
 
     Off-domain signal filtering (B-09) still applies for non-clinical products.
     """
@@ -240,43 +392,73 @@ def filter_literature_citations(
     verified = []
     for c in citations:
         pmid = (c.get("pmid") or "").strip()
+
+        # ── G.3: null-PMID path — verify via OpenAlex / Crossref ─────────────
         if not pmid:
-            verified.append(c)  # no PMID → pass through, off-domain gate still applies
-            continue
-
-        resolved = resolve_pmid(pmid)
-        if resolved is None:
-            # Unresolvable PMID (network error or non-existent): pass through to the
-            # domain gate. The hard drop only applies when a PMID resolves to a
-            # DIFFERENT title, which is the genuine fabrication signal.
-            logger.debug("Part A gate: PMID %s did not resolve — passing to relevance gate without title check", pmid)
-            verified.append(c)
-            continue
-
-        # Title match check: if the LLM-generated title differs substantially from
-        # the resolved title, the PMID was attached to the wrong paper.
-        gen_title = (c.get("title") or "").lower().strip()
-        real_title = resolved["title"].lower().strip()
-        if gen_title and real_title:
-            # Use word-overlap ratio: >30% of generated words must appear in real title
-            gen_words = set(gen_title.split())
-            real_words = set(real_title.split())
-            overlap = len(gen_words & real_words) / max(len(gen_words), 1)
-            if overlap < 0.30:
+            title = (c.get("title") or "").strip()
+            if not title:
+                logger.debug("G.3: dropping citation with no PMID and no title")
+                continue
+            external = resolve_via_openalex(title) or resolve_via_crossref(title)
+            if external is None:
                 logger.warning(
-                    "Part A gate: PMID %s title mismatch — generated '%s...' vs real '%s...' — using real title",
-                    pmid, gen_title[:60], real_title[:60],
+                    "G.3: dropping unverifiable null-PMID citation '%s' "
+                    "(not found in OpenAlex or Crossref)",
+                    title[:80],
                 )
-                # Replace with authoritative metadata from E-utilities
-                c = {**c, **resolved, "relevance": c.get("relevance", "")}
+                continue
+            # Replace LLM-recalled metadata with verified external metadata
+            c = {**c, **external, "relevance": c.get("relevance", "")}
+            logger.info(
+                "G.3: null-PMID citation '%s' verified via %s",
+                title[:60], external.get("verified_via", "?"),
+            )
 
-        # Part A abstract guard: verify that any statistics in the relevance field
-        # can actually be found in the paper's abstract. If not, flag as unverifiable
-        # so the report surface can show a disclaimer rather than a false citation.
-        abstract = resolved.get("abstract", "")
-        checked_relevance = _verify_claims_against_abstract(c.get("relevance", ""), abstract)
-        if checked_relevance != c.get("relevance", ""):
-            c = {**c, "relevance": checked_relevance}
+        # ── PMID path (unchanged from Part A) ────────────────────────────────
+        else:
+            resolved = resolve_pmid(pmid)
+            if resolved is None:
+                # Unresolvable PMID (network error or non-existent): pass through.
+                # Hard drop only when a PMID resolves to a DIFFERENT title.
+                logger.debug("Part A gate: PMID %s did not resolve — passing to relevance gate", pmid)
+            else:
+                # Title match check
+                gen_title = (c.get("title") or "").lower().strip()
+                real_title = resolved["title"].lower().strip()
+                if gen_title and real_title:
+                    gen_words = set(gen_title.split())
+                    real_words = set(real_title.split())
+                    overlap = len(gen_words & real_words) / max(len(gen_words), 1)
+                    if overlap < 0.30:
+                        logger.warning(
+                            "Part A gate: PMID %s title mismatch — generated '%s...' vs real '%s...' — using real title",
+                            pmid, gen_title[:60], real_title[:60],
+                        )
+                        c = {**c, **resolved, "relevance": c.get("relevance", "")}
+
+                # Part A abstract guard
+                abstract = resolved.get("abstract", "")
+                checked_relevance = _verify_claims_against_abstract(c.get("relevance", ""), abstract)
+                if checked_relevance != c.get("relevance", ""):
+                    c = {**c, "relevance": checked_relevance}
+
+        # ── G.3 relevance gate (null-PMID only) ──────────────────────────────
+        # PMID-backed papers already went through PubMed search (a relevance
+        # filter in itself) and through B-09 domain signals below. Only apply
+        # the keyword relevance gate to null-PMID citations because those are
+        # recalled from LLM memory and have no prior retrieval filter.
+        if not pmid:
+            score = _keyword_relevance_score(
+                c.get("title", ""),
+                c.get("abstract", ""),
+                idea,
+            )
+            if score < _RELEVANCE_THRESHOLD:
+                logger.debug(
+                    "G.3 relevance gate: dropped null-PMID citation '%s' (score=%d < %d)",
+                    c.get("title", "")[:80], score, _RELEVANCE_THRESHOLD,
+                )
+                continue
 
         verified.append(c)
 

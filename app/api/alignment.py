@@ -21,6 +21,49 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+# ── G.2 Cross-run contamination guard ────────────────────────────────────────
+
+import re as _re
+
+def _camel_split(word: str) -> list[str]:
+    """Split a CamelCase or snake_case word into lowercase components."""
+    parts = _re.sub(r"([A-Z])", r" \1", word).split()
+    return [p.lower() for p in parts if p]
+
+
+def _sanitize_product_name(product_name: str | None, idea: str) -> str | None:
+    """
+    Guard against cross-run state leakage where the frontend sends a stale
+    product_name from a prior generation alongside a different idea.
+
+    Logic: if product_name is provided and NONE of its significant sub-words appear
+    in the idea text, it is foreign to this request and must be cleared.
+    The alignment service then derives product_name from the idea text instead.
+
+    Handles CamelCase names (NeuroSync → ['neuro', 'sync']) and space-separated words.
+    Sub-words under 4 characters are skipped (articles, prepositions, etc.).
+    """
+    if not product_name:
+        return product_name
+    idea_lower = (idea or "").lower()
+    # Extract all significant sub-words: split on spaces, then camel-case each token
+    all_sub_words: list[str] = []
+    for token in product_name.split():
+        all_sub_words.extend(_camel_split(token))
+    sig_words = [w for w in all_sub_words if len(w) >= 4]
+    if not sig_words:
+        return product_name  # very short name — can't validate; pass through
+    matched = sum(1 for w in sig_words if w in idea_lower)
+    if matched == 0:
+        logger.warning(
+            "G.2: product_name %r has no word overlap with idea — "
+            "clearing to prevent cross-run contamination (idea[:80]=%r)",
+            product_name, idea[:80],
+        )
+        return None
+    return product_name
+
+
 class AlignmentRequest(BaseModel):
     idea: str = Field(..., min_length=30, max_length=2000)
 
@@ -138,10 +181,12 @@ async def get_pi_report(payload: PIReportRequest, current_user = Depends(get_cur
     timeouts on the ~2-3 minute generation."""
     await _enforce_quota(current_user)
     try:
+        idea = _idea_from_payload(payload)
         report = await generate_pi_report(
-            _idea_from_payload(payload), payload.product_type, payload.disease_domain,
+            idea, payload.product_type, payload.disease_domain,
             payload.tier1_category, funding_pathway=payload.funding_pathway,
-            product_name=payload.product_name, institution=payload.institution,
+            product_name=_sanitize_product_name(payload.product_name, idea),
+            institution=payload.institution,
             domain=payload.domain, clarify_answers=payload.clarify_answers,
         )
         await _increment_usage(current_user)
@@ -172,7 +217,8 @@ async def get_pi_report_async(payload: PIReportRequest, current_user = Depends(g
                 idea, payload.product_type, payload.disease_domain,
                 payload.tier1_category, funding_pathway=payload.funding_pathway,
                 user_id=(_user or {}).get("id"), skip_verification=True,
-                product_name=payload.product_name, institution=payload.institution,
+                product_name=_sanitize_product_name(payload.product_name, idea),
+                institution=payload.institution,
                 domain=payload.domain, clarify_answers=payload.clarify_answers,
             )
             rd = report.model_dump(mode="json")

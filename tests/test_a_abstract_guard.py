@@ -116,9 +116,32 @@ def test_integration_unresolvable_pmid_passes_through():
     assert result[0]["relevance"] == "Describes novel assay."
 
 
-def test_integration_no_pmid_passes_through():
+def test_integration_no_pmid_unverifiable_is_dropped():
+    # G.3: null-PMID citations that can't be resolved via OpenAlex or Crossref are dropped.
     citation = {"pmid": "", "title": "Some paper", "relevance": "Qualitative findings."}
-    with patch("app.services.pubmed_service.resolve_pmid") as mock_resolve:
+    with patch("app.services.pubmed_service.resolve_pmid") as mock_resolve, \
+         patch("app.services.pubmed_service.resolve_via_openalex", return_value=None), \
+         patch("app.services.pubmed_service.resolve_via_crossref", return_value=None):
         result = filter_literature_citations([citation], idea="cancer drug", sub_expert_id="oncology")
     mock_resolve.assert_not_called()
+    assert len(result) == 0, "Unverifiable null-PMID citation must be dropped (G.3)"
+
+
+def test_integration_no_pmid_verifiable_passes_through():
+    # G.3: null-PMID citation that resolves via OpenAlex passes through (with updated metadata).
+    citation = {"pmid": "", "title": "Phase III trial of novel oncology drug", "relevance": "Qualitative findings."}
+    fake_meta = {
+        "title": "Phase III trial of novel oncology drug",
+        "authors": "Smith et al.",
+        "journal": "J Clin Oncol",
+        "year": "2023",
+        "doi": "10.1234/jco.2023",
+        "url": "https://doi.org/10.1234/jco.2023",
+        "verified_via": "openAlex",
+    }
+    with patch("app.services.pubmed_service.resolve_pmid") as mock_resolve, \
+         patch("app.services.pubmed_service.resolve_via_openalex", return_value=fake_meta):
+        result = filter_literature_citations([citation], idea="cancer drug oncology treatment phase iii trial", sub_expert_id="oncology")
+    mock_resolve.assert_not_called()
     assert len(result) == 1
+    assert result[0]["verified_via"] == "openAlex"
