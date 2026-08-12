@@ -190,14 +190,12 @@ class TestScenarioTamCeiling:
 
 class TestSomLabelConsistency:
     """
-    B-10: the formula string stamped by _enforce_market_consistency must use
-    "Year-1 capture" (the authoritative horizon label).  The SOM_HORIZON_MISMATCH
-    regex then normalises any LLM prose that contradicts it ("5-year SOM",
-    "years 1-5", "cumulative SOM") in executive_summary / recommended_next_steps.
+    G.10 / B-08: the formula string stamped by _enforce_market_consistency must use
+    the HORIZON_YEARS canonical form (e.g. "5-yr penetration midpoint"), not "Year-1
+    capture". The SOM_HORIZON_MISMATCH regex normalises any LLM prose that contradicts
+    it ("Year-1 capture", "year-1 SOM") in executive_summary / recommended_next_steps.
 
-    Step titles from the LLM fixture may still say "5-yr" — normalisation of
-    step-level prose is out of scope; only the formula box and exec prose are
-    enforced here.
+    Step titles from the derivation service already use HORIZON_YEARS via the constant.
     """
 
     def test_som_step_title_says_5yr(self):
@@ -221,14 +219,14 @@ class TestSomLabelConsistency:
             f"SOM explanation must mention 5-year horizon."
         )
 
-    def test_stamp_formula_says_year1_not_5yr(self):
+    def test_stamp_formula_says_canonical_horizon_not_year1(self):
         """
-        _enforce_market_consistency must write 'Year-1 capture' in the formula
-        string — not '5-yr horizon capture'. The formula box is authoritative;
-        any LLM prose that says '5-year SOM' is normalised by the
-        SOM_HORIZON_MISMATCH regex.
+        G.10: _enforce_market_consistency must write the HORIZON_YEARS canonical
+        phrasing in the formula string (e.g. '5-yr penetration midpoint'), NOT
+        'Year-1 capture'. Year-1 was the old wrong canonical form.
         """
         from app.services.alignment_service import _enforce_market_consistency
+        from app.services.buyer_model import HORIZON_YEARS
 
         class _MS:
             total_addressable_market_usd = 0.0
@@ -242,11 +240,11 @@ class TestSomLabelConsistency:
         report = _Report()
         _enforce_market_consistency(report, deriv)
         formula = report.market_sizing.formula
-        assert re.search(r"year.?1\s+capture", formula, re.I), (
-            f"Formula box must say 'Year-1 capture' (B-10). Got: {formula!r}"
+        assert f"{HORIZON_YEARS}-yr" in formula.lower() or f"{HORIZON_YEARS} yr" in formula.lower(), (
+            f"Formula box must use canonical {HORIZON_YEARS}-yr horizon (G.10). Got: {formula!r}"
         )
-        assert "5-yr horizon" not in formula.lower(), (
-            f"Formula box must not say '5-yr horizon capture'. Got: {formula!r}"
+        assert "year-1 capture" not in formula.lower() and "year 1 capture" not in formula.lower(), (
+            f"Formula box must not say 'Year-1 capture' (G.10 reversed this). Got: {formula!r}"
         )
 
 

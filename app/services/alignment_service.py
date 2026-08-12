@@ -1843,8 +1843,14 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
             r")\b",
             _re_h08.I | _re_h08.UNICODE,
         )
+        # G.10/B-08: normalise all horizon mentions to the canonical HORIZON_YEARS-yr form.
+        # "Year-1 capture/SOM" was the prior wrong canonical form; replace it everywhere.
+        # Also replace "Years 1-5 SOM" / "5-year SOM" / "cumulative SOM" → same target.
+        from app.services.buyer_model import HORIZON_YEARS as _HY
+        _CANONICAL_HORIZON = f"{_HY}-yr penetration midpoint"
         _SOM_HORIZON_MISMATCH_RE = _re_h08.compile(
-            r"\b(years?\s+1[\s–-]+5|5[\s-]year\s+som|cumulative\s+som)\b",
+            r"\b(year[\s-]1\s+(?:capture|SOM)|year-1\s+(?:capture|SOM)"
+            r"|years?\s+1[\s–-]+5\s*(?:SOM)?|5[\s-]year\s+som|cumulative\s+som)\b",
             _re_h08.I | _re_h08.UNICODE,
         )
 
@@ -1852,7 +1858,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
             return _CONFIDENCE_PHRASES.sub("", text).strip()
 
         def _fix_som_horizon(text: str) -> str:
-            return _SOM_HORIZON_MISMATCH_RE.sub("Year-1 SOM", text)
+            return _SOM_HORIZON_MISMATCH_RE.sub(_CANONICAL_HORIZON, text)
 
         def _h08_clean(val):
             if isinstance(val, str):
@@ -2964,12 +2970,13 @@ def _enforce_market_consistency(report, deriv) -> None:
             "vaccine":                     "population at risk × immunization rate × price",
         }.get(_arch, "buyers × annual revenue per buyer")
 
+        from app.services.buyer_model import HORIZON_YEARS as _HORIZON_YEARS
         ms.total_addressable_market_usd = float(tam)
         ms.serviceable_market_usd = float(sam)
         ms.formula = (
             f"TAM = ${tam:,.0f} ({_fmt(tam)}, {_tam_basis}). "
             f"SAM = TAM × {pen}% reachable penetration = ${sam:,.0f} ({_fmt(sam)}). "
-            f"SOM = SAM × {cap}% (Year-1 capture) = ${som:,.0f} ({_fmt(som)}). "
+            f"SOM = SAM × {cap}% ({_HORIZON_YEARS}-yr penetration midpoint) = ${som:,.0f} ({_fmt(som)}). "
             f"US, annual; figures from the deterministic bottom-up derivation."
         )
 

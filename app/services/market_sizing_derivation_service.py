@@ -32,6 +32,8 @@ import math
 from dataclasses import dataclass, field
 from typing import Optional
 
+from app.services.buyer_model import HORIZON_YEARS
+
 logger = logging.getLogger(__name__)
 
 
@@ -1890,7 +1892,7 @@ def _derive_research_tool_formula(
         from app.services.buyer_model import research_tool_buyer_for_domain, MarketSizeResult
         bm = research_tool_buyer_for_domain(therapeutic_area, idea)
         ms = MarketSizeResult(buyer_model=bm, sam_fraction=_SAM_MID, som_fraction=_SOM_MID,
-                              som_horizon_years=5)
+                              som_horizon_years=HORIZON_YEARS)
         pop_lo  = bm.buyer_population_lo
         pop_hi  = bm.buyer_population_hi
         sp_lo   = bm.annualised_spend_lo()
@@ -2023,7 +2025,7 @@ def _derive_research_tool_formula(
             source_url="",
             explanation=(
                 f"The early-adopter fraction [{_sam_lo:.0%}–{_sam_hi:.0%}] encodes the "
-                f"fraction of eligible labs expected to adopt within 5 years given the product's "
+                f"fraction of eligible labs expected to adopt within {HORIZON_YEARS} years given the product's "
                 f"workflow fit and switching friction. "
                 + (f"Derived from intake answer: {_user_overrides['sam']}. " if _user_overrides.get("sam") else "")
                 + f"Midpoint {sam_mid:.0%} used as the planning base. "
@@ -2037,23 +2039,23 @@ def _derive_research_tool_formula(
         ),
         DerivationStep(
             step_num=5,
-            title=f"Step 5 — Serviceable Obtainable Market (SOM = SAM × 5-yr penetration, range {_som_lo:.0%}–{_som_hi:.0%})",
+            title=f"Step 5 — Serviceable Obtainable Market (SOM = SAM × {HORIZON_YEARS}-yr penetration, range {_som_lo:.0%}–{_som_hi:.0%})",
             formula=(
-                f"SOM = {_fmt(sam)} × [{_som_lo:.0%}–{_som_hi:.0%}] 5-yr penetration "
+                f"SOM = {_fmt(sam)} × [{_som_lo:.0%}–{_som_hi:.0%}] {HORIZON_YEARS}-yr penetration "
                 f"= {_fmt(sam * _som_lo)}–{_fmt(sam * _som_hi)}; midpoint {_fmt(som)}"
             ),
             value=float(som),
             unit="USD",
-            source_paper="Derived from adoption pathway" if _user_overrides.get("som") else "Assumed — 5-yr SAM ramp rate (method=assumed; validate with comparable research-tool launches)",
+            source_paper="Derived from adoption pathway" if _user_overrides.get("som") else f"Assumed — {HORIZON_YEARS}-yr SAM ramp rate (method=assumed; validate with comparable research-tool launches)",
             source_url="",
             explanation=(
-                f"5-yr penetration [{_som_lo:.0%}–{_som_hi:.0%}] of SAM assumes: (1) 12–18 month sales cycle per lab, "
+                f"{HORIZON_YEARS}-yr penetration [{_som_lo:.0%}–{_som_hi:.0%}] of SAM assumes: (1) 12–18 month sales cycle per lab, "
                 f"(2) referral-driven growth from early adopters, (3) pricing at or below observed spend band. "
                 + (f"Adoption pathway answer adjusts the penetration rate range. " if _user_overrides.get("som") else "")
                 + f"Midpoint {som_mid:.0%} used as planning base. "
                 f"This is the largest single source of uncertainty in the model — see sensitivity ranking."
             ),
-            data_source="Derived from adoption pathway answer" if _user_overrides.get("som") else "Assumed (method=assumed); target: comparable research-tool SaaS launch benchmarks",
+            data_source="Derived from adoption pathway answer" if _user_overrides.get("som") else f"Assumed (method=assumed); target: comparable research-tool SaaS launch benchmarks",
             assumptions=[
                 f"5-yr penetration range: {_som_lo:.0%}–{_som_hi:.0%} of SAM (midpoint {som_mid:.0%})",
                 "No Bass diffusion calibration yet; ranges from early-stage SaaS benchmarks",
