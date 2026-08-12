@@ -655,9 +655,39 @@ async def get_opportunities(
 ):
     """
     Return ranked biomedical opportunities.
-    Reads from disease_scored table (full universe) when available,
-    falls back to live v2 engine for the curated 309.
+    G.8: serves from pre-built static JSON artifact when available (fast path, ~50ms).
+    Falls back to live v2 engine for the curated 309 + disease_scored DB.
     """
+    # G.8: fast path — static artifact built by scripts/build_discovery_index.py
+    import pathlib as _pathlib, json as _json, time as _time
+    _STATIC_INDEX = _pathlib.Path(__file__).parent.parent / "data" / "discovery-index.json"
+    _STATIC_MAX_AGE_S = 25 * 60 * 60  # 25 h — fresh if built within last day
+    if not search and _STATIC_INDEX.exists():
+        try:
+            _stat_age = _time.time() - _STATIC_INDEX.stat().st_mtime
+            if _stat_age < _STATIC_MAX_AGE_S:
+                _payload = _json.loads(_STATIC_INDEX.read_text(encoding="utf-8"))
+                _opps = _payload.get("opportunities", [])
+                if _opps:
+                    _page = _opps[offset : offset + top_n]
+                    for i, o in enumerate(_page, offset + 1):
+                        o["rank"] = i
+                    logger.info(
+                        "G.8: served discovery from static artifact (age=%.0fs, %d opps)",
+                        _stat_age, len(_opps),
+                    )
+                    return {
+                        "opportunities":  _page,
+                        "universe_size":  _payload.get("universe_size", len(_opps)),
+                        "total_scored":   len(_opps),
+                        "built_at":       _payload.get("built_at"),
+                        "algorithm":      _payload.get("algorithm", "Static index"),
+                        "generated_at":   _payload.get("generated_at"),
+                        "_source":        "static",
+                    }
+        except Exception as _e:
+            logger.warning("G.8: static index read failed (falling back to live): %s", _e)
+
     # Strategy: Live v2 engine for curated 309 (expert TAM, EXCEPTIONAL tiers)
     # + disease_scored DB for extended MONDO universe (search only when >1000 entries)
     curated_opps = []
