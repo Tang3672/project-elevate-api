@@ -2053,6 +2053,26 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
                 "monte_carlo": _mc,
             }
             report.sensitivity = _sensitivity
+
+            # G.9: overwrite market_sizing TAM with triangulation reconciled TAM
+            # so there is one canonical number across both paths.
+            if report.market_sizing is not None:
+                _rec_tam = _triangulation.reconciled.get("tam_usd", 0)
+                if _rec_tam > 0:
+                    _old_tam = report.market_sizing.total_addressable_market_usd
+                    _note = report.market_sizing.methodology_note.rstrip(".")
+                    report.market_sizing = report.market_sizing.model_copy(update={
+                        "total_addressable_market_usd": _rec_tam,
+                        "methodology_note": (
+                            _note +
+                            " Reconciled via 3-method triangulation (BU 50% + TD 25% + VB 25%)."
+                        ).strip(),
+                    })
+                    logger.info(
+                        "G.9: TAM reconciled derivation=$%.0f → triangulation=$%.0f",
+                        _old_tam, _rec_tam,
+                    )
+
             logger.info(
                 "Part D: segmentation tree built (%d nodes), triangulated, "
                 "MC p10=$%.0f p90=$%.0f, %d sensitivity params",

@@ -213,10 +213,23 @@ def _link(url: str, text: str) -> str:
     return f'<a href="{_e(url)}">{_e(text)}</a>'
 
 
-def _toc_entry(populated: bool, num: str, anchor: str, label: str) -> str:
-    if not populated:
-        return ""
-    return f'      <li><span class="toc-num">§{num}</span><a href="#{anchor}">{label}</a></li>'
+def _build_toc(entries: list[tuple[bool, str, str]]) -> str:
+    """
+    G.11: Build TOC with sequential numbers that reflect only present sections.
+    entries = [(is_present, anchor, label), ...].
+    Citations always get § (not a number) and are appended unconditionally if present.
+    """
+    lines = []
+    n = 0
+    for present, anchor, label in entries:
+        if not present:
+            continue
+        if anchor == "s-citations":
+            lines.append(f'      <li><span class="toc-num">§</span><a href="#{anchor}">{label}</a></li>')
+        else:
+            n += 1
+            lines.append(f'      <li><span class="toc-num">§{n}</span><a href="#{anchor}">{label}</a></li>')
+    return "\n".join(lines)
 
 
 # ── Section renderers (F-08: tables for structured data) ─────────────────────
@@ -256,7 +269,7 @@ def _render_market_sizing(ms: dict) -> str:
 
     return f"""
 <div class="section" id="s-market">
-  <h2><span class="sec-num">3</span> Market Sizing</h2>
+  <h2><span class="sec-num"></span> Market Sizing</h2>
   <table class="data-table">
     <thead><tr>
       <th>Step</th><th class="num">Value</th><th>Unit</th>
@@ -367,7 +380,7 @@ def _render_regulatory_pathway(rp: dict) -> str:
 
     return f"""
 <div class="section" id="s-regulatory">
-  <h2><span class="sec-num">4</span> Regulatory Pathway</h2>
+  <h2><span class="sec-num"></span> Regulatory Pathway</h2>
   <p><strong>Recommended pathway:</strong> {pathway}</p>
   {f'<p>{rationale}</p>' if rationale else ""}
   <dl class="summary-row">
@@ -408,7 +421,7 @@ def _render_market_access(ma: dict) -> str:
 
     return f"""
 <div class="section" id="s-access">
-  <h2><span class="sec-num">5</span> Market Access &amp; Commercial Strategy</h2>
+  <h2><span class="sec-num"></span> Market Access &amp; Commercial Strategy</h2>
   {f'<p><strong>Primary channel:</strong> {channel}</p>' if channel else ""}
   {f'<p><strong>Reimbursement pathway:</strong> {reimb}</p>' if reimb else ""}
   {f'<p><strong>First commercial step:</strong> {first_step}</p>' if first_step else ""}
@@ -482,7 +495,7 @@ def _render_competitive_landscape(ci: dict) -> str:
 
     return f"""
 <div class="section" id="s-competitive">
-  <h2><span class="sec-num">6</span> Competitive Landscape</h2>
+  <h2><span class="sec-num"></span> Competitive Landscape</h2>
   {f'<p class="honest-empty">{honest_empty}</p>' if honest_empty else ""}
   {f'<table class="data-table"><thead>{header}</thead><tbody>{comp_rows}</tbody></table>' if comp_rows else ""}
   {f'<h3>Active Clinical Trials</h3><table class="data-table"><thead><tr><th>NCT ID</th><th>Title</th><th>Status</th><th>Sponsor</th></tr></thead><tbody>{trial_rows}</tbody></table>' if trial_rows else ""}
@@ -504,7 +517,7 @@ def _render_p1_sections(report: dict) -> str:
             </tr>"""
         out += f"""
 <div class="section" id="s-value-drivers">
-  <h2><span class="sec-num">7</span> Value Driver Ranking</h2>
+  <h2><span class="sec-num"></span> Value Driver Ranking</h2>
   <table class="data-table">
     <thead><tr><th>Driver</th><th>Importance</th><th>Product Implication</th></tr></thead>
     <tbody>{rows}</tbody>
@@ -526,7 +539,7 @@ def _render_p1_sections(report: dict) -> str:
             </tr>"""
         out += f"""
 <div class="section" id="s-segments">
-  <h2><span class="sec-num">8</span> Segment Fit</h2>
+  <h2><span class="sec-num"></span> Segment Fit</h2>
   <table class="data-table">
     <thead><tr><th>Segment</th><th>Fit / Posture</th><th>Rationale</th></tr></thead>
     <tbody>{rows}</tbody>
@@ -548,7 +561,7 @@ def _render_p1_sections(report: dict) -> str:
             </tr>"""
         out += f"""
 <div class="section" id="s-features">
-  <h2><span class="sec-num">9</span> Feature Investment Posture</h2>
+  <h2><span class="sec-num"></span> Feature Investment Posture</h2>
   <table class="data-table">
     <thead><tr><th>Feature Area</th><th>Posture</th><th>Rationale</th></tr></thead>
     <tbody>{rows}</tbody>
@@ -579,7 +592,7 @@ def _render_p1_sections(report: dict) -> str:
             </tr>"""
         out += f"""
 <div class="section" id="s-pricing">
-  <h2><span class="sec-num">10</span> Pricing Model Analysis</h2>
+  <h2><span class="sec-num"></span> Pricing Model Analysis</h2>
   {f'<table class="data-table"><thead><tr><th>Model</th><th>User Appeal</th><th>Sustainability</th><th>Stance</th></tr></thead><tbody>{model_rows}</tbody></table>' if model_rows else ""}
   {f'<h3>Contextual Analysis</h3><table class="data-table"><thead><tr><th>Context</th><th>Why It Works</th><th>Structural Risk</th></tr></thead><tbody>{ctx_rows}</tbody></table>' if ctx_rows else ""}
 </div>"""
@@ -589,7 +602,7 @@ def _render_p1_sections(report: dict) -> str:
     if ps:
         out += f"""
 <div class="section" id="s-positioning">
-  <h2><span class="sec-num">11</span> Positioning Statement</h2>
+  <h2><span class="sec-num"></span> Positioning Statement</h2>
   <blockquote class="positioning">{_e(ps)}</blockquote>
 </div>"""
 
@@ -599,7 +612,7 @@ def _render_p1_sections(report: dict) -> str:
         risks_html = "".join(f"<li>{_e(clean_list_item(r))}</li>" for r in sr)
         out += f"""
 <div class="section" id="s-risks">
-  <h2><span class="sec-num">12</span> Strategic Risks</h2>
+  <h2><span class="sec-num"></span> Strategic Risks</h2>
   <ul class="risk-list">{risks_html}</ul>
 </div>"""
 
@@ -608,7 +621,7 @@ def _render_p1_sections(report: dict) -> str:
     if gq:
         out += f"""
 <div class="section" id="s-guiding">
-  <h2><span class="sec-num">13</span> Guiding Question</h2>
+  <h2><span class="sec-num"></span> Guiding Question</h2>
   <p class="guiding-question">{_e(gq)}</p>
 </div>"""
 
@@ -626,7 +639,7 @@ def _render_p1_sections(report: dict) -> str:
             </tr>"""
         out += f"""
 <div class="section" id="s-adversarial">
-  <h2><span class="sec-num">14</span> Adversarial Review</h2>
+  <h2><span class="sec-num"></span> Adversarial Review</h2>
   <p class="section-note">Independent critic pass — each recommendation evaluated for structural risk and disconfirming evidence.</p>
   <table class="data-table adversarial-table">
     <thead><tr>
@@ -661,7 +674,7 @@ def _render_citations(citations: list) -> str:
         </tr>"""
     return f"""
 <div class="section citations-section" id="s-citations">
-  <h2><span class="sec-num">§</span> Citations</h2>
+  <h2><span class="sec-sym">§</span> Citations</h2>
   <table class="data-table citations-table">
     <thead><tr><th>#</th><th>Source</th><th>Date</th><th>URL</th></tr></thead>
     <tbody>{rows}</tbody>
@@ -675,7 +688,7 @@ def _render_recommended_steps(steps: list) -> str:
     items = "".join(f"<li>{_e(clean_list_item(s))}</li>" for s in steps if s and s.strip())
     return f"""
 <div class="section" id="s-next-steps">
-  <h2><span class="sec-num">15</span> Recommended Next Steps</h2>
+  <h2><span class="sec-num"></span> Recommended Next Steps</h2>
   <ol class="next-steps">{items}</ol>
 </div>"""
 
@@ -795,10 +808,14 @@ def _build_css(product_name: str) -> str:
       margin-top: .4rem;
     }}
 
-    /* ── Sections ── */
+    /* ── Sections — G.11: auto-numbering via CSS counter ── */
+    .page-content {{
+      counter-reset: section;
+    }}
     .section {{
       margin-bottom: 2.4rem;
       page-break-inside: avoid;
+      counter-increment: section;
     }}
     h2 {{
       font-family: system-ui, -apple-system, sans-serif;
@@ -826,6 +843,13 @@ def _build_css(product_name: str) -> str:
       color: var(--accent);
       font-variant-numeric: tabular-nums;
       min-width: 1.6rem;
+      display: inline-block;
+    }}
+    .sec-num::before {{
+      content: counter(section);
+    }}
+    .sec-sym {{
+      color: var(--accent);
       display: inline-block;
     }}
     p {{ margin-bottom: .65rem; }}
@@ -1037,7 +1061,7 @@ def render_report_html(
     exec_summary = _e(strip_negation(report.get("executive_summary", "") or ""))
     exec_html = f"""
 <div class="section" id="s-executive">
-  <h2><span class="sec-num">1</span> The Opportunity</h2>
+  <h2><span class="sec-num"></span> The Opportunity</h2>
   <p>{exec_summary}</p>
 </div>""" if exec_summary else ""
 
@@ -1051,7 +1075,7 @@ def render_report_html(
         ev_method = _e(eb.get("methodology", ""))
         evid_html = f"""
 <div class="section" id="s-evidence">
-  <h2><span class="sec-num">2</span> Evidence Base &amp; Limitations</h2>
+  <h2><span class="sec-num"></span> Evidence Base &amp; Limitations</h2>
   {f'<p>{ev_quality}</p>' if ev_quality else ""}
   {f'<p><strong>Key gaps:</strong> {ev_gaps}</p>' if ev_gaps else ""}
   {f'<p><strong>Methodology:</strong> {ev_method}</p>' if ev_method else ""}
@@ -1069,7 +1093,7 @@ def render_report_html(
     if _is_research_domain and report.get("regulatory_pathway") is None:
         rp_html = f"""
 <div class="section" id="s-regulatory">
-  <h2><span class="sec-num">4</span> Regulatory &amp; Compliance Overview</h2>
+  <h2><span class="sec-num"></span> Regulatory &amp; Compliance Overview</h2>
   <p><strong>FDA jurisdiction: not required.</strong> This product is a non-clinical research
   tool sold exclusively to academic investigators. It falls outside 21 U.S.C. § 321(h) — its
   intended use is data capture and analysis for research purposes, not to diagnose, treat,
@@ -1131,7 +1155,7 @@ def render_report_html(
     if _is_research_domain and report.get("market_access") is None:
         ma_html = """
 <div class="section" id="s-access">
-  <h2><span class="sec-num">5</span> Market Access</h2>
+  <h2><span class="sec-num"></span> Market Access</h2>
   <p class="honest-empty">Traditional payer/reimbursement analysis is not applicable
   for non-clinical research tools. Access is through direct institutional sales,
   NIH/NSF equipment grants, lab CAPEX budgets, and indirect cost recovery.
@@ -1211,25 +1235,26 @@ def render_report_html(
         "Consult domain specialists before making material business decisions."
     )
 
-    # B-06: dynamic TOC — only list sections that have rendered content
-    _toc_rows = "\n".join(filter(None, [
-        _toc_entry(bool(exec_html),                    "1",  "s-executive",    "The Opportunity"),
-        _toc_entry(bool(evid_html),                    "2",  "s-evidence",     "Evidence Base &amp; Limitations"),
-        _toc_entry(bool(ms_html),                      "3",  "s-market",       "Market Sizing"),
-        _toc_entry(bool(rp_html),                      "4",  "s-regulatory",   "Regulatory &amp; Compliance Overview"),
-        _toc_entry(bool(ma_html),                      "5",  "s-access",       "Market Access &amp; Commercial Strategy"),
-        _toc_entry(bool(ci_html),                      "6",  "s-competitive",  "Competitive Landscape"),
-        _toc_entry("s-value-drivers" in p1_html,       "7",  "s-value-drivers","Value Driver Ranking"),
-        _toc_entry("s-segments"      in p1_html,       "8",  "s-segments",     "Segment Fit"),
-        _toc_entry("s-features"      in p1_html,       "9",  "s-features",     "Feature Investment Posture"),
-        _toc_entry("s-pricing"       in p1_html,       "10", "s-pricing",      "Pricing Model Analysis"),
-        _toc_entry("s-positioning"   in p1_html,       "11", "s-positioning",  "Positioning Statement"),
-        _toc_entry("s-risks"         in p1_html,       "12", "s-risks",        "Strategic Risks"),
-        _toc_entry("s-guiding"       in p1_html,       "13", "s-guiding",      "Guiding Question"),
-        _toc_entry("s-adversarial"   in p1_html,       "14", "s-adversarial",  "Adversarial Review"),
-        _toc_entry(bool(steps_html),                   "15", "s-next-steps",   "Recommended Next Steps"),
-        _toc_entry(bool(cit_html),                     "—",  "s-citations",    "Citations"),
-    ]))
+    # G.11: dynamic TOC with sequential numbers — only present sections get numbers.
+    # Suppressed sections (e.g. adversarial review when empty) don't create gaps.
+    _toc_rows = _build_toc([
+        (bool(exec_html),                    "s-executive",    "The Opportunity"),
+        (bool(evid_html),                    "s-evidence",     "Evidence Base &amp; Limitations"),
+        (bool(ms_html),                      "s-market",       "Market Sizing"),
+        (bool(rp_html),                      "s-regulatory",   "Regulatory &amp; Compliance Overview"),
+        (bool(ma_html),                      "s-access",       "Market Access &amp; Commercial Strategy"),
+        (bool(ci_html),                      "s-competitive",  "Competitive Landscape"),
+        ("s-value-drivers" in p1_html,       "s-value-drivers","Value Driver Ranking"),
+        ("s-segments"      in p1_html,       "s-segments",     "Segment Fit"),
+        ("s-features"      in p1_html,       "s-features",     "Feature Investment Posture"),
+        ("s-pricing"       in p1_html,       "s-pricing",      "Pricing Model Analysis"),
+        ("s-positioning"   in p1_html,       "s-positioning",  "Positioning Statement"),
+        ("s-risks"         in p1_html,       "s-risks",        "Strategic Risks"),
+        ("s-guiding"       in p1_html,       "s-guiding",      "Guiding Question"),
+        ("s-adversarial"   in p1_html,       "s-adversarial",  "Adversarial Review"),
+        (bool(steps_html),                   "s-next-steps",   "Recommended Next Steps"),
+        (bool(cit_html),                     "s-citations",    "Citations"),
+    ])
     toc_html = f"""
   <!-- F-07: Table of Contents (dynamic — empty sections omitted) -->
   <nav class="toc" aria-label="Table of contents">
