@@ -1250,14 +1250,14 @@ BUYER ECONOMICS:
 - Key constraint: NIH caps indirect cost recovery — labs cannot "upgrade" out of budget.
 
 MARKET SIZING FOR RESEARCH TOOLS:
-- Denominator is NIH-funded labs running relevant experiments, NOT hospitals.
+- Denominator is labs receiving NIH/NSF funding running relevant experiments, NOT hospitals.
 - Use NIH RePORTER to estimate active grants in the relevant research area.
 - TAM = (eligible labs) × (fraction likely to pay) × (annualised contract value).
 - Show arithmetic explicitly. Do not use hospital counts.
 - Typical TAM for a niche academic tool: $5M-$50M. Do not project $300M+ unless the denominator is verified at that scale.
 
 COMPETITIVE LANDSCAPE:
-- Real competitors are: (1) the STATUS QUO / DIY (SD card retrieval, lab-built scripts, manual protocols) — this is the primary incumbent; (2) commercial research hardware (Movisens, ActiGraph, Empatica research tier); (3) generic IoT platforms a capable lab could assemble (Golioth, Blues, Balena, Memfault).
+- Real competitors are: (1) the STATUS QUO / DIY (SD card retrieval, lab-built scripts, manual protocols) — this is the primary incumbent; (2) commercial research hardware relevant to the specific domain (e.g., Movisens for human physiology research; METER Group / Onset HOBO for environmental sensing; Noldus for behavioral research); (3) generic IoT platforms a capable lab could assemble (Golioth, Blues, Balena, Memfault).
 - FDA device registries contain ZERO relevant competitors for non-clinical research tools.
 - A competitor analysis that does not name the status quo / inertia as the primary competitor is incomplete.
 
@@ -1290,7 +1290,7 @@ SECTIONS TO INCLUDE:
     critic_rules = """RESEARCH TOOL CRITIC RULES:
 - BANNED VOCABULARY: 510(k), De Novo, PMA, Breakthrough Device, predicate, NTAP, CPT, J-code, DRG, WAC, DALY, peak revenue. Flag and substitute N/A if found.
 - BUYER: must be academic_pi or core_facility, not hospital_enterprise or IDN.
-- TAM DENOMINATOR: must be NIH-funded labs or equivalent research population, not hospital count.
+- TAM DENOMINATOR: must be labs with NIH/NSF funding or equivalent research population, not hospital count.
 - COMPETITIVE SECTION: must name status quo / DIY as the primary competitor. Flag if missing.
 - PRICING: no WAC, no list-price with PBM. Only lab-appropriate models.
 - REGULATORY: no 510(k) pathway unless product has a clinical claim. If regulatory status is ambiguous, render a decision tree, not two parallel narratives.

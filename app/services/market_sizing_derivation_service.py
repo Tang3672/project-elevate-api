@@ -127,7 +127,7 @@ class MarketSizingDerivation:
 
 def _fmt(usd: float) -> str:
     if usd >= 1e9:  return f"${usd/1e9:.1f}B"
-    if usd >= 1e6:  return f"${usd/1e6:.0f}M"
+    if usd >= 1e6:  return f"${usd/1e6:.1f}M"
     return f"${usd/1e3:.0f}K"
 
 
@@ -2271,7 +2271,8 @@ def generate_market_sizing_derivation(
     """
     # sub_expert_id is a stronger routing signal than product_type — use it first.
     _sid = (sub_expert_id or "").lower()
-    if _sid in ("research_tool_non_clinical", "research_infrastructure_saas"):
+    if _sid in ("research_tool_non_clinical", "research_infrastructure_saas",
+                "research_tool_agronomy"):
         archetype = "research_tool_non_clinical"
     else:
         archetype = _classify_archetype(idea, product_type)

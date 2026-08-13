@@ -110,6 +110,7 @@ def _regulatory_hint(sub_expert_id: str) -> str:
 _RESEARCH_TOOL_ARCHETYPES = frozenset({
     "research_tool_non_clinical",
     "research_infrastructure_saas",
+    "research_tool_agronomy",
 })
 
 # ── Per-domain commercial hints for the commercial panel ─────────────────────
@@ -121,8 +122,19 @@ _COMMERCIAL_DOMAIN_HINTS: dict[str, str] = {
         "Budget line: grant direct costs, equipment line. "
         "Revenue model: per-lab subscription or one-time site license — NOT WAC pricing, NOT CPT, NOT J-code. "
         "Primary competitor: status quo (manual SD cards, lab-built scripts). "
-        "Pricing comparable: commercial research data loggers (ActiGraph, Empatica research tier, Movisens). "
+        "Pricing comparable: commercial research instrumentation relevant to the domain (e.g., Movisens/Empatica for physiology; METER Group/Onset for environmental; Noldus for behavioral). "
         "Do NOT reference hospital systems, DRG, NTAP, or drug pricing as comparables."
+    ),
+    "research_tool_agronomy": (
+        "Buyer is an academic agronomist, crop scientist, or environmental researcher funded by USDA-NIFA or NSF. "
+        "Purchase cadence: every 3-5 years (grant cycle). "
+        "Observed spend band: $5k-$20k per deployment; annualised ≈ $2k-$6k/yr. "
+        "Budget line: USDA-NIFA SBIR/STTR or NSF grant direct costs, equipment line. "
+        "Revenue model: per-site license or hardware + subscription — NOT WAC, NOT CPT, NOT J-code. "
+        "Primary SBIR funder: USDA-NIFA (nifa.usda.gov/grants) — NOT NIH. NSF is secondary. "
+        "Pricing comparable: environmental/soil sensing hardware (METER Group, Onset HOBO, Decagon, Sentek). "
+        "Do NOT reference ActiGraph, Empatica, hospital systems, DRG, NTAP, or drug pricing as comparables. "
+        "Do NOT cite NIH RePORTER as the buyer population source; use USDA CRIS or NSF Award Search instead."
     ),
     "research_infrastructure_saas": (
         "Buyer is an academic PI or core facility director funded by institutional or federal grants. "

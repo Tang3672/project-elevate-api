@@ -98,6 +98,7 @@ _BANNED_OUTPUT_STRINGS = [
     "no api tokens",
     "specify source",
     "[date removed",
+    "nih-funded funded",
 ]
 
 
