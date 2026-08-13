@@ -41,14 +41,18 @@ class TestResearchToolTamArithmetic:
 
     def test_tam_is_midpoint_not_pessimistic(self):
         """
-        TAM must be pop_mid × sp_mid ≈ $45.8M.
-        The pessimistic case (pop_lo × sp_lo = 3,000 × $6,667 = $20M) must NOT
-        be the headline — it is the conservative floor of the range.
+        The derivation must pick pop_mid × sp_mid ≈ $45.8M as the pre-calibration
+        TAM.  G.14 EDGAR calibration then scales it down by the archetype factor
+        (2.4× for research tools), so the post-calibration headline TAM is ~$19M.
+        We verify the midpoint was chosen by recovering the raw value from the factor.
         """
         deriv = _research_tool_derivation()
-        assert deriv.us_tam_usd > 40_000_000, (
-            f"TAM {deriv.us_tam_usd:,.0f} is at or below the pessimistic floor ($20M). "
-            "Must use the midpoint (~$45.8M), not the conservative endpoint."
+        # Recover pre-calibration TAM; edgar_calibration_factor > 1 means model was scaled down
+        factor = deriv.edgar_calibration_factor or 1.0
+        raw_tam = deriv.us_tam_usd * factor
+        assert raw_tam > 40_000_000, (
+            f"Pre-calibration TAM {raw_tam:,.0f} is at or below the pessimistic floor ($20M). "
+            "Must use the midpoint (~$45.8M) before EDGAR calibration is applied."
         )
 
     def test_tam_is_not_optimistic(self):
@@ -61,10 +65,9 @@ class TestResearchToolTamArithmetic:
 
     def test_midpoint_step_title_value_is_midpoint(self):
         """
-        The TAM step titled '... midpoint estimate' must carry the midpoint TAM value
-        — not the pessimistic or optimistic endpoint.  F-14 added 'midpoint' to Step 4
-        and Step 5 titles too (SAM/SOM midpoints), so we filter specifically for the
-        TAM midpoint step via 'midpoint estimate'.
+        The TAM step titled '... midpoint estimate' must carry the pre-calibration
+        midpoint (~$45.8M). After G.14 EDGAR calibration, deriv.us_tam_usd is the
+        calibrated value; the step value is the pre-calibration input.
         """
         deriv = _research_tool_derivation()
         mid_steps = [s for s in deriv.steps if "midpoint estimate" in (s.title or "").lower()]
@@ -74,10 +77,13 @@ class TestResearchToolTamArithmetic:
                 f"Step '{step.title}' says midpoint but value is {step.value:,.0f} — "
                 "must be ~$45.8M."
             )
-            # Must also match the derivation's headline TAM
-            assert abs(step.value - deriv.us_tam_usd) / deriv.us_tam_usd < 0.001, (
-                f"Step '{step.title}' value {step.value:,.0f} ≠ "
-                f"deriv.us_tam_usd {deriv.us_tam_usd:,.0f}"
+            # After EDGAR calibration, headline TAM = step.value / factor.
+            # Verify the step value and the headline TAM are consistent via the factor.
+            factor = deriv.edgar_calibration_factor or 1.0
+            expected_headline = step.value / factor
+            assert abs(expected_headline - deriv.us_tam_usd) / deriv.us_tam_usd < 0.01, (
+                f"Step '{step.title}' value {step.value:,.0f} / factor {factor:.2f} "
+                f"= {expected_headline:,.0f} but deriv.us_tam_usd is {deriv.us_tam_usd:,.0f}"
             )
 
     def test_sam_is_fraction_of_tam(self):
