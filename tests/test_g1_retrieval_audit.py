@@ -159,7 +159,7 @@ class TestFetchLogCollector:
             _log_fetch(FetchLog("b", "https://b.com", "GET", 200, 1.0, 10, 1, "b"))
             return log_a, log_b
 
-        log_a, log_b = asyncio.get_event_loop().run_until_complete(_run())
+        log_a, log_b = asyncio.run(_run())
         # log_b started fresh — only has "b"
         assert any(f.service == "b" for f in log_b)
 
