@@ -1,6 +1,16 @@
 import os
 from pydantic_settings import BaseSettings
 
+# Computed once at import time — used as the ENABLE_SCHEDULER default.
+# Railway sets RAILWAY_DEPLOYMENT_ID on every deploy (always a non-empty UUID).
+# This means the scheduler is on-by-default on Railway without any env var to set.
+# An explicit ENABLE_SCHEDULER=false in Railway's env still overrides this because
+# pydantic-settings reads env vars at higher priority than field defaults.
+_ON_RAILWAY: bool = bool(
+    os.environ.get("RAILWAY_DEPLOYMENT_ID") or
+    os.environ.get("RAILWAY_ENVIRONMENT")
+)
+
 class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = "postgresql://postgres:postgres@localhost:5432/project_elevate"
@@ -40,7 +50,7 @@ class Settings(BaseSettings):
     # App
     DEBUG:            bool = True
     ENVIRONMENT:      str  = "development"
-    ENABLE_SCHEDULER: bool = False
+    ENABLE_SCHEDULER: bool = _ON_RAILWAY
 
     class Config:
         env_file = ".env"
@@ -92,14 +102,6 @@ def get_settings() -> Settings:
         db = os.environ.get("DATABASE_URL", "")
         if db:
             s.DATABASE_URL = db
-
-    # Auto-enable the ingestion scheduler when running on Railway.
-    # Railway sets RAILWAY_ENVIRONMENT automatically; this avoids needing a
-    # manual ENABLE_SCHEDULER=true env var for every new deployment.
-    # Explicit ENABLE_SCHEDULER=false in env still wins over auto-detect.
-    _scheduler_explicit = os.environ.get("ENABLE_SCHEDULER", "").strip().lower()
-    if not s.ENABLE_SCHEDULER and os.environ.get("RAILWAY_ENVIRONMENT") and _scheduler_explicit != "false":
-        s.ENABLE_SCHEDULER = True
 
     return s
 
