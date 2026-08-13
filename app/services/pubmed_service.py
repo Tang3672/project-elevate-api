@@ -42,6 +42,94 @@ PUBMED_SUMMARY_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcg
 TIMEOUT = 20.0
 RATE_LIMIT_DELAY = 0.4  # 3 req/sec max without API key
 
+# B-02: archetypes whose primary literature is NOT in PubMed (agronomy, materials,
+# engineering). Route these through OpenAlex, which covers all disciplines.
+_NON_PUBMED_ARCHETYPES: frozenset = frozenset({
+    "research_tool_non_clinical",
+    "research_infrastructure_saas",
+    "research_tool_agronomy",
+})
+
+
+def _invert_index_to_text(inverted_index: dict) -> str:
+    """Reconstruct abstract text from OpenAlex's inverted-index format.
+
+    OpenAlex stores abstracts as {word: [position, ...]} to avoid copyright issues.
+    This reconstructs a readable sentence for relevance scoring.
+    """
+    if not inverted_index:
+        return ""
+    try:
+        max_pos = max(p for positions in inverted_index.values() for p in positions) + 1
+        words: list[str] = [""] * max_pos
+        for word, positions in inverted_index.items():
+            for pos in positions:
+                if 0 <= pos < max_pos:
+                    words[pos] = word
+        return " ".join(w for w in words if w)[:500]
+    except Exception:
+        return ""
+
+
+async def _get_openalex_publications(topic: str, sub_expert_id: str, max_results: int = 8) -> list:
+    """B-02: Primary publication retrieval via OpenAlex for non-biomedical archetypes.
+
+    PubMed doesn't index agronomy, soil science, or materials engineering journals.
+    OpenAlex covers all disciplines, including foundational sensor papers (Topp 1980,
+    Vellidis 2008) that PubMed will never return.
+    """
+    try:
+        # Build a topic search phrase that avoids clinical/disease framing
+        search_phrase = topic[:80]
+
+        params = {
+            "search":   search_phrase,
+            "per-page": str(max_results),
+            "select":   "id,doi,display_name,authorships,primary_location,publication_year,abstract_inverted_index",
+            "mailto":   _CONTACT_EMAIL,
+            "sort":     "cited_by_count:desc",
+        }
+        t0 = time.monotonic()
+        r = httpx.get(_OPENALEX_URL, params=params, timeout=12.0)
+        latency_ms = (time.monotonic() - t0) * 1000
+        items = r.json().get("results", []) if r.status_code == 200 else []
+        _log_fetch_pubmed(
+            _OPENALEX_URL, "GET", r.status_code,
+            latency_ms, len(r.content), len(items),
+            f"openalex primary search={search_phrase[:60]}",
+        )
+
+        papers = []
+        for w in items:
+            doi = (w.get("doi") or "").replace("https://doi.org/", "")
+            authors_raw = w.get("authorships") or []
+            last_names = [
+                a.get("author", {}).get("display_name", "").split()[-1]
+                for a in authors_raw[:3]
+                if a.get("author", {}).get("display_name")
+            ]
+            authors_str = (
+                (last_names[0] + " et al.") if len(last_names) > 1
+                else (last_names[0] if last_names else "")
+            )
+            journal = ((w.get("primary_location") or {}).get("source") or {})
+            abstract = _invert_index_to_text(w.get("abstract_inverted_index") or {})
+            papers.append({
+                "pmid":         "",
+                "title":        w.get("display_name", ""),
+                "authors":      authors_str,
+                "journal":      journal.get("display_name", ""),
+                "year":         str(w.get("publication_year", "")),
+                "url":          f"https://doi.org/{doi}" if doi else "",
+                "doi":          doi,
+                "abstract":     abstract,
+                "verified_via": "openAlex",
+            })
+        return papers
+    except Exception as exc:
+        logger.warning("OpenAlex publication search failed (non-fatal): %s", exc)
+        return []
+
 
 async def get_landmark_publications(
     disease_name: str,
@@ -50,7 +138,11 @@ async def get_landmark_publications(
 ) -> Dict:
     """
     Pull top landmark publications for a disease + expert domain.
-    Returns structured publication data ready to inject into expert context.
+
+    B-02: non-biomedical archetypes (agronomy, engineering research tools) route
+    through OpenAlex, which indexes all disciplines. PubMed does not index
+    Canadian Journal of Soil Science, Computers and Electronics in Agriculture,
+    or MDPI Sensors — the core literature for those products.
     """
     results = {
         "disease": disease_name,
@@ -61,7 +153,14 @@ async def get_landmark_publications(
         "total_found": 0,
     }
 
-    # Build targeted queries based on expert domain
+    # B-02: non-biomedical products → OpenAlex primary retrieval
+    if sub_expert_id in _NON_PUBMED_ARCHETYPES:
+        papers = await _get_openalex_publications(disease_name, sub_expert_id, max_papers)
+        results["publications"] = papers
+        results["total_found"] = len(papers)
+        return results
+
+    # Biomedical products → PubMed (unchanged path)
     queries = _build_pubmed_queries(disease_name, sub_expert_id)
 
     all_pmids = []
@@ -86,7 +185,6 @@ async def get_landmark_publications(
     # Categorize papers
     for p in papers:
         title_lower = p.get("title", "").lower()
-        pub_type = p.get("pub_type", "")
         if any(t in title_lower for t in ["systematic review", "meta-analysis", "cochrane"]):
             results["systematic_reviews"].append(p)
         elif any(t in title_lower for t in ["randomized", "phase 2", "phase 3", "rct", "trial"]):
@@ -115,6 +213,10 @@ _OFF_DOMAIN_SIGNALS: frozenset = frozenset({
     "clinical trial", "phase 2 trial", "phase 3 trial",
     "phase ii trial", "phase iii trial", "phase ii ", "phase iii ",
     "monoclonal antibod", "antibody therapy",
+    # Clinical psychology / neuropsychology (B-01: apathy-motivation paper, PMID 37012520)
+    "apathy", "psychometric",
+    # Ophthalmology (B-01: ocular toxicity paper, PMID 35817277)
+    "ocular toxicity", "vigabatrin", "infantile spasms",
 })
 
 
@@ -123,7 +225,7 @@ def _is_non_clinical_product(sub_expert_id: str) -> bool:
     return "non_clinical" in s or s.startswith("research_tool") or "lab_software" in s
 
 
-# ── G.3 OpenAlex / Crossref fallback for null-PMID citations ─────────────────
+# ── G.3 OpenAlex: fallback verifier + primary retrieval for non-biomedical ────
 
 _OPENALEX_URL  = "https://api.openalex.org/works"
 _CROSSREF_URL  = "https://api.crossref.org/works"
@@ -261,7 +363,7 @@ def _keyword_relevance_score(title: str, abstract: str, idea: str) -> int:
     idea_words = {w for w in idea.lower().split() if len(w) >= 4 and w not in _STOP}
     if not idea_words:
         return 10
-    corpus = (title + " " + abstract).lower()
+    corpus = ((title or "") + " " + (abstract or "")).lower()
     matched = sum(1 for w in idea_words if w in corpus)
     # Scale: 0 matches → 0, all matches → 10; anything ≥ 30% of idea words → ≥ 6
     score = min(10, round(matched / len(idea_words) * 10 * 2))  # ×2 so 30% → 6
@@ -367,7 +469,9 @@ def _verify_claims_against_abstract(relevance: str, abstract: str) -> str:
     return relevance
 
 
-_RELEVANCE_THRESHOLD = 6   # G.3: drop papers scoring below this (0-10 scale)
+_RELEVANCE_THRESHOLD_NULL_PMID = 6   # null-PMID (LLM-recalled): strict gate
+_RELEVANCE_THRESHOLD_PMID      = 0   # PMID-backed: B-09 signal gate handles domain filtering
+_RELEVANCE_THRESHOLD = _RELEVANCE_THRESHOLD_NULL_PMID  # alias used by tests
 
 
 def filter_literature_citations(
@@ -442,23 +546,27 @@ def filter_literature_citations(
                 if checked_relevance != c.get("relevance", ""):
                     c = {**c, "relevance": checked_relevance}
 
-        # ── G.3 relevance gate (null-PMID only) ──────────────────────────────
-        # PMID-backed papers already went through PubMed search (a relevance
-        # filter in itself) and through B-09 domain signals below. Only apply
-        # the keyword relevance gate to null-PMID citations because those are
-        # recalled from LLM memory and have no prior retrieval filter.
-        if not pmid:
-            score = _keyword_relevance_score(
-                c.get("title", ""),
-                c.get("abstract", ""),
-                idea,
+        # ── G.3 relevance gate — ALL citations (B-01 fix) ───────────────────────
+        # null-PMID: strict gate (threshold 6) — these are LLM-recalled with no
+        # prior retrieval filter.  A score < 6 means <30% idea-word overlap, almost
+        # certainly off-topic (e.g. apathy paper recalled for cloud sync platform).
+        #
+        # PMID-backed: lenient gate (threshold 1) — PubMed search already filtered
+        # for domain relevance.  We only drop papers with ZERO keyword overlap
+        # (completely different vocabulary), not borderline-relevant ones like
+        # REDCap (research informatics) cited for Hublink (research data platform).
+        threshold = _RELEVANCE_THRESHOLD_NULL_PMID if not pmid else _RELEVANCE_THRESHOLD_PMID
+        score = _keyword_relevance_score(
+            c.get("title") or "",
+            c.get("abstract") or "",
+            idea,
+        )
+        if score < threshold:
+            logger.debug(
+                "G.3 relevance gate: dropped citation '%s' (score=%d < threshold=%d, pmid=%r)",
+                (c.get("title") or "")[:80], score, threshold, pmid or "null",
             )
-            if score < _RELEVANCE_THRESHOLD:
-                logger.debug(
-                    "G.3 relevance gate: dropped null-PMID citation '%s' (score=%d < %d)",
-                    c.get("title", "")[:80], score, _RELEVANCE_THRESHOLD,
-                )
-                continue
+            continue
 
         verified.append(c)
 
