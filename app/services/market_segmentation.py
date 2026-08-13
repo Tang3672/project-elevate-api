@@ -711,6 +711,134 @@ async def query_nih_reporter(keyword: str, agency_codes: tuple[str, ...] | list[
         return fallback
 
 
+# ── Product-specific buyer cells (A.2 / v6 Part D revision) ──────────────────
+#
+# Proxy cells encode (funding_agency, award_size_band, current_solution, adoption)
+# for the typical buyer population.  Adoption rates differ by product domain so
+# between-group variance — and therefore computed lifts — differ per product.
+#
+# Agency weight rules:
+#   NIH-heavy TAs (cns, oncology, hematology …)   → NIH primary, adoption 0.19–0.21
+#   Environmental / agronomy                       → USDA primary, NIH low (0.03–0.05)
+#   Engineering / instrumentation                  → NSF primary, NIH secondary
+#   Defense / dual-use                             → DoD primary
+#   General / other                                → even NIH/NSF split
+#
+# Current-solution adoption pattern (stable across domains):
+#   manual → high (users feel the pain most acutely)
+#   diy_scripts → medium (already invested, switching cost)
+#   commercial → low (problem solved, won't switch unless significantly better)
+#
+# The resulting variance in `adoption` across cells drives dimension_selection
+# to compute genuinely different lifts for carnegie_tier, funding_agency, etc.
+# across products — not the hardcoded 25/22/20/18/15 sequence.
+
+_AGRONOMY_KWS   = frozenset({"soil","agronomy","crop","field","agriculture","usda","nifa",
+                              "irrigation","water","moisture","plant","tillage"})
+_ENGINEERING_KWS = frozenset({"sensor","instrument","hardware","embedded","firmware",
+                               "iot","arduino","raspberry","fpga","pcb","circuit","dsp"})
+_DEFENSE_KWS    = frozenset({"dod","darpa","defense","military","army","navy","air force"})
+_NIH_HEAVY_TAS  = frozenset({"cns","oncology","hematology","gene_therapy","immunology",
+                              "cardiovascular","metabolic","ibd","nash_mash","rare_disease",
+                              "neuroscience","clinical"})
+
+
+def _domain_from_ta_idea(ta: str, idea: str) -> str:
+    """Classify the product into a funding-agency domain for cell generation."""
+    ta_lower = (ta or "").lower()
+    idea_lower = (idea or "").lower()
+
+    if ta_lower in _NIH_HEAVY_TAS:
+        return "nih_heavy"
+    if any(kw in idea_lower for kw in _AGRONOMY_KWS):
+        return "agronomy"
+    if any(kw in idea_lower for kw in _DEFENSE_KWS) or "dod" in ta_lower:
+        return "defense"
+    if any(kw in idea_lower for kw in _ENGINEERING_KWS):
+        return "engineering"
+    return "general"   # even NIH/NSF split
+
+
+def _build_product_cells(ta: str, nih_labs_val: float, idea: str) -> list[dict]:
+    """
+    Build proxy buyer cells tailored to the product's funding domain.
+
+    Each cell = one representative buyer segment with a modeled adoption rate.
+    Between-group variance in 'adoption' across cells drives dimension lift
+    computation in build_dimension_report(); cells that vary more produce
+    higher lifts for that dimension.
+
+    Returns at least 7 cells covering all candidate dimension levels.
+    """
+    domain = _domain_from_ta_idea(ta, idea)
+    P = PRICE_ACADEMIC_USD   # base price anchor
+
+    # Current-solution adoption multipliers (stable across domains)
+    # manual=1.0x, diy=0.70x, commercial=0.40x — frustrated users adopt more
+    sol_mult = {"manual": 1.00, "diy_scripts": 0.70, "commercial": 0.40}
+
+    if domain == "nih_heavy":
+        # Biomedical / clinical — NIH dominant, NSF secondary, low USDA/DoD
+        return [
+            {"funding_agency":"NIH", "award_size_band":"large", "current_solution":"manual",     "adoption": 0.21, "price": P},
+            {"funding_agency":"NIH", "award_size_band":"large", "current_solution":"diy_scripts","adoption": 0.15, "price": P},
+            {"funding_agency":"NIH", "award_size_band":"mid",   "current_solution":"manual",     "adoption": 0.13, "price": P},
+            {"funding_agency":"NIH", "award_size_band":"mid",   "current_solution":"diy_scripts","adoption": 0.09, "price": P},
+            {"funding_agency":"NIH", "award_size_band":"small", "current_solution":"manual",     "adoption": 0.06, "price": P * 0.85},
+            {"funding_agency":"NSF", "award_size_band":"large", "current_solution":"commercial", "adoption": 0.08, "price": P * 0.90},
+            {"funding_agency":"NSF", "award_size_band":"mid",   "current_solution":"manual",     "adoption": 0.07, "price": P * 0.90},
+            {"funding_agency":"DoD", "award_size_band":"large", "current_solution":"manual",     "adoption": 0.05, "price": P},
+        ]
+
+    if domain == "agronomy":
+        # Agriculture / soil / crop — USDA-NIFA dominant, NSF-Earth secondary, NIH irrelevant
+        return [
+            {"funding_agency":"USDA",  "award_size_band":"large", "current_solution":"manual",     "adoption": 0.24, "price": P * 0.70},
+            {"funding_agency":"USDA",  "award_size_band":"large", "current_solution":"diy_scripts","adoption": 0.17, "price": P * 0.70},
+            {"funding_agency":"USDA",  "award_size_band":"mid",   "current_solution":"manual",     "adoption": 0.14, "price": P * 0.65},
+            {"funding_agency":"USDA",  "award_size_band":"small", "current_solution":"manual",     "adoption": 0.07, "price": P * 0.60},
+            {"funding_agency":"NSF",   "award_size_band":"large", "current_solution":"diy_scripts","adoption": 0.12, "price": P * 0.80},
+            {"funding_agency":"NSF",   "award_size_band":"mid",   "current_solution":"commercial", "adoption": 0.06, "price": P * 0.80},
+            {"funding_agency":"NIH",   "award_size_band":"mid",   "current_solution":"commercial", "adoption": 0.03, "price": P * 0.90},
+            {"funding_agency":"DoE",   "award_size_band":"large", "current_solution":"commercial", "adoption": 0.09, "price": P * 0.75},
+        ]
+
+    if domain == "defense":
+        # Defense / dual-use — DoD dominant, NSF secondary
+        return [
+            {"funding_agency":"DoD",  "award_size_band":"large", "current_solution":"manual",     "adoption": 0.23, "price": P * 1.20},
+            {"funding_agency":"DoD",  "award_size_band":"large", "current_solution":"diy_scripts","adoption": 0.16, "price": P * 1.20},
+            {"funding_agency":"DoD",  "award_size_band":"mid",   "current_solution":"manual",     "adoption": 0.12, "price": P * 1.10},
+            {"funding_agency":"NSF",  "award_size_band":"large", "current_solution":"commercial", "adoption": 0.09, "price": P},
+            {"funding_agency":"NSF",  "award_size_band":"mid",   "current_solution":"manual",     "adoption": 0.07, "price": P},
+            {"funding_agency":"NIH",  "award_size_band":"mid",   "current_solution":"commercial", "adoption": 0.04, "price": P * 0.90},
+            {"funding_agency":"DoE",  "award_size_band":"large", "current_solution":"diy_scripts","adoption": 0.11, "price": P},
+        ]
+
+    if domain == "engineering":
+        # Instrumentation / engineering — NSF dominant, DoD secondary
+        return [
+            {"funding_agency":"NSF", "award_size_band":"large", "current_solution":"manual",     "adoption": 0.19, "price": P},
+            {"funding_agency":"NSF", "award_size_band":"large", "current_solution":"diy_scripts","adoption": 0.13, "price": P},
+            {"funding_agency":"NSF", "award_size_band":"mid",   "current_solution":"manual",     "adoption": 0.11, "price": P * 0.90},
+            {"funding_agency":"NSF", "award_size_band":"small", "current_solution":"diy_scripts","adoption": 0.06, "price": P * 0.85},
+            {"funding_agency":"NIH", "award_size_band":"large", "current_solution":"commercial", "adoption": 0.09, "price": P},
+            {"funding_agency":"DoD", "award_size_band":"large", "current_solution":"manual",     "adoption": 0.14, "price": P * 1.10},
+            {"funding_agency":"Foundation","award_size_band":"mid","current_solution":"manual",  "adoption": 0.05, "price": P * 0.80},
+        ]
+
+    # general — even NIH/NSF split, moderate adoption variance
+    return [
+        {"funding_agency":"NIH",       "award_size_band":"large", "current_solution":"manual",     "adoption": 0.20, "price": P},
+        {"funding_agency":"NIH",       "award_size_band":"mid",   "current_solution":"diy_scripts","adoption": 0.13, "price": P},
+        {"funding_agency":"NIH",       "award_size_band":"small", "current_solution":"manual",     "adoption": 0.07, "price": P * 0.85},
+        {"funding_agency":"NSF",       "award_size_band":"large", "current_solution":"commercial", "adoption": 0.11, "price": P * 0.90},
+        {"funding_agency":"NSF",       "award_size_band":"mid",   "current_solution":"manual",     "adoption": 0.08, "price": P * 0.90},
+        {"funding_agency":"DoD",       "award_size_band":"large", "current_solution":"manual",     "adoption": 0.16, "price": P},
+        {"funding_agency":"Foundation","award_size_band":"mid",   "current_solution":"diy_scripts","adoption": 0.06, "price": P * 0.80},
+    ]
+
+
 # ── Life-sciences research tree (spec D.2) ────────────────────────────────────
 
 async def build_life_sciences_research_tree(
@@ -969,20 +1097,13 @@ async def build_life_sciences_research_tree(
     ]
 
     # Part D Revised: dimension selection report
+    # A.2 / v6 Part D: proxy cells are product-specific so computed lifts vary by product.
     _dim_report_dict = None
     try:
         from app.services.dimension_selection import build_dimension_report as _build_dr
         _cls = {"archetype": "research_tool"}
         _itn = {"domain": "LIFE_SCIENCES_RESEARCH", "therapeutic_area": ta or ""}
-        _proxy_cells = [
-            {"funding_agency":"NIH",       "award_size_band":"large", "current_solution":"manual",    "adoption":0.20,"price":PRICE_ACADEMIC_USD},
-            {"funding_agency":"NIH",       "award_size_band":"mid",   "current_solution":"diy_scripts","adoption":0.14,"price":PRICE_ACADEMIC_USD},
-            {"funding_agency":"NIH",       "award_size_band":"small", "current_solution":"manual",    "adoption":0.07,"price":PRICE_ACADEMIC_USD},
-            {"funding_agency":"NSF",       "award_size_band":"large", "current_solution":"commercial","adoption":0.10,"price":PRICE_ACADEMIC_USD*0.9},
-            {"funding_agency":"NSF",       "award_size_band":"mid",   "current_solution":"manual",    "adoption":0.08,"price":PRICE_ACADEMIC_USD*0.9},
-            {"funding_agency":"DoD",       "award_size_band":"large", "current_solution":"manual",    "adoption":0.16,"price":PRICE_ACADEMIC_USD},
-            {"funding_agency":"Foundation","award_size_band":"mid",   "current_solution":"diy_scripts","adoption":0.06,"price":PRICE_ACADEMIC_USD*0.8},
-        ]
+        _proxy_cells = _build_product_cells(ta, nih_labs_val=nih_labs_val, idea=idea)
         _dr = _build_dr(_cls, _itn, cells=_proxy_cells, param="adoption")
         _dim_report_dict = {
             "dimensions_considered": _dr.dimensions_considered_count,

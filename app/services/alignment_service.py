@@ -2079,6 +2079,57 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
                         _old_tam, _rec_tam,
                     )
 
+            # A.2: override axis_decisions with real computed lifts from the tree's
+            # dimension_report so lifts vary by product rather than staying fixed.
+            _dr = getattr(_seg_tree, "dimension_report", None) or {}
+            if _dr.get("selected") is not None:
+                try:
+                    _selected = [
+                        {
+                            "axis_id":        d["id"],
+                            "label":          d["label"],
+                            "family":         d["family"],
+                            "selected":       True,
+                            "reason": (
+                                f"Selected: {d['lift']:.1%} of adoption variance explained "
+                                f"by {d['label'].lower()} — exceeds 10% candidacy threshold."
+                            ),
+                            "est_lift":       round(d["lift"], 4),
+                            "data_available": True,
+                        }
+                        for d in _dr["selected"]
+                    ]
+                    _rejected_tree = [
+                        {
+                            "axis_id":        d["id"],
+                            "label":          d["label"],
+                            "family":         d["family"],
+                            "selected":       False,
+                            "reason":         d.get("reason", "Below variance threshold for this product."),
+                            "est_lift":       round(d["lift"], 4) if d.get("lift") else None,
+                            "data_available": True,
+                        }
+                        for d in (_dr.get("rejected") or [])
+                    ]
+                    # Preserve non-candidate axis rejections from the axis library
+                    _existing_rejected = (report.axis_decisions or {}).get("rejected", [])
+                    _tree_ids = {d["id"] for d in (_dr.get("selected") or []) + (_dr.get("rejected") or [])}
+                    _nc_rejected = [
+                        r for r in _existing_rejected
+                        if r.get("axis_id") not in _tree_ids
+                    ]
+                    report.axis_decisions = {
+                        "selected": sorted(_selected, key=lambda x: -(x["est_lift"] or 0)),
+                        "rejected": _rejected_tree + _nc_rejected,
+                    }
+                    logger.info(
+                        "A.2: axis_decisions overridden with computed lifts: "
+                        "%d selected, %d rejected (domain=%s)",
+                        len(_selected), len(_rejected_tree) + len(_nc_rejected), _resolved_domain,
+                    )
+                except Exception as _ax_e:
+                    logger.warning("A.2: axis override failed (non-fatal): %s", _ax_e)
+
             logger.info(
                 "Part D: segmentation tree built (%d nodes), triangulated, "
                 "MC p10=$%.0f p90=$%.0f, %d sensitivity params",
