@@ -601,14 +601,16 @@ async def save_market_sizing_override(
     if not report_id:
         raise HTTPException(status_code=400, detail="report_id required")
     user_id = (current_user or {}).get("id")
+    step_overrides = body.get("step_overrides", {})
+    rationale      = body.get("rationale", "")
     row_id = await _repo.save_override(
         report_id=str(report_id),
         segment_id=0,
         user_id=user_id,
         net_price_usd=0,
         overrides={
-            "step_overrides": body.get("step_overrides", {}),
-            "rationale": body.get("rationale", ""),
+            "step_overrides": step_overrides,
+            "rationale": rationale,
         },
         added_gates=[],
         removed_gates=[],
@@ -616,9 +618,54 @@ async def save_market_sizing_override(
         tam_usd=body.get("tam_usd"),
         sam_usd=body.get("sam_usd"),
         som_usd=body.get("som_usd"),
-        label=(body.get("rationale") or "")[:120] or None,
+        label=(rationale or "")[:120] or None,
     )
+
+    # v3 Part F: capture corrections in the aggregated override ledger (training data).
+    # Best-effort: any DB failure here must not affect the save response.
+    try:
+        from app.db import override_ledger_repository as _ledger
+        await _ledger.append_corrections(
+            step_overrides=step_overrides,
+            rationale=rationale,
+            report_id=str(report_id),
+        )
+    except Exception as _le:
+        logger.warning("override_ledger capture failed (non-fatal): %s", _le)
+
     return {"ok": True, "override_id": row_id}
+
+
+@router.get("/override-ledger/stats")
+async def get_override_ledger_stats(
+    step_label: str = "",
+    min_corrections: int = 1,
+    limit: int = 50,
+    current_user=Depends(get_current_user),
+):
+    """
+    v3 Part F: return aggregated expert correction statistics from the override ledger.
+
+    Each row shows how many times a given model step has been corrected by users,
+    and the distribution of correction ratios (new_value / orig_value).
+
+    A median_ratio of 0.05 means experts consistently correct this step to 5% of
+    the model's estimate — a reliable signal that the prior is systematically wrong.
+
+    Requires authentication: ledger data is internal to the operator.
+    """
+    from app.db import override_ledger_repository as _ledger
+    stats = await _ledger.get_stats(
+        step_label=step_label or None,
+        min_corrections=max(1, min_corrections),
+        limit=min(limit, 200),
+    )
+    total = await _ledger.count_total_corrections()
+    return {
+        "total_corrections": total,
+        "stats": stats,
+        "min_corrections_threshold": min_corrections,
+    }
 
 
 @router.get("/market-sizing-override/{report_id}")
