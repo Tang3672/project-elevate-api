@@ -20,6 +20,7 @@ source citations added.
 
 import json
 import logging
+import re
 from datetime import datetime
 from typing import Optional
 
@@ -44,6 +45,66 @@ logger = logging.getLogger(__name__)
 
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 CLAUDE_MODEL      = "claude-opus-4-5"
+
+
+# ── B-06 Grant deadline helpers ───────────────────────────────────────────────
+
+_DATE_PLACEHOLDER_RE = re.compile(r'\[date removed[^\]]*\]', re.IGNORECASE)
+
+# Grant deadline patterns: month number → (name, deadline_day)
+# NIH SBIR/STTR: April 5, August 5, December 5  (3×/year)
+# NIH R01:       February 5, June 5, October 5  (3×/year)
+_SBIR_MONTHS = [4, 8, 12]   # April, August, December
+_R01_MONTHS  = [2, 6, 10]   # February, June, October
+
+
+def _next_recurring_deadline(months: list, from_date: datetime) -> str:
+    """Return 'Month YYYY' of the next occurrence in the given month list."""
+    for m in months:
+        candidate = datetime(from_date.year, m, 5)
+        if candidate > from_date:
+            return candidate.strftime("%B %Y")
+    # All this year's cycles are past — advance to the first month of next year
+    return datetime(from_date.year + 1, months[0], 5).strftime("%B %Y")
+
+
+def _next_sbir_deadline(from_date: datetime) -> str:
+    """Return 'Month YYYY' of the next NIH SBIR Phase I deadline."""
+    return _next_recurring_deadline(_SBIR_MONTHS, from_date)
+
+
+def _resolve_date_placeholders(text: str, from_date: datetime) -> str:
+    """B-06: Replace [date removed...] placeholders with the next upcoming SBIR deadline.
+
+    The R-04 scrubber correctly identifies and removes past dates; this step
+    replaces the placeholder with an actionable future date so users see a real
+    deadline rather than an internal marker.
+    """
+    if "[date removed" not in text.lower():
+        return text
+    next_dl = _next_sbir_deadline(from_date)
+    return _DATE_PLACEHOLDER_RE.sub(next_dl, text)
+
+
+# ── B-05/B-09 banned output string guard ─────────────────────────────────────
+
+_BANNED_OUTPUT_STRINGS = [
+    "api key not set",
+    "api key",
+    "not assessed",
+    "pending verification",
+    "manual review required",
+    "dev mock",
+    "no api tokens",
+    "specify source",
+    "[date removed",
+]
+
+
+def _has_banned_output(text: str) -> list[str]:
+    """Return list of banned strings found in text (case-insensitive)."""
+    t = text.lower()
+    return [b for b in _BANNED_OUTPUT_STRINGS if b in t]
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1811,6 +1872,24 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
                 logger.warning("R-04: scrubbed past date(s) from %d recommended_next_steps item(s)", _changed)
     except Exception as _r04_e:
         logger.warning("R-04 past-date scrub failed (non-fatal): %s", _r04_e)
+
+    # B-06: Replace [date removed...] placeholders with next upcoming SBIR deadline.
+    # R-04 scrubs past dates to an internal placeholder; this step converts that
+    # placeholder to a real, actionable future deadline so users never see the marker.
+    try:
+        _now_b06 = datetime.utcnow()
+        _steps_b06 = data.get("recommended_next_steps") or []
+        if isinstance(_steps_b06, list):
+            _resolved = [
+                _resolve_date_placeholders(s, _now_b06) if isinstance(s, str) else s
+                for s in _steps_b06
+            ]
+            if _resolved != _steps_b06:
+                data["recommended_next_steps"] = _resolved
+                logger.info("B-06: resolved %d date placeholder(s) to upcoming SBIR deadline",
+                            sum(1 for a, b in zip(_steps_b06, _resolved) if a != b))
+    except Exception as _b06_e:
+        logger.warning("B-06 date placeholder resolution failed (non-fatal): %s", _b06_e)
 
     # Parse into PIReport
     report = _parse_expert_response(data, idea, product_type, expert, demand_results, hospital_matches_raw, total_signals,
