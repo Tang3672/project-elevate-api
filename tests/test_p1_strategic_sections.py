@@ -271,28 +271,27 @@ class TestAdversarialReviewService:
         from app.services.adversarial_review_service import _MAX_RECOMMENDATIONS
         assert len(recs) <= _MAX_RECOMMENDATIONS
 
-    def test_fallback_review_includes_all_recs(self):
+    def test_fallback_review_suppresses_section(self):
+        # B-05: fallback now returns [] so the section is suppressed — never shows
+        # internal strings like "API key not set" or "Not assessed" to users.
         recs = ["Step A", "Step B", "Step C"]
         result = _fallback_review(recs)
-        assert len(result) == 3
-        for item in result:
-            assert "structural_risk" in item
-            assert item["structural_risk"].strip() != ""
+        assert result == [], f"Expected [] but got {result!r}"
 
-    def test_fallback_review_structural_risk_non_empty(self):
-        result = _fallback_review(["Do X"])
-        assert result[0]["structural_risk"].strip() != ""
+    def test_fallback_review_empty_input_returns_empty(self):
+        result = _fallback_review([])
+        assert result == []
 
-    def test_run_adversarial_review_no_api_key_returns_fallback(self):
+    def test_run_adversarial_review_no_api_key_returns_empty(self):
         import os
         orig = os.environ.pop("ANTHROPIC_API_KEY", None)
         try:
             report = {"recommended_next_steps": ["Apply to NSF SBIR", "Run PI interviews"]}
             result = _run(run_adversarial_review(report, "wearable data logger"))
             assert isinstance(result, list)
-            assert len(result) >= 1
-            for item in result:
-                assert item.get("structural_risk", "").strip() != ""
+            assert result == [], (
+                f"Expected [] when API key absent, got {result!r}"
+            )
         finally:
             if orig:
                 os.environ["ANTHROPIC_API_KEY"] = orig

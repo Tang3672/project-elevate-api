@@ -3,9 +3,9 @@ B-10 — Regressions and residue from spec v4.
 =============================================
 Items addressed:
 
-  1. SOM horizon contradiction — formula string used "5-yr horizon capture"
-     while step labels said "Year-1". Fixed: formula now says "Year-1 capture"
-     and the SOM_HORIZON_MISMATCH regex normalises any surviving prose.
+  1. SOM horizon contradiction — G.10 canonicalises to HORIZON_YEARS-yr penetration
+     midpoint. Formula now says "5-yr penetration midpoint" (not "Year-1 capture").
+     The SOM_HORIZON_MISMATCH regex normalises any "Year-1 capture" prose.
 
   2. Find Trial Sites CTA offered for non-clinical products — now gated by
      `_isResearchProduct` in `_renderPostReportTools`. Verified by source
@@ -79,13 +79,13 @@ def _make_step(label: str, value: float, unit: str = "USD", source: str = "Model
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# SOM horizon — formula must say "Year-1", not "5-yr" (B-10 #1)
+# SOM horizon — formula must use canonical HORIZON_YEARS form (G.10 / B-08)
 # ══════════════════════════════════════════════════════════════════════════════
 
 class TestSomHorizonConsistency:
     """
     _enforce_market_consistency sets ms.formula.
-    That formula must never say '5-yr' while step labels say 'Year-1'.
+    G.10: formula must use the canonical {HORIZON_YEARS}-yr penetration midpoint form.
     """
 
     def _run_enforce(self, tam=45_833_333, sam=13_750_000, som=2_062_500,
@@ -113,17 +113,19 @@ class TestSomHorizonConsistency:
         _enforce_market_consistency(report, deriv)
         return ms.formula
 
-    def test_formula_does_not_contain_5yr(self):
+    def test_formula_contains_canonical_horizon(self):
+        """G.10: formula must use the HORIZON_YEARS canonical form, not 'Year-1'."""
+        from app.services.buyer_model import HORIZON_YEARS
         formula = self._run_enforce()
-        assert "5-yr" not in formula, (
-            f"Formula must not say '5-yr'; found it in: {formula!r}"
+        assert f"{HORIZON_YEARS}-yr" in formula.lower() or f"{HORIZON_YEARS} yr" in formula.lower(), (
+            f"Formula must say '{HORIZON_YEARS}-yr penetration midpoint' (G.10); got: {formula!r}"
         )
 
-    def test_formula_contains_year_1(self):
+    def test_formula_does_not_say_year1_capture(self):
+        """G.10: 'Year-1 capture' was the old wrong canonical form — must be absent."""
         formula = self._run_enforce()
-        # Either "Year-1" or "Year 1" is acceptable
-        assert re.search(r"year.?1", formula, re.I), (
-            f"Formula must say 'Year-1 capture'; got: {formula!r}"
+        assert "year-1 capture" not in formula.lower() and "year 1 capture" not in formula.lower(), (
+            f"Formula must not say 'Year-1 capture' (G.10 reversed this); got: {formula!r}"
         )
 
     def test_formula_contains_sam_multiplier(self):
@@ -134,17 +136,21 @@ class TestSomHorizonConsistency:
         formula = self._run_enforce()
         assert "TAM" in formula
 
-    def test_som_horizon_mismatch_regex_normalises_prose(self):
-        """The H-08/B-02 regex must turn prose '5-year SOM' → 'Year-1 SOM'."""
+    def test_som_horizon_mismatch_regex_normalises_year1_prose(self):
+        """G.10: the H-08 regex must turn 'Year-1 capture' → canonical horizon form."""
         import re as _re
-        _SOM_HORIZON_MISMATCH_RE = _re.compile(
-            r"\b(years?\s+1[\s–-]+5|5[\s-]year\s+som|cumulative\s+som)\b",
+        from app.services.buyer_model import HORIZON_YEARS
+        # Regex that now normalises Year-1 → HORIZON_YEARS canonical form
+        _RE = _re.compile(
+            r"\b(year[\s-]1\s+(?:capture|SOM)|year-1\s+(?:capture|SOM)"
+            r"|years?\s+1[\s–-]+5\s*(?:SOM)?|5[\s-]year\s+som|cumulative\s+som)\b",
             _re.I | _re.UNICODE,
         )
-        bad_text = "The 5-year SOM of $2M assumes 15% capture."
-        fixed = _SOM_HORIZON_MISMATCH_RE.sub("Year-1 SOM", bad_text)
-        assert "5-year SOM" not in fixed
-        assert "Year-1 SOM" in fixed
+        canonical = f"{HORIZON_YEARS}-yr penetration midpoint"
+        bad_text = "The Year-1 capture of SAM at 22.5% = $2.8M."
+        fixed = _RE.sub(canonical, bad_text)
+        assert "year-1 capture" not in fixed.lower()
+        assert f"{HORIZON_YEARS}-yr" in fixed
 
 
 # ══════════════════════════════════════════════════════════════════════════════

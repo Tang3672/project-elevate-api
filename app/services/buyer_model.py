@@ -25,6 +25,11 @@ from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
+# G.10 / B-08: single canonical SOM planning horizon used by every section
+# that mentions a horizon. Derivation service, formula string, and verifier
+# all read this constant so they can never disagree.
+HORIZON_YEARS: int = 5
+
 
 # ─── Buyer persona codes ──────────────────────────────────────────────────────
 

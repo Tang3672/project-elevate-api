@@ -1,15 +1,17 @@
 """
-B-02 — Deterministic market-arithmetic consistency guard.
+B-02 / G.10 — Deterministic market-arithmetic and horizon-consistency guard.
 
 The LLM math verifier can hallucinate "resolved" or emit no flags even when
 the numbers disagree. This module runs independent numeric checks with no LLM
 call. Its flags cannot be silenced by the LLM's verdict.
 
-Public API: check_market_arithmetic(market_sizing: dict) -> list[dict]
+Public API:
+  check_market_arithmetic(market_sizing: dict) -> list[dict]
 """
 
 from __future__ import annotations
 
+import re
 from typing import Optional
 
 
@@ -75,6 +77,60 @@ def _unit_price(steps: list[dict]) -> Optional[float]:
     return None
 
 
+# ── G.10 / B-08: horizon contradiction check ─────────────────────────────────
+
+# Regex to extract explicit year numbers associated with horizon phrasing.
+# Matches: "Year-1", "Year 1", "1-yr", "1-year", "5-yr", "5-year", "5 years"
+_HORIZON_RE = re.compile(
+    r"\b(?:year[\s-](\d+)|(\d+)[\s-](?:years?|yrs?))\b",
+    re.IGNORECASE,
+)
+
+
+def _extract_horizon_years(text: str) -> set[int]:
+    """Return the set of distinct year numbers mentioned in horizon phrasing."""
+    years: set[int] = set()
+    for m in _HORIZON_RE.finditer(text):
+        raw = m.group(1) or m.group(2)
+        if raw:
+            years.add(int(raw))
+    return years
+
+
+def _check_horizon_contradiction(market_sizing: dict) -> list[dict]:
+    """
+    G.10 / B-08: detect contradictory horizon year mentions in the market sizing
+    formula and methodology_note. Returns a BLOCKING MATH ERROR when the same
+    section uses two different year numbers (e.g. "Year-1 capture" alongside
+    "5-yr penetration midpoint").
+    """
+    try:
+        from app.services.buyer_model import HORIZON_YEARS
+    except ImportError:
+        HORIZON_YEARS = 5
+
+    formula = (market_sizing.get("formula") or "")
+    note    = (market_sizing.get("methodology_note") or "")
+    combined = f"{formula} {note}"
+
+    years = _extract_horizon_years(combined)
+
+    # Only flag if there are multiple distinct year numbers AND they are not
+    # the canonical horizon (e.g. "Year 1" in normal prose is fine — only flag
+    # when contradicting HORIZON_YEARS appears alongside another year).
+    non_canonical = years - {HORIZON_YEARS}
+    if len(years) >= 2 and non_canonical:
+        return [_flag(
+            "market_sizing.formula",
+            f"Contradictory SOM horizon: found year references {sorted(years)} "
+            f"in formula/methodology_note — canonical horizon is {HORIZON_YEARS} yr. "
+            f"This produces three different SOM horizons in one report (B-08).",
+            f"Ensure all horizon mentions use the canonical {HORIZON_YEARS}-yr "
+            f"penetration midpoint. Remove 'Year-1 capture' phrasing.",
+        )]
+    return []
+
+
 # ── public API ────────────────────────────────────────────────────────────────
 
 def check_market_arithmetic(market_sizing: dict) -> list[dict]:
@@ -86,6 +142,7 @@ def check_market_arithmetic(market_sizing: dict) -> list[dict]:
       2. SAM step value ≈ headline serviceable_market_usd (≤1% tolerance)
       3. Headline SAM ≤ TAM
       4. Bottom-up product (pop × price per unit) ≈ TAM (≤10% tolerance)
+      5. G.10 / B-08: no contradictory horizon year in formula / methodology_note
 
     Returns a list of MATH ERROR ValidationFlag dicts.
     """
@@ -93,6 +150,7 @@ def check_market_arithmetic(market_sizing: dict) -> list[dict]:
         return []
 
     flags: list[dict] = []
+    flags.extend(_check_horizon_contradiction(market_sizing))
 
     stated_tam = _to_float(market_sizing.get("total_addressable_market_usd"))
     stated_sam = _to_float(market_sizing.get("serviceable_market_usd"))

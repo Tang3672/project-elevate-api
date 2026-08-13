@@ -32,6 +32,8 @@ import math
 from dataclasses import dataclass, field
 from typing import Optional
 
+from app.services.buyer_model import HORIZON_YEARS
+
 logger = logging.getLogger(__name__)
 
 
@@ -104,7 +106,23 @@ class MarketSizingDerivation:
     key_assumptions:  list[str]
     confidence_note:  str
     primary_citations: list[dict]
-    monte_carlo:      Optional[MonteCarloResult] = None
+    monte_carlo:                Optional[MonteCarloResult] = None
+    # G.14: EDGAR calibration correction applied to TAM/SAM/SOM
+    edgar_calibration_factor:   Optional[float] = None   # ratio applied (>1 means model was scaled down)
+    edgar_calibration_note:     Optional[str]  = None   # human-readable explanation
+
+    def model_dump(self, mode: str = "python") -> dict:
+        """Serialize to dict, compatible with the pydantic-style call in alignment_service."""
+        import dataclasses
+        def _conv(v):
+            if dataclasses.is_dataclass(v) and not isinstance(v, type):
+                return {k: _conv(fv) for k, fv in dataclasses.asdict(v).items()}
+            if isinstance(v, list):
+                return [_conv(i) for i in v]
+            if isinstance(v, dict):
+                return {k: _conv(fv) for k, fv in v.items()}
+            return v
+        return {k: _conv(v) for k, v in dataclasses.asdict(self).items()}
 
 
 def _fmt(usd: float) -> str:
@@ -1818,9 +1836,17 @@ def _run_research_tool_sensitivity(
     sam_mid = (sam_lo + sam_hi) / 2
     som_mid = (som_lo + som_hi) / 2
     som_base = pop_mid * sp_mid * sam_mid * som_mid
+    if som_base <= 0:
+        raise ValueError(
+            f"sensitivity: degenerate baseline (pop_mid={pop_mid}, sp_mid={sp_mid}, "
+            f"sam_mid={sam_mid}, som_mid={som_mid}) — all midpoints must be positive"
+        )
 
     def _entry(param, lo_lbl, hi_lbl, som_lo_val, som_hi_val) -> SensitivityEntry:
-        swing = (som_hi_val - som_lo_val) / som_base * 100
+        raw_swing = (som_hi_val - som_lo_val) / som_base * 100
+        # Clamp to a meaningful range: if the swing exceeds 500% something is
+        # degenerate upstream (divide-by-near-zero). Cap rather than explode.
+        swing = max(0.0, min(raw_swing, 500.0))
         return SensitivityEntry(
             parameter=param, lo_label=lo_lbl, hi_label=hi_lbl,
             som_at_lo=som_lo_val, som_at_hi=som_hi_val, swing_pct=round(swing, 1),
@@ -1882,7 +1908,7 @@ def _derive_research_tool_formula(
         from app.services.buyer_model import research_tool_buyer_for_domain, MarketSizeResult
         bm = research_tool_buyer_for_domain(therapeutic_area, idea)
         ms = MarketSizeResult(buyer_model=bm, sam_fraction=_SAM_MID, som_fraction=_SOM_MID,
-                              som_horizon_years=5)
+                              som_horizon_years=HORIZON_YEARS)
         pop_lo  = bm.buyer_population_lo
         pop_hi  = bm.buyer_population_hi
         sp_lo   = bm.annualised_spend_lo()
@@ -2015,7 +2041,7 @@ def _derive_research_tool_formula(
             source_url="",
             explanation=(
                 f"The early-adopter fraction [{_sam_lo:.0%}–{_sam_hi:.0%}] encodes the "
-                f"fraction of eligible labs expected to adopt within 5 years given the product's "
+                f"fraction of eligible labs expected to adopt within {HORIZON_YEARS} years given the product's "
                 f"workflow fit and switching friction. "
                 + (f"Derived from intake answer: {_user_overrides['sam']}. " if _user_overrides.get("sam") else "")
                 + f"Midpoint {sam_mid:.0%} used as the planning base. "
@@ -2029,23 +2055,23 @@ def _derive_research_tool_formula(
         ),
         DerivationStep(
             step_num=5,
-            title=f"Step 5 — Serviceable Obtainable Market (SOM = SAM × 5-yr penetration, range {_som_lo:.0%}–{_som_hi:.0%})",
+            title=f"Step 5 — Serviceable Obtainable Market (SOM = SAM × {HORIZON_YEARS}-yr penetration, range {_som_lo:.0%}–{_som_hi:.0%})",
             formula=(
-                f"SOM = {_fmt(sam)} × [{_som_lo:.0%}–{_som_hi:.0%}] 5-yr penetration "
+                f"SOM = {_fmt(sam)} × [{_som_lo:.0%}–{_som_hi:.0%}] {HORIZON_YEARS}-yr penetration "
                 f"= {_fmt(sam * _som_lo)}–{_fmt(sam * _som_hi)}; midpoint {_fmt(som)}"
             ),
             value=float(som),
             unit="USD",
-            source_paper="Derived from adoption pathway" if _user_overrides.get("som") else "Assumed — 5-yr SAM ramp rate (method=assumed; validate with comparable research-tool launches)",
+            source_paper="Derived from adoption pathway" if _user_overrides.get("som") else f"Assumed — {HORIZON_YEARS}-yr SAM ramp rate (method=assumed; validate with comparable research-tool launches)",
             source_url="",
             explanation=(
-                f"5-yr penetration [{_som_lo:.0%}–{_som_hi:.0%}] of SAM assumes: (1) 12–18 month sales cycle per lab, "
+                f"{HORIZON_YEARS}-yr penetration [{_som_lo:.0%}–{_som_hi:.0%}] of SAM assumes: (1) 12–18 month sales cycle per lab, "
                 f"(2) referral-driven growth from early adopters, (3) pricing at or below observed spend band. "
                 + (f"Adoption pathway answer adjusts the penetration rate range. " if _user_overrides.get("som") else "")
                 + f"Midpoint {som_mid:.0%} used as planning base. "
                 f"This is the largest single source of uncertainty in the model — see sensitivity ranking."
             ),
-            data_source="Derived from adoption pathway answer" if _user_overrides.get("som") else "Assumed (method=assumed); target: comparable research-tool SaaS launch benchmarks",
+            data_source="Derived from adoption pathway answer" if _user_overrides.get("som") else f"Assumed (method=assumed); target: comparable research-tool SaaS launch benchmarks",
             assumptions=[
                 f"5-yr penetration range: {_som_lo:.0%}–{_som_hi:.0%} of SAM (midpoint {som_mid:.0%})",
                 "No Bass diffusion calibration yet; ranges from early-stage SaaS benchmarks",
@@ -2256,32 +2282,64 @@ def generate_market_sizing_derivation(
                 {k: v for k, v in signals.items() if v})
 
     if archetype == "research_tool_non_clinical":
-        return _derive_research_tool_formula(idea, dn, therapeutic_area, us_patient_population, signals,
-                                             user_params=user_params)
+        deriv = _derive_research_tool_formula(idea, dn, therapeutic_area, us_patient_population, signals,
+                                              user_params=user_params)
+    elif archetype == "gene_cell_therapy":
+        deriv = _derive_gene_therapy_formula(idea, dn, therapeutic_area, us_patient_population, signals)
+    elif archetype == "vaccine":
+        deriv = _derive_vaccine_formula(idea, dn, therapeutic_area, us_patient_population, signals)
+    elif archetype == "combination":
+        deriv = _derive_combination_formula(idea, dn, therapeutic_area, us_patient_population, signals)
+    elif archetype == "medical_device_capital":
+        deriv = _derive_device_capital_formula(idea, dn, therapeutic_area, us_patient_population, signals)
+    elif archetype == "medical_device_surgical":
+        deriv = _derive_device_surgical_formula(idea, dn, therapeutic_area, us_patient_population, signals)
+    elif archetype == "in_vitro_diagnostic":
+        deriv = _derive_ivd_formula(idea, dn, therapeutic_area, us_patient_population, signals)
+    elif archetype == "software_samd":
+        deriv = _derive_samd_formula(idea, dn, therapeutic_area, us_patient_population, signals)
+    else:
+        deriv = _derive_pharma_formula(idea, dn, therapeutic_area, us_patient_population, archetype, signals)
 
-    if archetype == "gene_cell_therapy":
-        return _derive_gene_therapy_formula(idea, dn, therapeutic_area, us_patient_population, signals)
+    # G.14: Apply EDGAR forecast-to-outcome calibration correction.
+    # Bottom-up models systematically overstate; the factor is the median ratio from
+    # cross-referencing S-1 TAM claims against realized 10-K revenue.
+    try:
+        from app.db import edgar_calibration_repository as _edgar
+        _ctam, _csam, _csom, _factor, _note = _edgar.apply_calibration(
+            deriv.us_tam_usd, deriv.us_sam_usd, deriv.us_som_usd, archetype
+        )
+        if _factor != 1.0 and _note:
+            deriv.us_tam_usd             = _ctam
+            deriv.us_sam_usd             = _csam
+            deriv.us_som_usd             = _csom
+            deriv.tam_fmt                = _fmt(_ctam)
+            deriv.sam_fmt                = _fmt(_csam)
+            deriv.som_fmt                = _fmt(_csom)
+            deriv.edgar_calibration_factor = _factor
+            deriv.edgar_calibration_note   = _note
+            deriv.key_assumptions = [_note] + (deriv.key_assumptions or [])
+            # Scale Monte Carlo distribution by the same factor so P50 ≈ corrected TAM
+            if deriv.monte_carlo is not None:
+                mc = deriv.monte_carlo
+                from dataclasses import replace as _dc_replace
+                deriv.monte_carlo = _dc_replace(mc,
+                    tam_p5  = mc.tam_p5  / _factor,
+                    tam_p25 = mc.tam_p25 / _factor,
+                    tam_p50 = mc.tam_p50 / _factor,
+                    tam_p75 = mc.tam_p75 / _factor,
+                    tam_p95 = mc.tam_p95 / _factor,
+                    sam_p25 = mc.sam_p25 / _factor,
+                    sam_p50 = mc.sam_p50 / _factor,
+                    sam_p75 = mc.sam_p75 / _factor,
+                    som_p25 = mc.som_p25 / _factor,
+                    som_p50 = mc.som_p50 / _factor,
+                    som_p75 = mc.som_p75 / _factor,
+                )
+    except Exception as _ec:
+        logger.warning("edgar_calibration: apply failed (non-fatal): %s", _ec)
 
-    if archetype == "vaccine":
-        return _derive_vaccine_formula(idea, dn, therapeutic_area, us_patient_population, signals)
-
-    if archetype == "combination":
-        return _derive_combination_formula(idea, dn, therapeutic_area, us_patient_population, signals)
-
-    if archetype == "medical_device_capital":
-        return _derive_device_capital_formula(idea, dn, therapeutic_area, us_patient_population, signals)
-
-    if archetype == "medical_device_surgical":
-        return _derive_device_surgical_formula(idea, dn, therapeutic_area, us_patient_population, signals)
-
-    if archetype == "in_vitro_diagnostic":
-        return _derive_ivd_formula(idea, dn, therapeutic_area, us_patient_population, signals)
-
-    if archetype == "software_samd":
-        return _derive_samd_formula(idea, dn, therapeutic_area, us_patient_population, signals)
-
-    # Default: pharma (small molecule or biologic)
-    return _derive_pharma_formula(idea, dn, therapeutic_area, us_patient_population, archetype, signals)
+    return deriv
 
 
 def format_derivation_for_prompt(deriv: MarketSizingDerivation) -> str:

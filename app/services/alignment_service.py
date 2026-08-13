@@ -20,6 +20,7 @@ source citations added.
 
 import json
 import logging
+import re
 from datetime import datetime
 from typing import Optional
 
@@ -44,6 +45,66 @@ logger = logging.getLogger(__name__)
 
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 CLAUDE_MODEL      = "claude-opus-4-5"
+
+
+# ── B-06 Grant deadline helpers ───────────────────────────────────────────────
+
+_DATE_PLACEHOLDER_RE = re.compile(r'\[date removed[^\]]*\]', re.IGNORECASE)
+
+# Grant deadline patterns: month number → (name, deadline_day)
+# NIH SBIR/STTR: April 5, August 5, December 5  (3×/year)
+# NIH R01:       February 5, June 5, October 5  (3×/year)
+_SBIR_MONTHS = [4, 8, 12]   # April, August, December
+_R01_MONTHS  = [2, 6, 10]   # February, June, October
+
+
+def _next_recurring_deadline(months: list, from_date: datetime) -> str:
+    """Return 'Month YYYY' of the next occurrence in the given month list."""
+    for m in months:
+        candidate = datetime(from_date.year, m, 5)
+        if candidate > from_date:
+            return candidate.strftime("%B %Y")
+    # All this year's cycles are past — advance to the first month of next year
+    return datetime(from_date.year + 1, months[0], 5).strftime("%B %Y")
+
+
+def _next_sbir_deadline(from_date: datetime) -> str:
+    """Return 'Month YYYY' of the next NIH SBIR Phase I deadline."""
+    return _next_recurring_deadline(_SBIR_MONTHS, from_date)
+
+
+def _resolve_date_placeholders(text: str, from_date: datetime) -> str:
+    """B-06: Replace [date removed...] placeholders with the next upcoming SBIR deadline.
+
+    The R-04 scrubber correctly identifies and removes past dates; this step
+    replaces the placeholder with an actionable future date so users see a real
+    deadline rather than an internal marker.
+    """
+    if "[date removed" not in text.lower():
+        return text
+    next_dl = _next_sbir_deadline(from_date)
+    return _DATE_PLACEHOLDER_RE.sub(next_dl, text)
+
+
+# ── B-05/B-09 banned output string guard ─────────────────────────────────────
+
+_BANNED_OUTPUT_STRINGS = [
+    "api key not set",
+    "api key",
+    "not assessed",
+    "pending verification",
+    "manual review required",
+    "dev mock",
+    "no api tokens",
+    "specify source",
+    "[date removed",
+]
+
+
+def _has_banned_output(text: str) -> list[str]:
+    """Return list of banned strings found in text (case-insensitive)."""
+    t = text.lower()
+    return [b for b in _BANNED_OUTPUT_STRINGS if b in t]
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1812,6 +1873,24 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
     except Exception as _r04_e:
         logger.warning("R-04 past-date scrub failed (non-fatal): %s", _r04_e)
 
+    # B-06: Replace [date removed...] placeholders with next upcoming SBIR deadline.
+    # R-04 scrubs past dates to an internal placeholder; this step converts that
+    # placeholder to a real, actionable future deadline so users never see the marker.
+    try:
+        _now_b06 = datetime.utcnow()
+        _steps_b06 = data.get("recommended_next_steps") or []
+        if isinstance(_steps_b06, list):
+            _resolved = [
+                _resolve_date_placeholders(s, _now_b06) if isinstance(s, str) else s
+                for s in _steps_b06
+            ]
+            if _resolved != _steps_b06:
+                data["recommended_next_steps"] = _resolved
+                logger.info("B-06: resolved %d date placeholder(s) to upcoming SBIR deadline",
+                            sum(1 for a, b in zip(_steps_b06, _resolved) if a != b))
+    except Exception as _b06_e:
+        logger.warning("B-06 date placeholder resolution failed (non-fatal): %s", _b06_e)
+
     # Parse into PIReport
     report = _parse_expert_response(data, idea, product_type, expert, demand_results, hospital_matches_raw, total_signals,
                                     product_name=product_name, institution=institution, sub_expert_id=sub_expert_id)
@@ -1843,8 +1922,14 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
             r")\b",
             _re_h08.I | _re_h08.UNICODE,
         )
+        # G.10/B-08: normalise all horizon mentions to the canonical HORIZON_YEARS-yr form.
+        # "Year-1 capture/SOM" was the prior wrong canonical form; replace it everywhere.
+        # Also replace "Years 1-5 SOM" / "5-year SOM" / "cumulative SOM" → same target.
+        from app.services.buyer_model import HORIZON_YEARS as _HY
+        _CANONICAL_HORIZON = f"{_HY}-yr penetration midpoint"
         _SOM_HORIZON_MISMATCH_RE = _re_h08.compile(
-            r"\b(years?\s+1[\s–-]+5|5[\s-]year\s+som|cumulative\s+som)\b",
+            r"\b(year[\s-]1\s+(?:capture|SOM)|year-1\s+(?:capture|SOM)"
+            r"|years?\s+1[\s–-]+5\s*(?:SOM)?|5[\s-]year\s+som|cumulative\s+som)\b",
             _re_h08.I | _re_h08.UNICODE,
         )
 
@@ -1852,7 +1937,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
             return _CONFIDENCE_PHRASES.sub("", text).strip()
 
         def _fix_som_horizon(text: str) -> str:
-            return _SOM_HORIZON_MISMATCH_RE.sub("Year-1 SOM", text)
+            return _SOM_HORIZON_MISMATCH_RE.sub(_CANONICAL_HORIZON, text)
 
         def _h08_clean(val):
             if isinstance(val, str):
@@ -2053,6 +2138,77 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
                 "monte_carlo": _mc,
             }
             report.sensitivity = _sensitivity
+
+            # G.9: overwrite market_sizing TAM with triangulation reconciled TAM
+            # so there is one canonical number across both paths.
+            if report.market_sizing is not None:
+                _rec_tam = _triangulation.reconciled.get("tam_usd", 0)
+                if _rec_tam > 0:
+                    _old_tam = report.market_sizing.total_addressable_market_usd
+                    _note = report.market_sizing.methodology_note.rstrip(".")
+                    report.market_sizing = report.market_sizing.model_copy(update={
+                        "total_addressable_market_usd": _rec_tam,
+                        "methodology_note": (
+                            _note +
+                            " Reconciled via 3-method triangulation (BU 50% + TD 25% + VB 25%)."
+                        ).strip(),
+                    })
+                    logger.info(
+                        "G.9: TAM reconciled derivation=$%.0f → triangulation=$%.0f",
+                        _old_tam, _rec_tam,
+                    )
+
+            # A.2: override axis_decisions with real computed lifts from the tree's
+            # dimension_report so lifts vary by product rather than staying fixed.
+            _dr = getattr(_seg_tree, "dimension_report", None) or {}
+            if _dr.get("selected") is not None:
+                try:
+                    _selected = [
+                        {
+                            "axis_id":        d["id"],
+                            "label":          d["label"],
+                            "family":         d["family"],
+                            "selected":       True,
+                            "reason": (
+                                f"Selected: {d['lift']:.1%} of adoption variance explained "
+                                f"by {d['label'].lower()} — exceeds 10% candidacy threshold."
+                            ),
+                            "est_lift":       round(d["lift"], 4),
+                            "data_available": True,
+                        }
+                        for d in _dr["selected"]
+                    ]
+                    _rejected_tree = [
+                        {
+                            "axis_id":        d["id"],
+                            "label":          d["label"],
+                            "family":         d["family"],
+                            "selected":       False,
+                            "reason":         d.get("reason", "Below variance threshold for this product."),
+                            "est_lift":       round(d["lift"], 4) if d.get("lift") else None,
+                            "data_available": True,
+                        }
+                        for d in (_dr.get("rejected") or [])
+                    ]
+                    # Preserve non-candidate axis rejections from the axis library
+                    _existing_rejected = (report.axis_decisions or {}).get("rejected", [])
+                    _tree_ids = {d["id"] for d in (_dr.get("selected") or []) + (_dr.get("rejected") or [])}
+                    _nc_rejected = [
+                        r for r in _existing_rejected
+                        if r.get("axis_id") not in _tree_ids
+                    ]
+                    report.axis_decisions = {
+                        "selected": sorted(_selected, key=lambda x: -(x["est_lift"] or 0)),
+                        "rejected": _rejected_tree + _nc_rejected,
+                    }
+                    logger.info(
+                        "A.2: axis_decisions overridden with computed lifts: "
+                        "%d selected, %d rejected (domain=%s)",
+                        len(_selected), len(_rejected_tree) + len(_nc_rejected), _resolved_domain,
+                    )
+                except Exception as _ax_e:
+                    logger.warning("A.2: axis override failed (non-fatal): %s", _ax_e)
+
             logger.info(
                 "Part D: segmentation tree built (%d nodes), triangulated, "
                 "MC p10=$%.0f p90=$%.0f, %d sensitivity params",
@@ -2944,12 +3100,13 @@ def _enforce_market_consistency(report, deriv) -> None:
             "vaccine":                     "population at risk × immunization rate × price",
         }.get(_arch, "buyers × annual revenue per buyer")
 
+        from app.services.buyer_model import HORIZON_YEARS as _HORIZON_YEARS
         ms.total_addressable_market_usd = float(tam)
         ms.serviceable_market_usd = float(sam)
         ms.formula = (
             f"TAM = ${tam:,.0f} ({_fmt(tam)}, {_tam_basis}). "
             f"SAM = TAM × {pen}% reachable penetration = ${sam:,.0f} ({_fmt(sam)}). "
-            f"SOM = SAM × {cap}% (Year-1 capture) = ${som:,.0f} ({_fmt(som)}). "
+            f"SOM = SAM × {cap}% ({_HORIZON_YEARS}-yr penetration midpoint) = ${som:,.0f} ({_fmt(som)}). "
             f"US, annual; figures from the deterministic bottom-up derivation."
         )
 

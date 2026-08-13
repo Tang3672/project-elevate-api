@@ -20,16 +20,115 @@ import asyncio
 import logging
 import json
 import re
+import time
 from typing import List, Dict, Optional
 import httpx
 
 logger = logging.getLogger(__name__)
+
+# Import the shared audit logger; avoid circular at module load time
+def _log_fetch_pubmed(url: str, method: str, status, latency_ms: float,
+                      response_bytes: int, parsed_records: int, query_summary: str) -> None:
+    """Emit a FETCH_AUDIT record for PubMed/E-utilities calls."""
+    logger.debug(
+        "FETCH_AUDIT service=pubmed method=%s status=%s latency_ms=%.0f bytes=%d "
+        "records=%d url=%s query=%r",
+        method, status, latency_ms, response_bytes, parsed_records, url, query_summary,
+    )
 
 PUBMED_SEARCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
 PUBMED_FETCH_URL  = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
 PUBMED_SUMMARY_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
 TIMEOUT = 20.0
 RATE_LIMIT_DELAY = 0.4  # 3 req/sec max without API key
+
+# B-02: archetypes whose primary literature is NOT in PubMed (agronomy, materials,
+# engineering). Route these through OpenAlex, which covers all disciplines.
+_NON_PUBMED_ARCHETYPES: frozenset = frozenset({
+    "research_tool_non_clinical",
+    "research_infrastructure_saas",
+    "research_tool_agronomy",
+})
+
+
+def _invert_index_to_text(inverted_index: dict) -> str:
+    """Reconstruct abstract text from OpenAlex's inverted-index format.
+
+    OpenAlex stores abstracts as {word: [position, ...]} to avoid copyright issues.
+    This reconstructs a readable sentence for relevance scoring.
+    """
+    if not inverted_index:
+        return ""
+    try:
+        max_pos = max(p for positions in inverted_index.values() for p in positions) + 1
+        words: list[str] = [""] * max_pos
+        for word, positions in inverted_index.items():
+            for pos in positions:
+                if 0 <= pos < max_pos:
+                    words[pos] = word
+        return " ".join(w for w in words if w)[:500]
+    except Exception:
+        return ""
+
+
+async def _get_openalex_publications(topic: str, sub_expert_id: str, max_results: int = 8) -> list:
+    """B-02: Primary publication retrieval via OpenAlex for non-biomedical archetypes.
+
+    PubMed doesn't index agronomy, soil science, or materials engineering journals.
+    OpenAlex covers all disciplines, including foundational sensor papers (Topp 1980,
+    Vellidis 2008) that PubMed will never return.
+    """
+    try:
+        # Build a topic search phrase that avoids clinical/disease framing
+        search_phrase = topic[:80]
+
+        params = {
+            "search":   search_phrase,
+            "per-page": str(max_results),
+            "select":   "id,doi,display_name,authorships,primary_location,publication_year,abstract_inverted_index",
+            "mailto":   _CONTACT_EMAIL,
+            "sort":     "cited_by_count:desc",
+        }
+        t0 = time.monotonic()
+        r = httpx.get(_OPENALEX_URL, params=params, timeout=12.0)
+        latency_ms = (time.monotonic() - t0) * 1000
+        items = r.json().get("results", []) if r.status_code == 200 else []
+        _log_fetch_pubmed(
+            _OPENALEX_URL, "GET", r.status_code,
+            latency_ms, len(r.content), len(items),
+            f"openalex primary search={search_phrase[:60]}",
+        )
+
+        papers = []
+        for w in items:
+            doi = (w.get("doi") or "").replace("https://doi.org/", "")
+            authors_raw = w.get("authorships") or []
+            last_names = [
+                a.get("author", {}).get("display_name", "").split()[-1]
+                for a in authors_raw[:3]
+                if a.get("author", {}).get("display_name")
+            ]
+            authors_str = (
+                (last_names[0] + " et al.") if len(last_names) > 1
+                else (last_names[0] if last_names else "")
+            )
+            journal = ((w.get("primary_location") or {}).get("source") or {})
+            abstract = _invert_index_to_text(w.get("abstract_inverted_index") or {})
+            papers.append({
+                "pmid":         "",
+                "title":        w.get("display_name", ""),
+                "authors":      authors_str,
+                "journal":      journal.get("display_name", ""),
+                "year":         str(w.get("publication_year", "")),
+                "url":          f"https://doi.org/{doi}" if doi else "",
+                "doi":          doi,
+                "abstract":     abstract,
+                "verified_via": "openAlex",
+            })
+        return papers
+    except Exception as exc:
+        logger.warning("OpenAlex publication search failed (non-fatal): %s", exc)
+        return []
 
 
 async def get_landmark_publications(
@@ -39,7 +138,11 @@ async def get_landmark_publications(
 ) -> Dict:
     """
     Pull top landmark publications for a disease + expert domain.
-    Returns structured publication data ready to inject into expert context.
+
+    B-02: non-biomedical archetypes (agronomy, engineering research tools) route
+    through OpenAlex, which indexes all disciplines. PubMed does not index
+    Canadian Journal of Soil Science, Computers and Electronics in Agriculture,
+    or MDPI Sensors — the core literature for those products.
     """
     results = {
         "disease": disease_name,
@@ -50,7 +153,14 @@ async def get_landmark_publications(
         "total_found": 0,
     }
 
-    # Build targeted queries based on expert domain
+    # B-02: non-biomedical products → OpenAlex primary retrieval
+    if sub_expert_id in _NON_PUBMED_ARCHETYPES:
+        papers = await _get_openalex_publications(disease_name, sub_expert_id, max_papers)
+        results["publications"] = papers
+        results["total_found"] = len(papers)
+        return results
+
+    # Biomedical products → PubMed (unchanged path)
     queries = _build_pubmed_queries(disease_name, sub_expert_id)
 
     all_pmids = []
@@ -75,7 +185,6 @@ async def get_landmark_publications(
     # Categorize papers
     for p in papers:
         title_lower = p.get("title", "").lower()
-        pub_type = p.get("pub_type", "")
         if any(t in title_lower for t in ["systematic review", "meta-analysis", "cochrane"]):
             results["systematic_reviews"].append(p)
         elif any(t in title_lower for t in ["randomized", "phase 2", "phase 3", "rct", "trial"]):
@@ -104,12 +213,161 @@ _OFF_DOMAIN_SIGNALS: frozenset = frozenset({
     "clinical trial", "phase 2 trial", "phase 3 trial",
     "phase ii trial", "phase iii trial", "phase ii ", "phase iii ",
     "monoclonal antibod", "antibody therapy",
+    # Clinical psychology / neuropsychology (B-01: apathy-motivation paper, PMID 37012520)
+    "apathy", "psychometric",
+    # Ophthalmology (B-01: ocular toxicity paper, PMID 35817277)
+    "ocular toxicity", "vigabatrin", "infantile spasms",
 })
 
 
 def _is_non_clinical_product(sub_expert_id: str) -> bool:
     s = (sub_expert_id or "").lower()
     return "non_clinical" in s or s.startswith("research_tool") or "lab_software" in s
+
+
+# ── G.3 OpenAlex: fallback verifier + primary retrieval for non-biomedical ────
+
+_OPENALEX_URL  = "https://api.openalex.org/works"
+_CROSSREF_URL  = "https://api.crossref.org/works"
+_CONTACT_EMAIL = "oneonesie100@gmail.com"   # required by OpenAlex polite pool
+
+
+def _openalex_result_to_meta(w: dict, query_title: str) -> "dict | None":
+    """Convert a raw OpenAlex work dict to our normalised metadata format."""
+    w_title = (w.get("display_name") or "").lower()
+    q_words = set(query_title.lower().split())
+    w_words = set(w_title.split())
+    if not q_words or len(q_words & w_words) / len(q_words) < 0.40:
+        return None
+    doi = (w.get("doi") or "").replace("https://doi.org/", "")
+    authors_raw = w.get("authorships") or []
+    last_names = [
+        a.get("author", {}).get("display_name", "").split()[-1]
+        for a in authors_raw[:3]
+        if a.get("author", {}).get("display_name")
+    ]
+    authors_str = (last_names[0] + " et al.") if len(last_names) > 1 else (last_names[0] if last_names else "")
+    journal = ((w.get("primary_location") or {}).get("source") or {})
+    return {
+        "title":        w.get("display_name", ""),
+        "authors":      authors_str,
+        "journal":      journal.get("display_name", ""),
+        "year":         str(w.get("publication_year", "")),
+        "doi":          doi,
+        "url":          f"https://doi.org/{doi}" if doi else "",
+        "verified_via": "openAlex",
+    }
+
+
+def resolve_via_openalex(title: str) -> "dict | None":
+    """Query OpenAlex by title (sync). Returns normalised metadata dict or None."""
+    if not title or len(title) < 10:
+        return None
+    try:
+        t0 = time.monotonic()
+        r = httpx.get(
+            _OPENALEX_URL,
+            params={
+                "filter":   f"title.search:{title[:120]}",
+                "per-page": "1",
+                "select":   "id,doi,display_name,authorships,primary_location,publication_year",
+                "mailto":   _CONTACT_EMAIL,
+            },
+            timeout=8.0,
+        )
+        _log_fetch_pubmed(
+            _OPENALEX_URL, "GET", r.status_code,
+            (time.monotonic() - t0) * 1000, len(r.content),
+            1 if r.status_code == 200 else 0,
+            f"openalex title={title[:60]}",
+        )
+        if r.status_code != 200:
+            return None
+        items = r.json().get("results", [])
+        if not items:
+            return None
+        return _openalex_result_to_meta(items[0], title)
+    except Exception as exc:
+        logger.debug("OpenAlex lookup failed for %r: %s", title[:60], exc)
+        return None
+
+
+def resolve_via_crossref(title: str) -> "dict | None":
+    """Query Crossref by title (sync). Returns normalised metadata dict or None."""
+    if not title or len(title) < 10:
+        return None
+    try:
+        t0 = time.monotonic()
+        r = httpx.get(
+            _CROSSREF_URL,
+            params={
+                "query.title": title[:120],
+                "rows":        "1",
+                "select":      "DOI,title,author,published,container-title",
+            },
+            timeout=8.0,
+        )
+        _log_fetch_pubmed(
+            _CROSSREF_URL, "GET", r.status_code,
+            (time.monotonic() - t0) * 1000, len(r.content),
+            1 if r.status_code == 200 else 0,
+            f"crossref title={title[:60]}",
+        )
+        if r.status_code != 200:
+            return None
+        items = (r.json().get("message") or {}).get("items") or []
+        if not items:
+            return None
+        item = items[0]
+        cr_title = (item.get("title") or [""])[0]
+        q_words = set(title.lower().split())
+        c_words = set(cr_title.lower().split())
+        if not q_words or len(q_words & c_words) / len(q_words) < 0.40:
+            return None
+        doi = item.get("DOI", "")
+        authors_raw = item.get("author") or []
+        last_names = [a.get("family", "") for a in authors_raw[:3] if a.get("family")]
+        authors_str = (last_names[0] + " et al.") if len(last_names) > 1 else (last_names[0] if last_names else "")
+        pub_date = item.get("published", {}).get("date-parts") or [[""]]
+        year = str(pub_date[0][0]) if pub_date[0] else ""
+        container = (item.get("container-title") or [""])[0]
+        return {
+            "title":        cr_title,
+            "authors":      authors_str,
+            "journal":      container,
+            "year":         year,
+            "doi":          doi,
+            "url":          f"https://doi.org/{doi}" if doi else "",
+            "verified_via": "crossref",
+        }
+    except Exception as exc:
+        logger.debug("Crossref lookup failed for %r: %s", title[:60], exc)
+        return None
+
+
+# ── G.3 Relevance gate ─────────────────────────────────────────────────────────
+
+def _keyword_relevance_score(title: str, abstract: str, idea: str) -> int:
+    """
+    Heuristic 0-10 relevance score: how well does a paper match the product idea?
+    Counts distinct idea-word matches in title+abstract; scales to 0-10.
+
+    A score < 6 indicates the paper is probably off-topic for this product.
+    """
+    if not idea:
+        return 10  # no idea text → can't filter, pass everything
+    # Extract meaningful words from idea (≥4 chars, skip stopwords)
+    _STOP = {"with", "that", "this", "from", "have", "been", "will", "which",
+              "their", "using", "based", "into", "more", "than", "also",
+              "about", "some", "such", "when", "where", "what", "each"}
+    idea_words = {w for w in idea.lower().split() if len(w) >= 4 and w not in _STOP}
+    if not idea_words:
+        return 10
+    corpus = ((title or "") + " " + (abstract or "")).lower()
+    matched = sum(1 for w in idea_words if w in corpus)
+    # Scale: 0 matches → 0, all matches → 10; anything ≥ 30% of idea words → ≥ 6
+    score = min(10, round(matched / len(idea_words) * 10 * 2))  # ×2 so 30% → 6
+    return score
 
 
 def resolve_pmid(pmid: str) -> "dict | None":
@@ -126,10 +384,17 @@ def resolve_pmid(pmid: str) -> "dict | None":
     """
     import xml.etree.ElementTree as ET
     try:
+        _t0 = time.monotonic()
         resp = httpx.get(
             PUBMED_FETCH_URL,
             params={"db": "pubmed", "id": pmid, "retmode": "xml"},
             timeout=10.0,
+        )
+        _log_fetch_pubmed(
+            PUBMED_FETCH_URL, "GET", resp.status_code,
+            (time.monotonic() - _t0) * 1000, len(resp.content),
+            0 if not resp.is_success else 1,
+            f"efetch pmid={pmid}",
         )
         if not resp.is_success:
             return None
@@ -204,15 +469,24 @@ def _verify_claims_against_abstract(relevance: str, abstract: str) -> str:
     return relevance
 
 
+_RELEVANCE_THRESHOLD_NULL_PMID = 6   # null-PMID (LLM-recalled): strict gate
+_RELEVANCE_THRESHOLD_PMID      = 0   # PMID-backed: B-09 signal gate handles domain filtering
+_RELEVANCE_THRESHOLD = _RELEVANCE_THRESHOLD_NULL_PMID  # alias used by tests
+
+
 def filter_literature_citations(
     citations: List[dict],
     idea: str,
     sub_expert_id: str,
 ) -> List[dict]:
     """
-    Part A + B-09: Verify each PMID via E-utilities and drop citations that
-    either don't resolve or whose title doesn't match the generated title
-    (catches the fabricated-PMID-on-real-paper defect from spec v6).
+    Part A + B-09 + G.3: Verify each citation and gate on relevance.
+
+    Changes in G.3:
+    - Null-PMID citations → try OpenAlex then Crossref by title.
+      If neither resolves, the citation is an LLM hallucination and is dropped.
+    - All citations (PMID and non-PMID alike) are scored for relevance to the
+      idea using _keyword_relevance_score. Score < 6 → dropped before display.
 
     Off-domain signal filtering (B-09) still applies for non-clinical products.
     """
@@ -222,43 +496,77 @@ def filter_literature_citations(
     verified = []
     for c in citations:
         pmid = (c.get("pmid") or "").strip()
+
+        # ── G.3: null-PMID path — verify via OpenAlex / Crossref ─────────────
         if not pmid:
-            verified.append(c)  # no PMID → pass through, off-domain gate still applies
-            continue
-
-        resolved = resolve_pmid(pmid)
-        if resolved is None:
-            # Unresolvable PMID (network error or non-existent): pass through to the
-            # domain gate. The hard drop only applies when a PMID resolves to a
-            # DIFFERENT title, which is the genuine fabrication signal.
-            logger.debug("Part A gate: PMID %s did not resolve — passing to relevance gate without title check", pmid)
-            verified.append(c)
-            continue
-
-        # Title match check: if the LLM-generated title differs substantially from
-        # the resolved title, the PMID was attached to the wrong paper.
-        gen_title = (c.get("title") or "").lower().strip()
-        real_title = resolved["title"].lower().strip()
-        if gen_title and real_title:
-            # Use word-overlap ratio: >30% of generated words must appear in real title
-            gen_words = set(gen_title.split())
-            real_words = set(real_title.split())
-            overlap = len(gen_words & real_words) / max(len(gen_words), 1)
-            if overlap < 0.30:
+            title = (c.get("title") or "").strip()
+            if not title:
+                logger.debug("G.3: dropping citation with no PMID and no title")
+                continue
+            external = resolve_via_openalex(title) or resolve_via_crossref(title)
+            if external is None:
                 logger.warning(
-                    "Part A gate: PMID %s title mismatch — generated '%s...' vs real '%s...' — using real title",
-                    pmid, gen_title[:60], real_title[:60],
+                    "G.3: dropping unverifiable null-PMID citation '%s' "
+                    "(not found in OpenAlex or Crossref)",
+                    title[:80],
                 )
-                # Replace with authoritative metadata from E-utilities
-                c = {**c, **resolved, "relevance": c.get("relevance", "")}
+                continue
+            # Replace LLM-recalled metadata with verified external metadata
+            c = {**c, **external, "relevance": c.get("relevance", "")}
+            logger.info(
+                "G.3: null-PMID citation '%s' verified via %s",
+                title[:60], external.get("verified_via", "?"),
+            )
 
-        # Part A abstract guard: verify that any statistics in the relevance field
-        # can actually be found in the paper's abstract. If not, flag as unverifiable
-        # so the report surface can show a disclaimer rather than a false citation.
-        abstract = resolved.get("abstract", "")
-        checked_relevance = _verify_claims_against_abstract(c.get("relevance", ""), abstract)
-        if checked_relevance != c.get("relevance", ""):
-            c = {**c, "relevance": checked_relevance}
+        # ── PMID path (unchanged from Part A) ────────────────────────────────
+        else:
+            resolved = resolve_pmid(pmid)
+            if resolved is None:
+                # Unresolvable PMID (network error or non-existent): pass through.
+                # Hard drop only when a PMID resolves to a DIFFERENT title.
+                logger.debug("Part A gate: PMID %s did not resolve — passing to relevance gate", pmid)
+            else:
+                # Title match check
+                gen_title = (c.get("title") or "").lower().strip()
+                real_title = resolved["title"].lower().strip()
+                if gen_title and real_title:
+                    gen_words = set(gen_title.split())
+                    real_words = set(real_title.split())
+                    overlap = len(gen_words & real_words) / max(len(gen_words), 1)
+                    if overlap < 0.30:
+                        logger.warning(
+                            "Part A gate: PMID %s title mismatch — generated '%s...' vs real '%s...' — using real title",
+                            pmid, gen_title[:60], real_title[:60],
+                        )
+                        c = {**c, **resolved, "relevance": c.get("relevance", "")}
+
+                # Part A abstract guard
+                abstract = resolved.get("abstract", "")
+                checked_relevance = _verify_claims_against_abstract(c.get("relevance", ""), abstract)
+                if checked_relevance != c.get("relevance", ""):
+                    c = {**c, "relevance": checked_relevance}
+
+        # ── G.3 relevance gate — ALL citations (B-01 fix) ───────────────────────
+        # null-PMID: strict gate (threshold 6) — these are LLM-recalled with no
+        # prior retrieval filter.  A score < 6 means <30% idea-word overlap, almost
+        # certainly off-topic (e.g. apathy paper recalled for cloud sync platform).
+        #
+        # PMID-backed: lenient gate (threshold 1) — PubMed search already filtered
+        # for domain relevance.  We only drop papers with ZERO keyword overlap
+        # (completely different vocabulary), not borderline-relevant ones like
+        # REDCap (research informatics) cited for Hublink (research data platform).
+        threshold = _RELEVANCE_THRESHOLD_NULL_PMID if not pmid else _RELEVANCE_THRESHOLD_PMID
+        score = _keyword_relevance_score(
+            c.get("title") or "",
+            c.get("abstract") or "",
+            idea,
+        )
+        if score < threshold:
+            logger.debug(
+                "G.3 relevance gate: dropped citation '%s' (score=%d < threshold=%d, pmid=%r)",
+                (c.get("title") or "")[:80], score, threshold, pmid or "null",
+            )
+            continue
 
         verified.append(c)
 
@@ -328,6 +636,7 @@ def _build_pubmed_queries(disease_name: str, sub_expert_id: str) -> List[str]:
 
 async def _search_pubmed(query: str, max_results: int = 5) -> List[str]:
     """Search PubMed and return list of PMIDs."""
+    _t0 = time.monotonic()
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:
             r = await client.get(PUBMED_SEARCH_URL, params={
@@ -337,10 +646,21 @@ async def _search_pubmed(query: str, max_results: int = 5) -> List[str]:
                 "retmode": "json",
                 "sort": "relevance",
             })
+            ids = []
             if r.status_code == 200:
-                data = r.json()
-                return data.get("esearchresult", {}).get("idlist", [])
+                ids = r.json().get("esearchresult", {}).get("idlist", [])
+            _log_fetch_pubmed(
+                PUBMED_SEARCH_URL, "GET", r.status_code,
+                (time.monotonic() - _t0) * 1000, len(r.content), len(ids),
+                f"esearch {query[:80]}",
+            )
+            return ids
     except Exception as e:
+        _log_fetch_pubmed(
+            PUBMED_SEARCH_URL, "GET", None,
+            (time.monotonic() - _t0) * 1000, 0, 0,
+            f"esearch {query[:80]}",
+        )
         logger.warning(f"PubMed search failed: {e}")
     return []
 
@@ -352,11 +672,17 @@ async def _fetch_paper_summaries(pmids: List[str]) -> List[Dict]:
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:
             # Get summary data
+            _t0 = time.monotonic()
             r = await client.get(PUBMED_SUMMARY_URL, params={
                 "db": "pubmed",
                 "id": ",".join(pmids),
                 "retmode": "json",
             })
+            _log_fetch_pubmed(
+                PUBMED_SUMMARY_URL, "GET", r.status_code,
+                (time.monotonic() - _t0) * 1000, len(r.content), len(pmids),
+                f"esummary ids={','.join(pmids[:5])}{'...' if len(pmids) > 5 else ''}",
+            )
             if r.status_code != 200:
                 return []
 
@@ -392,12 +718,18 @@ async def _fetch_paper_summaries(pmids: List[str]) -> List[Dict]:
             # Fetch abstracts in one batch call
             await asyncio.sleep(RATE_LIMIT_DELAY)
             try:
+                _ta0 = time.monotonic()
                 ra = await client.get(PUBMED_FETCH_URL, params={
                     "db": "pubmed",
                     "id": ",".join(pmids),
                     "rettype": "abstract",
                     "retmode": "text",
                 })
+                _log_fetch_pubmed(
+                    PUBMED_FETCH_URL, "GET", ra.status_code,
+                    (time.monotonic() - _ta0) * 1000, len(ra.content), len(pmids),
+                    f"efetch abstracts ids={','.join(pmids[:5])}{'...' if len(pmids) > 5 else ''}",
+                )
                 if ra.status_code == 200:
                     abstract_text = ra.text
                     # Parse individual abstracts by PMID

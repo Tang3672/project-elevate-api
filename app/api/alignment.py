@@ -21,6 +21,49 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+# ── G.2 Cross-run contamination guard ────────────────────────────────────────
+
+import re as _re
+
+def _camel_split(word: str) -> list[str]:
+    """Split a CamelCase or snake_case word into lowercase components."""
+    parts = _re.sub(r"([A-Z])", r" \1", word).split()
+    return [p.lower() for p in parts if p]
+
+
+def _sanitize_product_name(product_name: str | None, idea: str) -> str | None:
+    """
+    Guard against cross-run state leakage where the frontend sends a stale
+    product_name from a prior generation alongside a different idea.
+
+    Logic: if product_name is provided and NONE of its significant sub-words appear
+    in the idea text, it is foreign to this request and must be cleared.
+    The alignment service then derives product_name from the idea text instead.
+
+    Handles CamelCase names (NeuroSync → ['neuro', 'sync']) and space-separated words.
+    Sub-words under 4 characters are skipped (articles, prepositions, etc.).
+    """
+    if not product_name:
+        return product_name
+    idea_lower = (idea or "").lower()
+    # Extract all significant sub-words: split on spaces, then camel-case each token
+    all_sub_words: list[str] = []
+    for token in product_name.split():
+        all_sub_words.extend(_camel_split(token))
+    sig_words = [w for w in all_sub_words if len(w) >= 4]
+    if not sig_words:
+        return product_name  # very short name — can't validate; pass through
+    matched = sum(1 for w in sig_words if w in idea_lower)
+    if matched == 0:
+        logger.warning(
+            "G.2: product_name %r has no word overlap with idea — "
+            "clearing to prevent cross-run contamination (idea[:80]=%r)",
+            product_name, idea[:80],
+        )
+        return None
+    return product_name
+
+
 class AlignmentRequest(BaseModel):
     idea: str = Field(..., min_length=30, max_length=2000)
 
@@ -138,10 +181,12 @@ async def get_pi_report(payload: PIReportRequest, current_user = Depends(get_cur
     timeouts on the ~2-3 minute generation."""
     await _enforce_quota(current_user)
     try:
+        idea = _idea_from_payload(payload)
         report = await generate_pi_report(
-            _idea_from_payload(payload), payload.product_type, payload.disease_domain,
+            idea, payload.product_type, payload.disease_domain,
             payload.tier1_category, funding_pathway=payload.funding_pathway,
-            product_name=payload.product_name, institution=payload.institution,
+            product_name=_sanitize_product_name(payload.product_name, idea),
+            institution=payload.institution,
             domain=payload.domain, clarify_answers=payload.clarify_answers,
         )
         await _increment_usage(current_user)
@@ -172,7 +217,8 @@ async def get_pi_report_async(payload: PIReportRequest, current_user = Depends(g
                 idea, payload.product_type, payload.disease_domain,
                 payload.tier1_category, funding_pathway=payload.funding_pathway,
                 user_id=(_user or {}).get("id"), skip_verification=True,
-                product_name=payload.product_name, institution=payload.institution,
+                product_name=_sanitize_product_name(payload.product_name, idea),
+                institution=payload.institution,
                 domain=payload.domain, clarify_answers=payload.clarify_answers,
             )
             rd = report.model_dump(mode="json")
@@ -555,14 +601,16 @@ async def save_market_sizing_override(
     if not report_id:
         raise HTTPException(status_code=400, detail="report_id required")
     user_id = (current_user or {}).get("id")
+    step_overrides = body.get("step_overrides", {})
+    rationale      = body.get("rationale", "")
     row_id = await _repo.save_override(
         report_id=str(report_id),
         segment_id=0,
         user_id=user_id,
         net_price_usd=0,
         overrides={
-            "step_overrides": body.get("step_overrides", {}),
-            "rationale": body.get("rationale", ""),
+            "step_overrides": step_overrides,
+            "rationale": rationale,
         },
         added_gates=[],
         removed_gates=[],
@@ -570,9 +618,54 @@ async def save_market_sizing_override(
         tam_usd=body.get("tam_usd"),
         sam_usd=body.get("sam_usd"),
         som_usd=body.get("som_usd"),
-        label=(body.get("rationale") or "")[:120] or None,
+        label=(rationale or "")[:120] or None,
     )
+
+    # v3 Part F: capture corrections in the aggregated override ledger (training data).
+    # Best-effort: any DB failure here must not affect the save response.
+    try:
+        from app.db import override_ledger_repository as _ledger
+        await _ledger.append_corrections(
+            step_overrides=step_overrides,
+            rationale=rationale,
+            report_id=str(report_id),
+        )
+    except Exception as _le:
+        logger.warning("override_ledger capture failed (non-fatal): %s", _le)
+
     return {"ok": True, "override_id": row_id}
+
+
+@router.get("/override-ledger/stats")
+async def get_override_ledger_stats(
+    step_label: str = "",
+    min_corrections: int = 1,
+    limit: int = 50,
+    current_user=Depends(get_current_user),
+):
+    """
+    v3 Part F: return aggregated expert correction statistics from the override ledger.
+
+    Each row shows how many times a given model step has been corrected by users,
+    and the distribution of correction ratios (new_value / orig_value).
+
+    A median_ratio of 0.05 means experts consistently correct this step to 5% of
+    the model's estimate — a reliable signal that the prior is systematically wrong.
+
+    Requires authentication: ledger data is internal to the operator.
+    """
+    from app.db import override_ledger_repository as _ledger
+    stats = await _ledger.get_stats(
+        step_label=step_label or None,
+        min_corrections=max(1, min_corrections),
+        limit=min(limit, 200),
+    )
+    total = await _ledger.count_total_corrections()
+    return {
+        "total_corrections": total,
+        "stats": stats,
+        "min_corrections_threshold": min_corrections,
+    }
 
 
 @router.get("/market-sizing-override/{report_id}")
@@ -609,9 +702,39 @@ async def get_opportunities(
 ):
     """
     Return ranked biomedical opportunities.
-    Reads from disease_scored table (full universe) when available,
-    falls back to live v2 engine for the curated 309.
+    G.8: serves from pre-built static JSON artifact when available (fast path, ~50ms).
+    Falls back to live v2 engine for the curated 309 + disease_scored DB.
     """
+    # G.8: fast path — static artifact built by scripts/build_discovery_index.py
+    import pathlib as _pathlib, json as _json, time as _time
+    _STATIC_INDEX = _pathlib.Path(__file__).parent.parent / "data" / "discovery-index.json"
+    _STATIC_MAX_AGE_S = 25 * 60 * 60  # 25 h — fresh if built within last day
+    if not search and _STATIC_INDEX.exists():
+        try:
+            _stat_age = _time.time() - _STATIC_INDEX.stat().st_mtime
+            if _stat_age < _STATIC_MAX_AGE_S:
+                _payload = _json.loads(_STATIC_INDEX.read_text(encoding="utf-8"))
+                _opps = _payload.get("opportunities", [])
+                if _opps:
+                    _page = _opps[offset : offset + top_n]
+                    for i, o in enumerate(_page, offset + 1):
+                        o["rank"] = i
+                    logger.info(
+                        "G.8: served discovery from static artifact (age=%.0fs, %d opps)",
+                        _stat_age, len(_opps),
+                    )
+                    return {
+                        "opportunities":  _page,
+                        "universe_size":  _payload.get("universe_size", len(_opps)),
+                        "total_scored":   len(_opps),
+                        "built_at":       _payload.get("built_at"),
+                        "algorithm":      _payload.get("algorithm", "Static index"),
+                        "generated_at":   _payload.get("generated_at"),
+                        "_source":        "static",
+                    }
+        except Exception as _e:
+            logger.warning("G.8: static index read failed (falling back to live): %s", _e)
+
     # Strategy: Live v2 engine for curated 309 (expert TAM, EXCEPTIONAL tiers)
     # + disease_scored DB for extended MONDO universe (search only when >1000 entries)
     curated_opps = []

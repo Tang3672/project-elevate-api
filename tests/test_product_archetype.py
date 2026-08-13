@@ -492,12 +492,13 @@ class TestDerivationRouting:
             product_type="other",
             sub_expert_id="research_tool_non_clinical",
         )
-        # TAM should be in $20M-$80M range (3k-8k labs × $6k-$10k/yr), not the
-        # billion-dollar range that pharma or hospital-count models produce
+        # TAM should be in $20M-$80M pre-calibration range (3k-8k labs × $6k-$10k/yr).
+        # G.14 EDGAR calibration divides by ~2.4, so post-calibration floor is ~$3M.
+        # The critical guard is the upper bound: must never be billion-dollar.
         assert d.us_tam_usd < 500_000_000, \
             f"Research tool TAM should be <$500M (lab-based, not hospital-based): got {d.tam_fmt}"
-        assert d.us_tam_usd >= 10_000_000, \
-            f"Research tool TAM should be >$10M: got {d.tam_fmt}"
+        assert d.us_tam_usd >= 3_000_000, \
+            f"Research tool TAM should be >$3M (calibration-adjusted): got {d.tam_fmt}"
 
     def test_research_infra_saas_also_routes_to_buyer_model(self):
         from app.services.market_sizing_derivation_service import generate_market_sizing_derivation

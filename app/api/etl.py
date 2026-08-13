@@ -196,6 +196,62 @@ async def cache_status():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/signals")
+async def signal_ingestion_status():
+    """
+    Return demand_signals row counts and last-fetch timestamps per source.
+    Useful for monitoring whether the ingestion scheduler is running.
+    """
+    from app.db.demand_repository import get_signal_counts_by_source
+    try:
+        rows = await get_signal_counts_by_source()
+        total = sum(r["count"] for r in rows)
+        last_fetched = max(
+            (r["last_fetched"] for r in rows if r.get("last_fetched")),
+            default=None,
+        )
+        return {
+            "total_signals": total,
+            "last_ingested_at": last_fetched.isoformat() if last_fetched else None,
+            "by_source": [
+                {
+                    "source": r["source"],
+                    "signal_type": r["signal_type"],
+                    "count": r["count"],
+                    "last_fetched": r["last_fetched"].isoformat() if r.get("last_fetched") else None,
+                }
+                for r in rows
+            ],
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/signals/run")
+async def trigger_signal_pipeline(
+    background_tasks: BackgroundTasks,
+    connectors: str = None,
+):
+    """
+    Manually trigger the demand-signal ingestion pipeline.
+    ?connectors=cdc_wastewater,clinical_trials  — runs only those connectors.
+    Omit to run all connectors.
+    """
+    connector_list = [c.strip() for c in connectors.split(",")] if connectors else None
+
+    async def _run():
+        from app.ingestion.pipeline import run_pipeline
+        result = await run_pipeline(connector_names=connector_list)
+        logger.info("Manual signal pipeline: %s", result.summary())
+
+    background_tasks.add_task(_run)
+    return {
+        "status": "started",
+        "connectors": connector_list or "all",
+        "note": "Check /etl/signals for updated counts when complete.",
+    }
+
+
 @router.get("/licenses")
 async def license_registry():
     """Return the source license register."""
