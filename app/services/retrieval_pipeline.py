@@ -504,6 +504,8 @@ class RetrievalResult:
     sources_called:     list[str]
     concepts_filled:    set[str]
     context_blocks:     dict[str, str]       # chapter → formatted context string
+    # G.1 retrieval audit: all outbound HTTP calls made during this pipeline run
+    fetch_logs:         list = field(default_factory=list)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -825,35 +827,90 @@ async def _fetch_source(
 
         elif source_id == "clinicaltrials_gov":
             import requests as _req
-            r = _req.get(
-                "https://clinicaltrials.gov/api/v2/studies",
-                params={"query.cond": disease_name, "filter.overallStatus": "RECRUITING,ACTIVE_NOT_RECRUITING",
-                        "fields": "NCTId,Phase,BriefTitle", "pageSize": 3},
-                timeout=4,
-            )
+            from app.services.knowledge_retriever import _log_fetch, FetchLog
+            _t0_ct = time.monotonic()
+            _ct_url = "https://clinicaltrials.gov/api/v2/studies"
+            _ct_params = {"query.cond": disease_name, "filter.overallStatus": "RECRUITING,ACTIVE_NOT_RECRUITING",
+                          "fields": "NCTId,Phase,BriefTitle", "pageSize": 3}
+            r = _req.get(_ct_url, params=_ct_params, timeout=4)
+            _studies = r.json().get("studies", []) if r.ok else []
+            _log_fetch(FetchLog(
+                service="clinicaltrials_gov",
+                url=_ct_url,
+                method="GET",
+                status=r.status_code,
+                latency_ms=(time.monotonic() - _t0_ct) * 1000,
+                response_bytes=len(r.content) if r.ok else 0,
+                parsed_records=len(_studies),
+                query_summary=f"clinicaltrials_gov cond={disease_name[:50]!r}",
+            ))
             if r.ok:
-                studies = r.json().get("studies", [])
                 facts.append(RetrievedFact(
                     concept_type="competitor_trial_count", source_id=source_id,
-                    value={"count": len(studies), "studies": studies},
-                    quality_score=compute_quality(source_id, "competitor_trial_count", studies, disease_name, 2024),
+                    value={"count": len(_studies), "studies": _studies},
+                    quality_score=compute_quality(source_id, "competitor_trial_count", _studies, disease_name, 2024),
                     tier=2,
                 ))
 
         elif source_id == "nih_reporter":
             import requests as _req
+            from app.services.knowledge_retriever import _log_fetch, FetchLog
+            _RT_EXPERTS = frozenset({"research_tool_non_clinical", "research_infrastructure_saas",
+                                     "research_tool_agronomy"})
+            if subcategory_id in _RT_EXPERTS:
+                # Research tools: search by product text, not disease_conditions.
+                # "disease_conditions" on a soil sensor returns NIH clinical grants —
+                # what we need is grants that funded comparable instrumentation work.
+                _search_text = idea[:80] if idea else (disease_name[:50] or "research instrumentation")
+                _nih_body = {
+                    "criteria": {
+                        "advanced_text_search": {
+                            "operator": "and",
+                            "search_field": "all",
+                            "search_text": _search_text,
+                        },
+                        "fiscal_years": [2023, 2024, 2025],
+                        "is_active": True,
+                    },
+                    "include_fields": ["ProjectNum", "ProjectTitle", "AwardAmount",
+                                       "Organization", "AbstractText"],
+                    "limit": 5,
+                }
+                _concept = "funding_opportunities"
+            else:
+                _nih_body = {
+                    "criteria": {
+                        "disease_conditions": [disease_name[:50]],
+                        "fiscal_years": [2024, 2025],
+                    },
+                    "limit": 3,
+                }
+                _concept = "funding_opportunities"
+            _t0_nih = time.monotonic()
             r = _req.post(
                 "https://api.reporter.nih.gov/v2/projects/search",
-                json={"criteria": {"disease_conditions": [disease_name[:50]],
-                                    "fiscal_years": [2024, 2025]}, "limit": 3},
+                json=_nih_body,
                 timeout=6,
             )
+            _log_fetch(FetchLog(
+                service="nih_reporter",
+                url="https://api.reporter.nih.gov/v2/projects/search",
+                method="POST",
+                status=r.status_code if hasattr(r, "status_code") else None,
+                latency_ms=(time.monotonic() - _t0_nih) * 1000,
+                response_bytes=len(r.content) if r.ok else 0,
+                parsed_records=len(r.json().get("results", [])) if r.ok else 0,
+                query_summary=(f"nih_reporter research_tool text={_search_text[:60]!r}"
+                               if subcategory_id in _RT_EXPERTS
+                               else f"nih_reporter disease={disease_name[:40]!r}"),
+            ))
             if r.ok:
                 projects = r.json().get("results", [])
-                facts.append(RetrievedFact(
-                    concept_type="funding_opportunities", source_id=source_id,
-                    value=projects[:3], quality_score=0.90, tier=2,
-                ))
+                if projects:
+                    facts.append(RetrievedFact(
+                        concept_type=_concept, source_id=source_id,
+                        value=projects[:5], quality_score=0.90, tier=2,
+                    ))
 
         elif source_id == "grants_gov":
             from app.ingestion.connectors.grants_gov import search_funding_opportunities
@@ -1175,6 +1232,10 @@ async def run_retrieval_pipeline(
     chapters_needed = chapters_needed or list(CHAPTER_CONCEPTS.keys())
     t_start = time.monotonic()
 
+    # G.1 retrieval audit: activate per-generation fetch log collection
+    from app.services.knowledge_retriever import start_fetch_log
+    start_fetch_log()
+
     # Determine relevant sources for this subcategory
     relevant_sources = SUBCATEGORY_SOURCE_RELEVANCE.get(
         subcategory_id,
@@ -1273,6 +1334,7 @@ async def run_retrieval_pipeline(
 def _build_result(
     all_facts, fused, coverage, t_start, sources_called, tiers_reached, context_blocks
 ) -> RetrievalResult:
+    from app.services.knowledge_retriever import get_fetch_log
     total_ms = (time.monotonic() - t_start) * 1000
     cached_count = sum(1 for f in all_facts if f.cached)
     cache_hit_rate = cached_count / max(1, len(all_facts))
@@ -1287,4 +1349,5 @@ def _build_result(
         sources_called=sources_called,
         concepts_filled=concepts_filled,
         context_blocks=context_blocks,
+        fetch_logs=list(get_fetch_log()),
     )

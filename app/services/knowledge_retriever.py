@@ -19,6 +19,7 @@ ready to inject into the Researcher Claude's prompt.
 import asyncio
 import logging
 import time
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional
 import httpx
@@ -31,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class FetchLog:
-    """One outbound HTTP call record, emitted at DEBUG level per generation."""
+    """One outbound HTTP call record, captured per generation."""
     service:        str          # "knowledge_retriever" | "pubmed" | "nih_reporter" | "nsf_awards"
     url:            str
     method:         str          # "GET" | "POST"
@@ -42,13 +43,39 @@ class FetchLog:
     query_summary:  str          # ≤120-char human-readable summary of what was queried
 
 
+# ContextVar so each async generation has its own isolated fetch log.
+# None means "not collecting" (default); start_fetch_log() activates it.
+_FETCH_LOG_CTX: ContextVar[Optional[List[FetchLog]]] = ContextVar(
+    "_FETCH_LOG_CTX", default=None
+)
+
+
+def start_fetch_log() -> List[FetchLog]:
+    """
+    Activate per-generation fetch log collection for the current async context.
+    Returns the list; all _log_fetch() calls will append to it until reset.
+    Call once at the top of a report generation coroutine.
+    """
+    log: List[FetchLog] = []
+    _FETCH_LOG_CTX.set(log)
+    return log
+
+
+def get_fetch_log() -> List[FetchLog]:
+    """Return the current generation's fetch log (empty list if not collecting)."""
+    return _FETCH_LOG_CTX.get() or []
+
+
 def _log_fetch(log: FetchLog) -> None:
-    """Emit the fetch record to the audit logger."""
+    """Emit the fetch record to the audit logger AND append to the ContextVar collector."""
     logger.debug(
         "FETCH_AUDIT service=%s method=%s status=%s latency_ms=%.0f bytes=%d records=%d url=%s query=%r",
         log.service, log.method, log.status, log.latency_ms,
         log.response_bytes, log.parsed_records, log.url, log.query_summary,
     )
+    collector = _FETCH_LOG_CTX.get()
+    if collector is not None:
+        collector.append(log)
 
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 SEARCH_MODEL      = "claude-sonnet-4-6"
@@ -330,6 +357,32 @@ SEARCH_TEMPLATES: Dict[str, List[str]] = {
         "{disease} drug delivery bioavailability improvement 2024",
         "{disease} delivery platform manufacturing scale challenges 2024",
         "FDA drug delivery platform combination product guidance {disease} 2024",
+    ],
+
+    # ── Research Tools / Non-Clinical Lab Infrastructure ─────────────────────
+    # Queries target the PI buyer — NIH/NSF/USDA funded labs, not hospitals.
+    # {product} is the product description (first 50 chars); {disease} may be empty.
+    "research_tool_non_clinical": [
+        "NIH SBIR STTR {product} academic research tool funding 2024 site:sbir.nih.gov",
+        "academic lab instrumentation adoption rate survey neuroscience research 2024",
+        "NIH RePORTER {product} research instrument grant funding site:reporter.nih.gov",
+        "academic research software tool pricing subscription model PI lab 2024",
+        "wearable data logger sensor academic research lab adoption barriers 2024",
+    ],
+    "research_infrastructure_saas": [
+        "NIH SBIR STTR {product} academic research software platform 2024 site:sbir.nih.gov",
+        "university research data management SaaS platform adoption 2024",
+        "NIH RePORTER research informatics data platform grant funding 2024",
+        "academic PI lab software subscription pricing willingness to pay 2024",
+        "research computing infrastructure FAIR data platform NSF 2024 site:nsf.gov",
+    ],
+    # ── Agronomy / USDA-funded research tools ────────────────────────────────
+    "research_tool_agronomy": [
+        "USDA NIFA SBIR {product} precision agriculture sensor 2024 site:nifa.usda.gov",
+        "soil moisture sensor adoption rate agricultural research 2024",
+        "USDA NIFA research instrumentation grant funding award 2024 site:nifa.usda.gov",
+        "precision agriculture IoT sensor market adoption land-grant university 2024",
+        "USDA NIFA SBIR STTR agronomy sensor data acquisition 2024",
     ],
 }
 
