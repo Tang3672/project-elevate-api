@@ -152,11 +152,29 @@ app.include_router(tracker_router,   prefix="/api/v1", tags=["tracker"])
 
 @app.get("/health")
 async def health_check():
+    signal_stats: dict = {}
+    try:
+        from app.db.demand_repository import get_signal_counts_by_source
+        rows = await get_signal_counts_by_source()
+        total = sum(r["count"] for r in rows)
+        last_fetched = max(
+            (r["last_fetched"] for r in rows if r.get("last_fetched")),
+            default=None,
+        )
+        signal_stats = {
+            "total_signals": total,
+            "last_ingested_at": last_fetched.isoformat() if last_fetched else None,
+            "sources": {r["source"]: r["count"] for r in rows},
+        }
+    except Exception:
+        signal_stats = {"total_signals": None, "last_ingested_at": None}
+
     return {
         "status": "ok",
         "service": "medlevate",
         "version": "0.2.0",
         "scheduler_enabled": settings.ENABLE_SCHEDULER,
+        "signals": signal_stats,
     }
 
 
