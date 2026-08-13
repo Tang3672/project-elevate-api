@@ -42,8 +42,10 @@ class TestChapter8Gate:
 
     def test_chapter_8_uses_chapter_header(self):
         src = _app()
-        assert "chapterHeader('8'" in src, (
-            "Chapter 8 must use chapterHeader() so numbering is consistent"
+        # B-07: hardcoded '8' replaced with ++_sec counter; check the actual pattern
+        assert "chapterHeader(++_sec, 'Strategic Intelligence'" in src, (
+            "Chapter 8 must use chapterHeader(++_sec, ...) so B-07 sequential "
+            "numbering applies after suppressed sections"
         )
 
 
