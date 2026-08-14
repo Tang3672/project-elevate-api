@@ -493,15 +493,35 @@ def filter_literature_citations(
     if not citations:
         return citations
 
+    # Sentinel title prefixes that some retrieval paths emit as "no results" entries.
+    # These are plumbing artifacts, not papers — drop them unconditionally.
+    _SENTINEL_PREFIXES = (
+        "no pubmed", "no publications", "not indexed", "no results",
+        "no papers found", "not available", "no literature",
+    )
+
     verified = []
     for c in citations:
         pmid = (c.get("pmid") or "").strip()
+
+        # D-02: PMC IDs (PMC\d+) are NOT PubMed IDs. Also drop sentinel non-numeric
+        # values like "N/A", "NA", "None". Real PMIDs are purely numeric.
+        # Non-numeric "PMIDs" are treated as null-PMID → stricter gate applies.
+        if pmid and (pmid.upper().startswith("PMC") or not pmid.lstrip("-").isdigit()):
+            logger.debug(
+                "D-02: non-numeric or PMC-namespace ID '%s' treated as null-PMID", pmid
+            )
+            pmid = ""
 
         # ── G.3: null-PMID path — verify via OpenAlex / Crossref ─────────────
         if not pmid:
             title = (c.get("title") or "").strip()
             if not title:
                 logger.debug("G.3: dropping citation with no PMID and no title")
+                continue
+            # Drop sentinel "no results" titles before attempting any external lookup.
+            if title.lower().startswith(_SENTINEL_PREFIXES) or title.lower() in ("n/a", "na", "none"):
+                logger.debug("D-02: dropping sentinel no-result entry '%s'", title[:60])
                 continue
             external = resolve_via_openalex(title) or resolve_via_crossref(title)
             if external is None:

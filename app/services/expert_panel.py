@@ -18,12 +18,39 @@ Panels run in parallel inside the existing asyncio.gather — zero latency overh
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from typing import Optional, List
 
 import httpx
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_usd_range(s: str) -> str:
+    """Normalize LLM-generated USD range strings.
+
+    Converts sub-$1M amounts expressed as decimal millions ($0.05M) to thousands
+    ($50K). This fixes the recurring fmt_usd issue where Haiku emits "$0.05M–$0.15M"
+    for a $50K–$150K range.
+
+    Examples:
+        "$0.05M–$0.15M" → "$50K–$150K"
+        "$0.5M–$2M"     → "$500K–$2M"   (0.5M = 500K; only sub-1 affected)
+        "$5M–$30M"      → "$5M–$30M"    (unchanged)
+        "$50K–$150K"    → "$50K–$150K"  (unchanged)
+    """
+    if not s:
+        return s
+
+    def _replace(m: re.Match) -> str:
+        val = float(m.group(1))
+        if val < 1.0:
+            k = int(round(val * 1000))
+            return f"${k}K"
+        return m.group(0)
+
+    return re.sub(r"\$(\d+(?:\.\d+)?)M", _replace, s)
 
 HAIKU_MODEL = "claude-haiku-4-5-20251001"
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
@@ -442,7 +469,7 @@ async def _run_commercial_panel(
         '  "moat_basis": "<what specifically creates or undermines the moat in one sentence>",\n'
         '  "yrs_to_peak_revenue": <integer, years post-launch to peak annual revenue>,\n'
         '  "reimbursement_mechanism": "<primary code/pathway, e.g., J-code, DRG+NTAP, CPT, self-pay>",\n'
-        '  "licensing_upfront_range": "<$XM-$YM upfront based on deal comps for this stage>",\n'
+        '  "licensing_upfront_range": "<use K for amounts under $1M, e.g. $50K-$150K not $0.05M-$0.15M; for larger deals use $XM-$YM>",\n'
         '  "licensing_royalty_range": "<X%-Y% royalty on net sales (academic) or X%-Y% (corporate)>"\n'
         "}"
     )
@@ -463,7 +490,7 @@ async def _run_commercial_panel(
             moat_basis                 = str(data.get("moat_basis", "")),
             yrs_to_peak_revenue        = int(data.get("yrs_to_peak_revenue", 5)),
             reimbursement_mechanism    = str(data.get("reimbursement_mechanism", "")),
-            licensing_upfront_range    = str(data.get("licensing_upfront_range", "")),
+            licensing_upfront_range    = _normalize_usd_range(str(data.get("licensing_upfront_range", ""))),
             licensing_royalty_range    = str(data.get("licensing_royalty_range", "")),
         )
     except Exception as e:

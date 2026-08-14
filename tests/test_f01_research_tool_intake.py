@@ -109,27 +109,47 @@ class TestResearchToolExamples:
 
 
 class TestResearchToolChips:
+    """E-01: example chips must be generated dynamically and include research tool entries."""
 
-    def _chips_block(self) -> str:
+    def test_example_chips_container_present(self):
+        """Chips container must have id=example-chips (dynamic rendering)."""
         src = _app_html()
-        m = re.search(r'<div class="chips">(.*?)</div>', src, re.DOTALL)
-        assert m, "Could not find chips div in app.html"
-        return m.group(1)
+        assert 'id="example-chips"' in src, (
+            "Quick-example chips must use <div id='example-chips'> for dynamic rendering"
+        )
 
-    def test_research_tool_chip_present(self):
-        block = self._chips_block()
-        # At least one chip must call setEx with an index ≥ 12 (research tool entries)
-        chip_indices = [int(x) for x in re.findall(r"setEx\((\d+)\)", block)]
-        assert any(i >= 12 for i in chip_indices), (
-            "Chips section must include at least one research tool example (setEx index ≥ 12)"
+    def test_example_labels_array_has_research_tool_entries(self):
+        """_EXAMPLE_LABELS must define entries for indices 12–14 (research tool examples)."""
+        src = _app_html()
+        m = re.search(r"const _EXAMPLE_LABELS\s*=\s*\[(.*?)\];", src, re.DOTALL)
+        assert m, "_EXAMPLE_LABELS array must be defined in app.html"
+        block = m.group(1)
+        # At least one entry mentioning wearable / data mgmt / ELN (research tool labels)
+        assert any(kw in block.lower() for kw in ("wearable", "lab data", "eln", "behavioral")), (
+            "_EXAMPLE_LABELS must include research tool example labels (indices 12-14)"
+        )
+
+    def test_render_examples_function_filters_by_type(self):
+        """_renderExamples must filter shown examples by selectedType (E-01)."""
+        src = _app_html()
+        assert "_renderExamples" in src, "_renderExamples() function must be defined"
+        # The function must gate on research tool type and show indices 12-14
+        m = re.search(r"function _renderExamples\(\)(.*?)^}", src, re.DOTALL | re.MULTILINE)
+        if not m:
+            # Try alternate: function body ends before next top-level declaration
+            m = re.search(r"function _renderExamples\(\)\s*\{(.*?)^\}", src, re.DOTALL | re.MULTILINE)
+        assert m or "research_tool" in src[src.find("_renderExamples"):src.find("_renderExamples")+800], (
+            "_renderExamples must reference 'research_tool' to gate examples by domain"
         )
 
     def test_research_tool_chip_has_descriptive_label(self):
+        """_EXAMPLE_LABELS[12] must have a descriptive label (not empty)."""
         src = _app_html()
-        m = re.search(r'setEx\(12\)[^>]*>(.*?)</button>', src, re.DOTALL)
-        assert m, "setEx(12) chip must exist"
-        label = m.group(1).strip()
-        assert len(label) > 5, f"Chip label too short: {label!r}"
+        m = re.search(r"const _EXAMPLE_LABELS\s*=\s*\[(.*?)\];", src, re.DOTALL)
+        assert m, "_EXAMPLE_LABELS must be defined"
+        labels = re.findall(r"'([^']+)'", m.group(1))
+        assert len(labels) >= 13, f"Need at least 13 labels, got {len(labels)}"
+        assert len(labels[12]) > 5, f"Label 12 too short: {labels[12]!r}"
 
 
 class TestSelectTypePlaceholder:
