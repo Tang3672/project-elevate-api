@@ -2689,21 +2689,38 @@ async def parse_assumption(
     return result
 
 
+@router.get("/reports/{report_id}/assumptions")
+async def list_assumptions(
+    report_id: str,
+    current_user=Depends(get_current_user),
+):
+    """Return persisted NL assumption ops for a report (used on page reload)."""
+    import app.db.market_model_repository as _mmr
+    try:
+        await _mmr.init_nl_assumptions_table()
+        return await _mmr.list_nl_assumptions(report_id)
+    except Exception as exc:
+        logger.warning("list_assumptions non-fatal: %s", exc)
+        return []
+
+
 @router.post("/reports/{report_id}/assumptions/apply")
 async def apply_assumption(
     report_id: str,
     body: _ApplyBody,
     current_user=Depends(get_current_user),
 ):
-    """Persist applied assumption ops for a report (best-effort stub).
-
-    The frontend applies changes client-side immediately. Full persistence
-    (reload survivability) requires wiring to the report store — tracked
-    as a follow-on task. For now this endpoint accepts the call and returns
-    ok so the frontend's fire-and-forget POST does not error.
-    """
-    logger.info("assumptions/apply: report=%s ops=%d (persistence not yet wired)",
-                report_id, len(body.ops))
+    """Persist applied assumption ops so they survive page reload."""
+    import app.db.market_model_repository as _mmr
+    await _mmr.init_nl_assumptions_table()
+    for op in (body.ops or []):
+        op_dict = op if isinstance(op, dict) else op.model_dump()
+        if not op_dict.get("id"):
+            continue
+        try:
+            await _mmr.save_nl_assumption(report_id, op_dict)
+        except Exception as exc:
+            logger.warning("save_nl_assumption non-fatal: %s", exc)
     return {"ok": True}
 
 
@@ -2713,11 +2730,11 @@ async def delete_assumption(
     assumption_id: str,
     current_user=Depends(get_current_user),
 ):
-    """Remove a persisted assumption op (best-effort stub).
-
-    Acceptance here keeps the frontend ledger remove flow clean.
-    Full persistence is tracked as a follow-on task.
-    """
-    logger.info("assumptions/delete: report=%s id=%s (persistence not yet wired)",
-                report_id, assumption_id)
+    """Remove one persisted assumption op from the ledger."""
+    import app.db.market_model_repository as _mmr
+    try:
+        await _mmr.init_nl_assumptions_table()
+        await _mmr.delete_nl_assumption(report_id, assumption_id)
+    except Exception as exc:
+        logger.warning("delete_nl_assumption non-fatal: %s", exc)
     return {"ok": True}
