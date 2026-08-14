@@ -365,3 +365,208 @@ class TestSourceUrlHygiene:
         )
         assert log.service != ""
         assert "clinicaltrials.gov/api" in log.url
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# D-01 / D-03: cross-domain contamination gate
+# ══════════════════════════════════════════════════════════════════════════════
+
+_CLINICAL_FORBIDDEN: frozenset[str] = frozenset({
+    "clinicaltrials_gov", "openfda", "nci_seer", "seer_preloaded",
+    "orphanet", "clinvar", "cms_part_d", "cms_part_b_asp",
+    "nice_hta", "preloaded_icer", "who_gho", "opentargets",
+    "cms_open_payments", "cms_prescriber_part_d",
+})
+
+_NON_CLINICAL_ARCHETYPES = (
+    "research_tool_non_clinical",
+    "research_tool_agronomy",
+    "research_infrastructure_saas",
+)
+
+
+class TestDomainRelevanceGate:
+    """D-01/D-03: Clinical-domain signals must not enter non-clinical reports.
+
+    Root cause of D-01: surface-string match ('soil moisture' → 'coccidioidomycosis')
+    contaminated a lab-tool report because the pipeline queried SEER/clinical sources
+    and then emitted a disease_intelligence context block unconditionally.
+
+    Fix: non-clinical archetypes (a) have their own SUBCATEGORY_SOURCE_RELEVANCE
+    entries that exclude clinical registries; (b) are gated out of SEER preload in
+    _fetch_tier0; (c) are gated out of disease_intelligence in _format_facts_for_context.
+    """
+
+    # ── source plan gate ──────────────────────────────────────────────────────
+
+    def test_non_clinical_archetypes_have_own_source_plans(self):
+        """Each non-clinical archetype must have its own entry in SUBCATEGORY_SOURCE_RELEVANCE."""
+        from app.services.retrieval_pipeline import SUBCATEGORY_SOURCE_RELEVANCE
+        for archetype in _NON_CLINICAL_ARCHETYPES:
+            assert archetype in SUBCATEGORY_SOURCE_RELEVANCE, (
+                f"{archetype!r} falls through to 'default' which includes clinical sources — "
+                "it must have its own restricted source plan"
+            )
+
+    def test_research_tool_non_clinical_excludes_clinical_sources(self):
+        """D-03: research_tool_non_clinical source plan must not include clinical registries."""
+        from app.services.retrieval_pipeline import SUBCATEGORY_SOURCE_RELEVANCE
+        sources = SUBCATEGORY_SOURCE_RELEVANCE["research_tool_non_clinical"]
+        violations = sources & _CLINICAL_FORBIDDEN
+        assert not violations, (
+            f"research_tool_non_clinical source plan contains clinical-domain sources: "
+            f"{violations} — these index regulated clinical products and will contaminate "
+            "lab-instrument reports with disease prevalence data (D-01)"
+        )
+
+    def test_research_tool_agronomy_excludes_clinical_sources(self):
+        """D-03: research_tool_agronomy must not query clinical registries."""
+        from app.services.retrieval_pipeline import SUBCATEGORY_SOURCE_RELEVANCE
+        sources = SUBCATEGORY_SOURCE_RELEVANCE["research_tool_agronomy"]
+        violations = sources & _CLINICAL_FORBIDDEN
+        assert not violations, (
+            f"research_tool_agronomy source plan contains clinical sources: {violations}"
+        )
+
+    def test_research_infrastructure_saas_excludes_clinical_sources(self):
+        from app.services.retrieval_pipeline import SUBCATEGORY_SOURCE_RELEVANCE
+        sources = SUBCATEGORY_SOURCE_RELEVANCE["research_infrastructure_saas"]
+        violations = sources & _CLINICAL_FORBIDDEN
+        assert not violations, (
+            f"research_infrastructure_saas source plan contains clinical sources: {violations}"
+        )
+
+    def test_non_clinical_archetypes_constant_exported(self):
+        """_NON_CLINICAL_ARCHETYPES must exist in retrieval_pipeline for the gate to work."""
+        from app.services.retrieval_pipeline import _NON_CLINICAL_ARCHETYPES as _NCA
+        for archetype in _NON_CLINICAL_ARCHETYPES:
+            assert archetype in _NCA, (
+                f"{archetype!r} missing from _NON_CLINICAL_ARCHETYPES — domain gate won't fire"
+            )
+
+    # ── Tier-0 SEER gate ─────────────────────────────────────────────────────
+
+    def test_fetch_tier0_gates_seer_on_archetype(self):
+        """D-01: _fetch_tier0 source code must guard the SEER block on _NON_CLINICAL_ARCHETYPES."""
+        src = _rp_src()
+        # The guard must appear before the seer_cancer import
+        seer_import_pos = src.find("get_cancer_incidence")
+        assert seer_import_pos != -1, "SEER import not found in retrieval_pipeline"
+        # The _NON_CLINICAL_ARCHETYPES check must appear before the SEER import
+        gate_pos = src.find("_NON_CLINICAL_ARCHETYPES")
+        assert gate_pos != -1, "_NON_CLINICAL_ARCHETYPES not referenced in retrieval_pipeline"
+        assert gate_pos < seer_import_pos, (
+            "_NON_CLINICAL_ARCHETYPES gate must appear before the SEER preload block in "
+            "_fetch_tier0; otherwise non-clinical reports still receive disease prevalence facts"
+        )
+
+    # ── context formatting gate ───────────────────────────────────────────────
+
+    def test_format_facts_skips_disease_intelligence_for_non_clinical(self):
+        """D-01: disease_intelligence block must be absent when subcategory_id is non-clinical."""
+        from app.services.retrieval_pipeline import _format_facts_for_context, RetrievedFact
+        # Inject a fake prevalence fact — simulates what SEER would return if not gated
+        fake_fact = RetrievedFact(
+            concept_type="prevalence_incidence",
+            source_id="seer_preloaded",
+            value={"annual_new_cases": 12345, "disease": "coccidioidomycosis"},
+            quality_score=0.90,
+            tier=0,
+        )
+        fused = {"prevalence_incidence": [fake_fact]}
+        blocks = _format_facts_for_context(
+            fused, "coccidioidomycosis", "infectious_disease",
+            subcategory_id="research_tool_non_clinical",
+        )
+        assert "disease_intelligence" not in blocks, (
+            "disease_intelligence block must be suppressed for research_tool_non_clinical — "
+            "D-01: coccidioidomycosis contaminated a soil sensor report via this path"
+        )
+
+    def test_format_facts_skips_disease_intelligence_for_agronomy(self):
+        from app.services.retrieval_pipeline import _format_facts_for_context, RetrievedFact
+        fake_fact = RetrievedFact(
+            concept_type="prevalence_incidence",
+            source_id="seer_preloaded",
+            value={"us_patient_estimate": 50000},
+            quality_score=0.85,
+            tier=0,
+        )
+        fused = {"prevalence_incidence": [fake_fact]}
+        blocks = _format_facts_for_context(
+            fused, "soil_pathogen", "agriculture",
+            subcategory_id="research_tool_agronomy",
+        )
+        assert "disease_intelligence" not in blocks, (
+            "disease_intelligence must be suppressed for research_tool_agronomy"
+        )
+
+    def test_format_facts_includes_disease_intelligence_for_clinical(self):
+        """Control: clinical archetypes must still receive the disease_intelligence block."""
+        from app.services.retrieval_pipeline import _format_facts_for_context, RetrievedFact
+        fake_fact = RetrievedFact(
+            concept_type="prevalence_incidence",
+            source_id="seer_preloaded",
+            value={"annual_new_cases": 50000},
+            quality_score=0.90,
+            tier=0,
+        )
+        fused = {"prevalence_incidence": [fake_fact]}
+        blocks = _format_facts_for_context(
+            fused, "breast cancer", "oncology",
+            subcategory_id="drug_oncology",
+        )
+        assert "disease_intelligence" in blocks, (
+            "disease_intelligence must be present for clinical archetypes"
+        )
+
+    def test_format_facts_includes_disease_intelligence_when_no_archetype(self):
+        """Backward compat: empty subcategory_id defaults to clinical path."""
+        from app.services.retrieval_pipeline import _format_facts_for_context, RetrievedFact
+        fake_fact = RetrievedFact(
+            concept_type="prevalence_incidence",
+            source_id="seer_preloaded",
+            value={"annual_new_cases": 10000},
+            quality_score=0.90,
+            tier=0,
+        )
+        fused = {"prevalence_incidence": [fake_fact]}
+        blocks = _format_facts_for_context(fused, "disease_x", "oncology")
+        assert "disease_intelligence" in blocks
+
+    # ── cost_aware_router gate ────────────────────────────────────────────────
+
+    def test_plan_sources_excludes_clinical_for_research_tool(self):
+        """cost_aware_router.plan_sources must not include clinical registries for research tools."""
+        from app.services.cost_aware_router import plan_sources
+        profile = {
+            "modality": "other",
+            "sub_expert_id": "research_tool_non_clinical",
+            "required_output_type": "full_report",
+            "evidence_availability": "medium",
+        }
+        plan = plan_sources(profile)
+        sources = set(plan["prioritized_sources"])
+        forbidden = {"ClinicalTrials.gov", "openFDA", "CDC PLACES", "Census SAHIE",
+                     "CMS ASP", "ICER", "NICE HTA", "SEER"}
+        violations = sources & forbidden
+        assert not violations, (
+            f"plan_sources for research_tool_non_clinical returned clinical registries: "
+            f"{violations} — these produce irrelevant results for lab instrumentation"
+        )
+
+    def test_plan_sources_excludes_clinical_for_agronomy(self):
+        from app.services.cost_aware_router import plan_sources
+        profile = {
+            "modality": "other",
+            "sub_expert_id": "research_tool_agronomy",
+            "required_output_type": "full_report",
+            "evidence_availability": "medium",
+        }
+        plan = plan_sources(profile)
+        sources = set(plan["prioritized_sources"])
+        forbidden = {"ClinicalTrials.gov", "openFDA", "CDC PLACES", "Census SAHIE"}
+        violations = sources & forbidden
+        assert not violations, (
+            f"plan_sources for research_tool_agronomy returned clinical sources: {violations}"
+        )

@@ -384,6 +384,22 @@ SUBCATEGORY_SOURCE_RELEVANCE: dict[str, set[str]] = {
         "preloaded_buyer_counts", "nice_hta", "pubmed_openalex",
         "grants_gov", "oecd_health", "preloaded_realized",
     },
+    # Non-clinical research tool archetypes — grant databases only, no clinical registries.
+    # D-01/D-03: clinical sources (openFDA, ClinicalTrials, SEER, etc.) must not appear
+    # here; they index regulated clinical products and produce irrelevant results for
+    # lab instruments, sensors, and research infrastructure tools.
+    "research_tool_non_clinical": {
+        "nih_reporter", "grants_gov", "pubmed_openalex",
+        "preloaded_buyer_counts", "preloaded_benchmarks",
+    },
+    "research_tool_agronomy": {
+        "nih_reporter", "grants_gov", "pubmed_openalex",
+        "preloaded_buyer_counts", "preloaded_benchmarks",
+    },
+    "research_infrastructure_saas": {
+        "nih_reporter", "grants_gov", "pubmed_openalex",
+        "preloaded_buyer_counts", "preloaded_benchmarks",
+    },
     # Default: all Tier 0+1 sources + core Tier 2
     "default": {
         "who_gho", "clinicaltrials_gov", "openfda", "opentargets",
@@ -392,6 +408,14 @@ SUBCATEGORY_SOURCE_RELEVANCE: dict[str, set[str]] = {
         "preloaded_icer", "oecd_health", "preloaded_realized",
     },
 }
+
+# D-01: archetypes whose reports must never receive clinical-domain signals
+# (disease prevalence, FDA timelines, trial counts, payer decisions).
+_NON_CLINICAL_ARCHETYPES: frozenset[str] = frozenset({
+    "research_tool_non_clinical",
+    "research_tool_agronomy",
+    "research_infrastructure_saas",
+})
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -581,33 +605,35 @@ def _fetch_tier0(
         ))
     except Exception: pass
 
-    # NCI SEER pre-loaded stats
-    try:
-        from app.ingestion.connectors.seer_cancer import get_cancer_incidence
-        seer = get_cancer_incidence(disease_name)
-        if seer:
-            facts.append(RetrievedFact(
-                concept_type="prevalence_incidence",
-                source_id="seer_preloaded",
-                value=seer,
-                quality_score=compute_quality("seer_preloaded", "prevalence_incidence", seer, disease_name, 2024),
-                tier=0,
-            ))
-            facts.append(RetrievedFact(
-                concept_type="survival_prognosis",
-                source_id="seer_preloaded",
-                value=seer,
-                quality_score=compute_quality("seer_preloaded", "survival_prognosis", seer, disease_name, 2024),
-                tier=0,
-            ))
-            facts.append(RetrievedFact(
-                concept_type="stage_distribution",
-                source_id="seer_preloaded",
-                value=seer,
-                quality_score=compute_quality("seer_preloaded", "stage_distribution", seer, disease_name, 2024),
-                tier=0,
-            ))
-    except Exception: pass
+    # NCI SEER pre-loaded stats — skip for non-clinical archetypes (D-01: prevents
+    # disease prevalence facts from contaminating lab-tool / agronomy reports).
+    if subcategory_id not in _NON_CLINICAL_ARCHETYPES:
+        try:
+            from app.ingestion.connectors.seer_cancer import get_cancer_incidence
+            seer = get_cancer_incidence(disease_name)
+            if seer:
+                facts.append(RetrievedFact(
+                    concept_type="prevalence_incidence",
+                    source_id="seer_preloaded",
+                    value=seer,
+                    quality_score=compute_quality("seer_preloaded", "prevalence_incidence", seer, disease_name, 2024),
+                    tier=0,
+                ))
+                facts.append(RetrievedFact(
+                    concept_type="survival_prognosis",
+                    source_id="seer_preloaded",
+                    value=seer,
+                    quality_score=compute_quality("seer_preloaded", "survival_prognosis", seer, disease_name, 2024),
+                    tier=0,
+                ))
+                facts.append(RetrievedFact(
+                    concept_type="stage_distribution",
+                    source_id="seer_preloaded",
+                    value=seer,
+                    quality_score=compute_quality("seer_preloaded", "stage_distribution", seer, disease_name, 2024),
+                    tier=0,
+                ))
+        except Exception: pass
 
     # Reactome pathways (pre-loaded)
     try:
@@ -1069,6 +1095,7 @@ def _format_facts_for_context(
     fused: dict[str, list[RetrievedFact]],
     disease_name: str,
     therapeutic_area: str,
+    subcategory_id: str = "",
 ) -> dict[str, str]:
     """
     Format retrieved facts into chapter-specific context strings
@@ -1077,39 +1104,47 @@ def _format_facts_for_context(
     F-11 (C-01): only facts with quality_score >= _MIN_QUALITY_SECTION1 are
     included. Each included fact carries a tier label ([T0]–[T3]) so Claude
     can signal source quality in §1 narrative without hallucinating a tier.
+
+    D-01: disease_intelligence block is skipped for non-clinical archetypes to
+    prevent clinical-domain signals (prevalence, prognosis, DALYs) from
+    contaminating lab-tool and agronomy reports.
     """
     blocks: dict[str, str] = {}
 
     # ── disease_intelligence ─────────────────────────────────────────────────
-    # F-11: only facts with quality_score >= _MIN_QUALITY_SECTION1 are included;
-    # each fact carries a tier label for source transparency in §1 narrative.
-    di_lines = [f"\n=== DISEASE INTELLIGENCE — {disease_name.upper()} (Database-Grounded) ==="]
-    for concept in ["prevalence_incidence", "survival_prognosis", "stage_distribution",
-                     "disease_burden_dalys", "biomarker_prevalence", "gene_variant_data"]:
-        fact = _best_fact_above_threshold(fused, concept)
-        if fact is None:
-            continue   # relevance gate: no fact met _MIN_QUALITY_SECTION1
-        v = fact.value
-        if not v:
-            continue
-        tl = _tier_label(fact.tier)
-        if concept == "prevalence_incidence":
-            if isinstance(v, dict) and "annual_new_cases" in v:
-                di_lines.append(f"  • Annual incidence: {v['annual_new_cases']:,} new cases/yr [NCI SEER 2024, seer.cancer.gov] {tl}")
-            elif isinstance(v, dict) and "us_patient_estimate" in v:
-                di_lines.append(f"  • US patient population: ~{v['us_patient_estimate']:,} [Orphanet CC BY 4.0] {tl}")
-            elif isinstance(v, dict) and "dalys" in v:
-                di_lines.append(f"  • Disease burden: {v['dalys']:,.0f} US DALYs [WHO GHO] {tl}")
-        elif concept == "survival_prognosis" and isinstance(v, dict) and "5yr_survival_all" in v:
-            di_lines.append(f"  • 5-year survival (all stages): {v['5yr_survival_all']:.1%} [NCI SEER 2024] {tl}")
-        elif concept == "stage_distribution" and isinstance(v, dict) and "stage_dist_distant" in v:
-            di_lines.append(f"  • Stage IV at diagnosis: {v.get('stage_dist_distant', 0):.0%} [NCI SEER 2024] {tl}")
-        elif concept == "disease_burden_dalys" and isinstance(v, dict) and "dalys" in v:
-            di_lines.append(f"  • US DALYs: {v['dalys']:,.0f} [WHO GHO] {tl}")
-        elif concept == "gene_variant_data" and isinstance(v, dict) and v.get("found"):
-            di_lines.append(f"  • Gene target: {v.get('gene_symbol')} — {v.get('note', '')} [ClinVar, NCBI] {tl}")
-    di_lines.append("INSTRUCTION: Cite these data points verbatim. Do NOT generate different numbers.")
-    blocks["disease_intelligence"] = "\n".join(di_lines)
+    # D-01: skip entirely for non-clinical archetypes — they have no disease
+    # burden concepts in scope, and emitting this block would contaminate the
+    # synthesis context with irrelevant clinical signals.
+    if subcategory_id not in _NON_CLINICAL_ARCHETYPES:
+        # F-11: only facts with quality_score >= _MIN_QUALITY_SECTION1 are included;
+        # each fact carries a tier label for source transparency in §1 narrative.
+        di_lines = [f"\n=== DISEASE INTELLIGENCE — {disease_name.upper()} (Database-Grounded) ==="]
+        for concept in ["prevalence_incidence", "survival_prognosis", "stage_distribution",
+                         "disease_burden_dalys", "biomarker_prevalence", "gene_variant_data"]:
+            fact = _best_fact_above_threshold(fused, concept)
+            if fact is None:
+                continue   # relevance gate: no fact met _MIN_QUALITY_SECTION1
+            v = fact.value
+            if not v:
+                continue
+            tl = _tier_label(fact.tier)
+            if concept == "prevalence_incidence":
+                if isinstance(v, dict) and "annual_new_cases" in v:
+                    di_lines.append(f"  • Annual incidence: {v['annual_new_cases']:,} new cases/yr [NCI SEER 2024, seer.cancer.gov] {tl}")
+                elif isinstance(v, dict) and "us_patient_estimate" in v:
+                    di_lines.append(f"  • US patient population: ~{v['us_patient_estimate']:,} [Orphanet CC BY 4.0] {tl}")
+                elif isinstance(v, dict) and "dalys" in v:
+                    di_lines.append(f"  • Disease burden: {v['dalys']:,.0f} US DALYs [WHO GHO] {tl}")
+            elif concept == "survival_prognosis" and isinstance(v, dict) and "5yr_survival_all" in v:
+                di_lines.append(f"  • 5-year survival (all stages): {v['5yr_survival_all']:.1%} [NCI SEER 2024] {tl}")
+            elif concept == "stage_distribution" and isinstance(v, dict) and "stage_dist_distant" in v:
+                di_lines.append(f"  • Stage IV at diagnosis: {v.get('stage_dist_distant', 0):.0%} [NCI SEER 2024] {tl}")
+            elif concept == "disease_burden_dalys" and isinstance(v, dict) and "dalys" in v:
+                di_lines.append(f"  • US DALYs: {v['dalys']:,.0f} [WHO GHO] {tl}")
+            elif concept == "gene_variant_data" and isinstance(v, dict) and v.get("found"):
+                di_lines.append(f"  • Gene target: {v.get('gene_symbol')} — {v.get('note', '')} [ClinVar, NCBI] {tl}")
+        di_lines.append("INSTRUCTION: Cite these data points verbatim. Do NOT generate different numbers.")
+        blocks["disease_intelligence"] = "\n".join(di_lines)
 
     # ── regulatory_pathway ───────────────────────────────────────────────────
     reg_lines = ["\n=== REGULATORY PATHWAY — Precedent-Grounded ==="]
@@ -1257,7 +1292,7 @@ async def run_retrieval_pipeline(
 
     if avg_coverage >= COVERAGE_THRESHOLD:
         logger.info("FLARE stop: coverage threshold met after Tier 0")
-        context_blocks = _format_facts_for_context(fused, disease_name, therapeutic_area)
+        context_blocks = _format_facts_for_context(fused, disease_name, therapeutic_area, subcategory_id)
         return _build_result(all_facts, fused, coverage, t_start, sources_called, 0, context_blocks)
 
     # ── Tier 1: fast parallel (<0.8s) ────────────────────────────────────────
@@ -1279,7 +1314,7 @@ async def run_retrieval_pipeline(
 
     if avg_coverage >= COVERAGE_THRESHOLD:
         logger.info("FLARE stop: coverage threshold met after Tier 1")
-        context_blocks = _format_facts_for_context(fused, disease_name, therapeutic_area)
+        context_blocks = _format_facts_for_context(fused, disease_name, therapeutic_area, subcategory_id)
         return _build_result(all_facts, fused, coverage, t_start, sources_called, 1, context_blocks)
 
     # ── Tier 2: medium parallel (<4s) ────────────────────────────────────────
@@ -1305,7 +1340,7 @@ async def run_retrieval_pipeline(
             logger.info("Tier 2 done: %d facts total, %.0f%% coverage", len(all_facts), avg_coverage * 100)
 
     if avg_coverage >= COVERAGE_THRESHOLD:
-        context_blocks = _format_facts_for_context(fused, disease_name, therapeutic_area)
+        context_blocks = _format_facts_for_context(fused, disease_name, therapeutic_area, subcategory_id)
         return _build_result(all_facts, fused, coverage, t_start, sources_called, 2, context_blocks)
 
     # ── Tier 3: rich parallel (<10s) ─────────────────────────────────────────
@@ -1327,7 +1362,7 @@ async def run_retrieval_pipeline(
             fused = _fuse_facts(all_facts)
             coverage = _compute_coverage(fused, chapters_needed)
 
-    context_blocks = _format_facts_for_context(fused, disease_name, therapeutic_area)
+    context_blocks = _format_facts_for_context(fused, disease_name, therapeutic_area, subcategory_id)
     return _build_result(all_facts, fused, coverage, t_start, sources_called, 3, context_blocks)
 
 
