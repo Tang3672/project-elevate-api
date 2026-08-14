@@ -2141,24 +2141,24 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
             }
             report.sensitivity = _sensitivity
 
-            # G.9: overwrite market_sizing TAM with triangulation reconciled TAM
-            # so there is one canonical number across both paths.
+            # G.9 NOTE: triangulation is a cross-check only — it does NOT write to
+            # market_sizing.total_addressable_market_usd. The bottom-up derivation
+            # is the single authoritative TAM. Writing the triangulation's reconciled
+            # value here caused a BLOCKING arithmetic contradiction: the step table
+            # kept the bottom-up TAM while the headline was overwritten with a
+            # constant ($9.7M) from a non-product-specific triangulation block.
+            # Triangulation data is preserved in report.triangulation for display.
             if report.market_sizing is not None:
                 _rec_tam = _triangulation.reconciled.get("tam_usd", 0)
-                if _rec_tam > 0:
-                    _old_tam = report.market_sizing.total_addressable_market_usd
-                    _note = report.market_sizing.methodology_note.rstrip(".")
-                    report.market_sizing = report.market_sizing.model_copy(update={
-                        "total_addressable_market_usd": _rec_tam,
-                        "methodology_note": (
-                            _note +
-                            " Reconciled via 3-method triangulation (BU 50% + TD 25% + VB 25%)."
-                        ).strip(),
-                    })
-                    logger.info(
-                        "G.9: TAM reconciled derivation=$%.0f → triangulation=$%.0f",
-                        _old_tam, _rec_tam,
-                    )
+                _bot_tam = report.market_sizing.total_addressable_market_usd
+                if _rec_tam > 0 and _bot_tam > 0:
+                    _div = max(_rec_tam, _bot_tam) / max(min(_rec_tam, _bot_tam), 1)
+                    if _div > 2.0:
+                        logger.warning(
+                            "G.9 cross-check: triangulation TAM ($%.0f) diverges "
+                            "from bottom-up TAM ($%.0f) by %.1f× — bottom-up is canonical",
+                            _rec_tam, _bot_tam, _div,
+                        )
 
             # A.2: override axis_decisions with real computed lifts from the tree's
             # dimension_report so lifts vary by product rather than staying fixed.

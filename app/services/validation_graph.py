@@ -69,9 +69,10 @@ class PIReportState(TypedDict):
     factual_error:    Optional[str]
 
     # Final
-    all_flags:         List[ValidationFlag]
-    validation_passed: bool
-    validated_report:  Optional[dict]
+    all_flags:          List[ValidationFlag]
+    validation_passed:  bool
+    validated_report:   Optional[dict]
+    factual_skipped:    bool   # True when factual verifier was not run (research domain)
 
 
 # ── Claude caller ─────────────────────────────────────────────────────────────
@@ -493,7 +494,7 @@ async def factual_verifier_node(state: PIReportState) -> dict:
         _sid = state.get("sub_expert_id", "") or ""
         if _sid in _RESEARCH_TOOL_SIDS or "research_tool" in _sid or "research_infrastructure" in _sid:
             logger.info("Factual verifier: skipped for research tool archetype (%s)", _sid)
-            return {"factual_flags": [], "factual_error": None}
+            return {"factual_flags": [], "factual_error": None, "factual_skipped": True}
 
         di = state["report"].get("disease_intelligence", {})
         if not di:
@@ -609,8 +610,9 @@ def arbitrator_node(state: PIReportState) -> dict:
 
 def formatter_node(state: PIReportState) -> dict:
     """Attaches full validation results to the report."""
-    report = state["report"].copy()
-    flags  = state.get("all_flags", [])
+    report          = state["report"].copy()
+    flags           = state.get("all_flags", [])
+    factual_skipped = state.get("factual_skipped", False)
 
     # Recompute verdict from actual flags — don't rely on _verdict which LangGraph
     # may drop if the key isn't in PIReportState TypedDict.
@@ -659,13 +661,21 @@ def formatter_node(state: PIReportState) -> dict:
         "warnings":         warnings,
         "notes":            notes,
         "total_flags":      len(flags),
-        "agents_run":       ["Math Verifier", "Source Verifier", "Regulatory Verifier",
-                             "Market Verifier", "Factual Verifier"],
+        "agents_run":       [
+            "Math Verifier", "Source Verifier", "Regulatory Verifier", "Market Verifier",
+            "Factual Verifier (not run — research tool domain)" if factual_skipped else "Factual Verifier",
+        ],
+        "factual_skipped":  factual_skipped,
         "by_agent":         errors_by_agent,
         "validator_model":  VERIFIER_MODEL,
         "validated_at":     datetime.utcnow().isoformat(),
         "summary": (
-            f"✓ PASS: All 5 verification agents found no issues — math, sources, regulatory, market, and factual checks all clear."
+            (
+                f"✓ PASS: 4 of 5 verification agents found no issues — math, sources, regulatory, and market checks all clear. "
+                f"Factual verifier: not available for this product domain (research tools use domain-specific knowledge not covered by the clinical verifier)."
+                if factual_skipped else
+                f"✓ PASS: All 5 verification agents found no issues — math, sources, regulatory, market, and factual checks all clear."
+            )
             if verdict == "PASS" else
             f"⚠ FLAG: {len(warnings)} warning(s) found by {', '.join(sorted(set(f.get('agent','') for f in warnings)))}. Report is usable but review flagged items."
             if verdict == "FLAG" else
@@ -908,6 +918,7 @@ async def validate_pi_report(report: dict, sub_expert_id: str = "drug_amr") -> d
         "all_flags":           [],
         "validation_passed":   True,
         "validated_report":    None,
+        "factual_skipped":     False,
     }
 
     try:
