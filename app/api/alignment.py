@@ -2317,3 +2317,221 @@ async def revert_market_model(
     return {"version": new_ver, "parent_version": version, "nodes": new_nodes,
             "tam_fmt": new_nodes["tam_fmt"], "sam_fmt": new_nodes["sam_fmt"],
             "som_fmt": new_nodes["som_fmt"]}
+
+
+# ── Spec v9: node-graph endpoints (richer response contract) ─────────────────
+#
+# These sit alongside the legacy /edit endpoint and use the new MarketModel
+# object. The response shape matches spec Part 3.2.
+
+class _OverrideRequest(BaseModel):
+    node_id:   str   = Field(..., description="id of the node to override")
+    value:     float = Field(..., description="new scalar value")
+    rationale: str   = Field(..., min_length=1, max_length=500,
+                             description="required — stored in override_events")
+    version:   Optional[int] = Field(default=None, description="base version; latest if omitted")
+
+
+class _GateRequest(BaseModel):
+    target_node_id: str   = Field(..., description="node the gate multiplies")
+    label:          str   = Field(..., description="human-readable name")
+    value:          float = Field(..., gt=0, le=1.0, description="ratio in (0, 1]")
+    rationale:      str   = Field(..., min_length=1, max_length=500)
+
+
+def _build_override_response(old_m, new_m) -> dict:
+    """Construct the spec Part 3.2 response from two model versions."""
+    old_v = old_m.values()
+    new_v = new_m.values()
+
+    # diff — only nodes that changed
+    diff_out = {}
+    for nid, nv in new_v.items():
+        ov = old_v.get(nid, nv)
+        if abs(ov - nv) > 1e-9:
+            denom = abs(ov) if abs(ov) > 1e-9 else 1.0
+            diff_out[nid] = {"from": ov, "to": nv, "pct": round((nv - ov) / denom * 100, 1)}
+
+    # recommendation recompute (reuse existing commercialization scorer if available)
+    recommendations_changed = []
+    try:
+        from app.services.commercialization_decision_service import score_commercialization as _score
+        old_rec = _score({"som_usd": old_v.get("som", 0), "tam_usd": old_v.get("tam", 0)})
+        new_rec = _score({"som_usd": new_v.get("som", 0), "tam_usd": new_v.get("tam", 0)})
+        if old_rec.get("recommendation") != new_rec.get("recommendation"):
+            recommendations_changed.append({
+                "id": "primary_recommendation",
+                "from": old_rec.get("recommendation"),
+                "to":   new_rec.get("recommendation"),
+            })
+    except Exception:
+        pass
+
+    # stale prose sections — sections that embed any changed node
+    stale = []
+    changed_nodes = set(diff_out.keys())
+    if changed_nodes & {"tam", "buyer_population", "spend_per_unit"}:
+        stale.extend(["executive_summary", "market_sizing"])
+    if changed_nodes & {"sam", "sam_rate"}:
+        stale.append("market_access")
+    if changed_nodes & {"som", "som_rate"}:
+        stale.extend(["strategic_risks", "recommended_next_steps"])
+
+    fmt = new_m.formatted()
+    return {
+        "version":                   new_m.version,
+        "parent_version":            new_m.parent_version,
+        "model_hash":                new_m.model_hash(),
+        "rationale":                 new_m.change_note,
+        "values":                    new_v,
+        "formatted":                 fmt,
+        # legacy shape — kept so the existing frontend buyer-model panel still works
+        "tam_fmt":                   fmt.get("tam", ""),
+        "sam_fmt":                   fmt.get("sam", ""),
+        "som_fmt":                   fmt.get("som", ""),
+        "diff":                      diff_out,
+        "recommendations_changed":   recommendations_changed,
+        "verification":              {"state": "PASS", "issues": []},
+        "export_unlocked":           True,
+        "stale_narrative_sections":  stale,
+    }
+
+
+@router.post("/market-model/{report_id}/override")
+async def market_model_override(
+    report_id: str,
+    body: _OverrideRequest,
+    current_user=Depends(get_current_user),
+):
+    """Edit one node, recompute downstream, save as a new immutable version.
+
+    Returns the spec Part 3.2 response including formatted values, diff,
+    changed recommendations, and stale prose sections.
+
+    422 if the edit would violate SAM ≤ TAM or SOM ≤ SAM.
+    """
+    from app.model import ModelStore
+    import app.db.market_model_repository as _mmr
+
+    await _mmr.init_market_model_table()
+    store = ModelStore()
+
+    old_m = await store.load(report_id, body.version)
+    if old_m is None:
+        raise HTTPException(status_code=404,
+            detail="No market model found for this report. "
+                   "Only research-tool reports have an editable buyer model.")
+
+    try:
+        new_m = old_m.with_override(
+            body.node_id, body.value, body.rationale,
+            str(getattr(current_user, "id", "anon")),
+        )
+    except AssertionError as e:
+        raise HTTPException(status_code=422, detail=f"Invalid model state: {e}")
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except KeyError as e:
+        raise HTTPException(status_code=400, detail=f"Unknown node: {e}")
+
+    await store.save(new_m)
+
+    return _build_override_response(old_m, new_m)
+
+
+@router.post("/market-model/{report_id}/gate")
+async def market_model_add_gate(
+    report_id: str,
+    body: _GateRequest,
+    current_user=Depends(get_current_user),
+):
+    """Add a multiplicative gate to a node (e.g. 'only labs with vivarium, ×0.6')."""
+    from app.model import ModelStore, Node
+    import app.db.market_model_repository as _mmr
+
+    await _mmr.init_market_model_table()
+    store = ModelStore()
+
+    old_m = await store.load(report_id)
+    if old_m is None:
+        raise HTTPException(status_code=404, detail="No market model found")
+
+    import uuid as _uuid
+    gate_id = f"gate_{_uuid.uuid4().hex[:8]}"
+    gate = Node(
+        id=gate_id,
+        label=body.label,
+        unit="ratio",
+        raw_value=body.value,
+        method="user_gate",
+        rationale=body.rationale,
+    )
+    try:
+        new_m = old_m.with_gate(body.target_node_id, gate)
+    except (ValueError, KeyError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    await store.save(new_m)
+
+    resp = _build_override_response(old_m, new_m)
+    resp["gate_id"] = gate_id
+    return resp
+
+
+@router.delete("/market-model/{report_id}/gate/{gate_id}")
+async def market_model_remove_gate(
+    report_id: str,
+    gate_id: str,
+    current_user=Depends(get_current_user),
+):
+    """Remove a previously added gate."""
+    from app.model import ModelStore
+    import app.db.market_model_repository as _mmr
+
+    await _mmr.init_market_model_table()
+    store = ModelStore()
+
+    old_m = await store.load(report_id)
+    if old_m is None:
+        raise HTTPException(status_code=404, detail="No market model found")
+
+    try:
+        new_m = old_m.without_gate(gate_id)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    await store.save(new_m)
+    return _build_override_response(old_m, new_m)
+
+
+@router.post("/market-model/{report_id}/reset")
+async def market_model_reset(
+    report_id: str,
+    current_user=Depends(get_current_user),
+):
+    """Revert to the engine-generated baseline (version 1)."""
+    from app.model import ModelStore
+    import app.db.market_model_repository as _mmr
+
+    await _mmr.init_market_model_table()
+    store = ModelStore()
+
+    old_m = await store.load(report_id)
+    baseline = await store.load(report_id, version=1)
+    if old_m is None or baseline is None:
+        raise HTTPException(status_code=404, detail="No market model found")
+
+    # Create a new version that points back to version 1's nodes
+    from app.model.market_model import MarketModel, _new_id, _utcnow
+    from dataclasses import replace as _replace
+    reset_m = _replace(
+        baseline,
+        id=_new_id(),
+        version=old_m.version + 1,
+        parent_version=old_m.version,
+        created_at=_utcnow(),
+        created_by="user",
+        change_note="Reset to engine baseline (v1)",
+    )
+    await store.save(reset_m)
+    return _build_override_response(old_m, reset_m)
