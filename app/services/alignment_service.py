@@ -2135,6 +2135,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
             _dr = getattr(_seg_tree, "dimension_report", None) or {}
             if _dr.get("selected") is not None:
                 try:
+                    from app.market.axis_library import CLINICAL_FAMILIES as _CF
                     _selected = [
                         {
                             "axis_id":        d["id"],
@@ -2149,6 +2150,9 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
                             "data_available": True,
                         }
                         for d in _dr["selected"]
+                        # Hard gate: clinical-family axes never enter selected for non-clinical domains
+                        if _resolved_domain == "LIFE_SCIENCES_CLINICAL"
+                        or d.get("family", "") not in _CF
                     ]
                     _rejected_tree = [
                         {

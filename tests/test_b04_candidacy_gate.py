@@ -17,8 +17,11 @@ import pytest
 
 from app.market.axis_library import (
     AXIS_LIBRARY,
+    CLINICAL_FAMILIES,
     AxisDecision,
+    AxisDefinition,
     format_axis_decisions,
+    is_candidate,
     select_axes,
 )
 
@@ -97,6 +100,46 @@ class TestCandidacyGateResearchDomain:
         assert contamination == set(), (
             f"[{expert}] Serialized selected list must not contain clinical families: {contamination}"
         )
+
+
+class TestIsCandidateGate:
+    """is_candidate() hard gate — must block clinical-family axes regardless of applies_when."""
+
+    def test_is_candidate_blocks_clinical_family_for_research(self):
+        """Every clinical-family axis in the library must be blocked for research domain."""
+        clinical_axes = [ax for ax in AXIS_LIBRARY if ax.family in CLINICAL_FAMILIES]
+        assert clinical_axes, "Test requires at least one clinical-family axis in library"
+        for ax in clinical_axes:
+            assert not is_candidate(ax, "LIFE_SCIENCES_RESEARCH"), (
+                f"is_candidate must return False for clinical-family axis '{ax.id}' "
+                f"(family={ax.family}) on LIFE_SCIENCES_RESEARCH domain"
+            )
+
+    def test_is_candidate_blocks_clinical_family_for_unknown_domain(self):
+        """Clinical-family axes are blocked for any domain that isn't LIFE_SCIENCES_CLINICAL."""
+        clinical_axes = [ax for ax in AXIS_LIBRARY if ax.family in CLINICAL_FAMILIES]
+        for ax in clinical_axes:
+            assert not is_candidate(ax, "ENGINEERING_HARDWARE"), (
+                f"is_candidate must block '{ax.id}' for ENGINEERING_HARDWARE"
+            )
+            assert not is_candidate(ax, ""), (
+                f"is_candidate must block '{ax.id}' for empty domain (fallback protection)"
+            )
+
+    def test_is_candidate_allows_clinical_family_for_clinical_domain(self):
+        """Clinical domain must be allowed through — gate must not block everything."""
+        clinical_axes = [ax for ax in AXIS_LIBRARY if ax.family in CLINICAL_FAMILIES]
+        for ax in clinical_axes:
+            assert is_candidate(ax, "LIFE_SCIENCES_CLINICAL"), (
+                f"is_candidate must return True for '{ax.id}' on LIFE_SCIENCES_CLINICAL"
+            )
+
+    def test_select_axes_no_clinical_for_research(self):
+        """select_axes() must produce zero clinical-family axes selected for research domain."""
+        decisions = select_axes("LIFE_SCIENCES_RESEARCH", "research_tool_agronomy")
+        selected = [d for d in decisions if d.selected]
+        leaked = [d for d in selected if d.family in CLINICAL_FAMILIES]
+        assert leaked == [], f"Clinical axes leaked into selected: {[d.axis_id for d in leaked]}"
 
 
 class TestCandidacyGateClinicalDomain:
