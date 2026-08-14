@@ -2109,7 +2109,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
         try:
             from app.services.market_segmentation import (
                 LIFE_SCIENCES_RESEARCH as _SEG_TEMPLATE,
-                build_segment_tree, triangulate, monte_carlo, sensitivity_analysis,
+                build_segment_tree, sensitivity_analysis,
             )
             _seg_tree = await build_segment_tree(
                 template=_SEG_TEMPLATE,
@@ -2117,10 +2117,6 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
                 product_name=getattr(report, "product_name", "") or "",
                 ta=ta_for_deriv,
             )
-            # Triangulation (D.3): three independent methods + reconciliation
-            _triangulation = triangulate(_seg_tree)
-            # Monte Carlo (D.6): seed=42 for reproducibility (B-05 determinism)
-            _mc = monte_carlo(_seg_tree, n=5_000, seed=42)
             # Sensitivity analysis (D.7): tornado-chart ranked parameters
             _sensitivity = sensitivity_analysis(_seg_tree)
 
@@ -2132,33 +2128,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
                 "product_name": _seg_tree.product_name,
                 "nih_labs_retrieved": _seg_tree.nih_labs_retrieved,
             }
-            report.triangulation = {
-                "bottom_up":   _triangulation.bottom_up,
-                "top_down":    _triangulation.top_down,
-                "value_based": _triangulation.value_based,
-                "reconciled":  _triangulation.reconciled,
-                "monte_carlo": _mc,
-            }
             report.sensitivity = _sensitivity
-
-            # G.9 NOTE: triangulation is a cross-check only — it does NOT write to
-            # market_sizing.total_addressable_market_usd. The bottom-up derivation
-            # is the single authoritative TAM. Writing the triangulation's reconciled
-            # value here caused a BLOCKING arithmetic contradiction: the step table
-            # kept the bottom-up TAM while the headline was overwritten with a
-            # constant ($9.7M) from a non-product-specific triangulation block.
-            # Triangulation data is preserved in report.triangulation for display.
-            if report.market_sizing is not None:
-                _rec_tam = _triangulation.reconciled.get("tam_usd", 0)
-                _bot_tam = report.market_sizing.total_addressable_market_usd
-                if _rec_tam > 0 and _bot_tam > 0:
-                    _div = max(_rec_tam, _bot_tam) / max(min(_rec_tam, _bot_tam), 1)
-                    if _div > 2.0:
-                        logger.warning(
-                            "G.9 cross-check: triangulation TAM ($%.0f) diverges "
-                            "from bottom-up TAM ($%.0f) by %.1f× — bottom-up is canonical",
-                            _rec_tam, _bot_tam, _div,
-                        )
 
             # A.2: override axis_decisions with real computed lifts from the tree's
             # dimension_report so lifts vary by product rather than staying fixed.
@@ -2212,11 +2182,8 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
                     logger.warning("A.2: axis override failed (non-fatal): %s", _ax_e)
 
             logger.info(
-                "Part D: segmentation tree built (%d nodes), triangulated, "
-                "MC p10=$%.0f p90=$%.0f, %d sensitivity params",
+                "Part D: segmentation tree built (%d nodes), %d sensitivity params",
                 len(_seg_tree.nodes),
-                _mc.get("p10", 0),
-                _mc.get("p90", 0),
                 len(_sensitivity),
             )
         except Exception as _seg_e:
