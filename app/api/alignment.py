@@ -2352,18 +2352,19 @@ def _build_override_response(old_m, new_m) -> dict:
             denom = abs(ov) if abs(ov) > 1e-9 else 1.0
             diff_out[nid] = {"from": ov, "to": nv, "pct": round((nv - ov) / denom * 100, 1)}
 
-    # recommendation recompute (reuse existing commercialization scorer if available)
+    # recommendation recompute — predicate library, no LLM call
     recommendations_changed = []
     try:
-        from app.services.commercialization_decision_service import score_commercialization as _score
-        old_rec = _score({"som_usd": old_v.get("som", 0), "tam_usd": old_v.get("tam", 0)})
-        new_rec = _score({"som_usd": new_v.get("som", 0), "tam_usd": new_v.get("tam", 0)})
-        if old_rec.get("recommendation") != new_rec.get("recommendation"):
-            recommendations_changed.append({
-                "id": "primary_recommendation",
-                "from": old_rec.get("recommendation"),
-                "to":   new_rec.get("recommendation"),
-            })
+        from app.services.recommendation_library import recommend as _lib_rec
+        old_recs = {r.id: r.text for r in _lib_rec(old_v)}
+        new_recs = {r.id: r.text for r in _lib_rec(new_v)}
+        for rid in set(old_recs) | set(new_recs):
+            if old_recs.get(rid) != new_recs.get(rid):
+                recommendations_changed.append({
+                    "id": rid,
+                    "from": old_recs.get(rid, ""),
+                    "to":   new_recs.get(rid, ""),
+                })
     except Exception:
         pass
 
@@ -2378,6 +2379,19 @@ def _build_override_response(old_m, new_m) -> dict:
         stale.extend(["strategic_risks", "recommended_next_steps"])
 
     fmt = new_m.formatted()
+    # Active user-added gates — nodes with method="user_gate"
+    active_gates = [
+        {
+            "id": nid,
+            "label": n.label,
+            "value": round(n.override_value if n.override_value is not None else (n.raw_value or 0), 4),
+            "target_node_id": next(
+                (tid for tid, tn in new_m.nodes.items() if nid in tn.gates), None
+            ),
+        }
+        for nid, n in new_m.nodes.items()
+        if n.method == "user_gate"
+    ]
     return {
         "version":                   new_m.version,
         "parent_version":            new_m.parent_version,
@@ -2390,6 +2404,7 @@ def _build_override_response(old_m, new_m) -> dict:
         "sam_fmt":                   fmt.get("sam", ""),
         "som_fmt":                   fmt.get("som", ""),
         "diff":                      diff_out,
+        "active_gates":              active_gates,
         "recommendations_changed":   recommendations_changed,
         "verification":              {"state": "PASS", "issues": []},
         "export_unlocked":           True,
@@ -2435,6 +2450,25 @@ async def market_model_override(
         raise HTTPException(status_code=400, detail=f"Unknown node: {e}")
 
     await store.save(new_m)
+
+    # Log to override_events (non-fatal)
+    try:
+        old_node_val = old_m.values().get(body.node_id, 0.0)
+        new_node_val = new_m.values().get(body.node_id, 0.0)
+        old_som = old_m.values().get("som", 0.0)
+        new_som = new_m.values().get("som", 0.0)
+        delta_pct = ((new_som - old_som) / old_som * 100) if old_som else None
+        await _mmr.insert_override_event(
+            report_id=report_id,
+            node_id=body.node_id,
+            original_value=old_node_val,
+            new_value=new_node_val,
+            rationale=body.rationale,
+            user_id=str(getattr(current_user, "id", "anon")),
+            downstream_delta_pct=delta_pct,
+        )
+    except Exception as _oe_err:
+        logger.warning("override_events logging failed (non-fatal): %s", _oe_err)
 
     return _build_override_response(old_m, new_m)
 

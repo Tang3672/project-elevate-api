@@ -35,7 +35,56 @@ async def init_market_model_table() -> None:
         """)
         await conn.execute(
             "CREATE INDEX IF NOT EXISTS mmv_report_idx ON market_model_version (report_id)")
+    await init_override_events_table()
     logger.info("market_model_version table ready")
+
+
+async def init_override_events_table() -> None:
+    from app.db.database import get_pool
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS override_events (
+                id                   TEXT PRIMARY KEY,
+                report_id            TEXT NOT NULL,
+                node_id              TEXT NOT NULL,
+                original_value       DOUBLE PRECISION,
+                new_value            DOUBLE PRECISION,
+                ratio                DOUBLE PRECISION,
+                rationale            TEXT,
+                downstream_delta_pct DOUBLE PRECISION,
+                user_id              TEXT,
+                created_at           TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS oe_report_idx ON override_events (report_id)")
+
+
+async def insert_override_event(
+    report_id: str,
+    node_id: str,
+    original_value: float,
+    new_value: float,
+    rationale: str,
+    user_id: str,
+    downstream_delta_pct: Optional[float] = None,
+) -> None:
+    import uuid as _uuid
+    try:
+        from app.db.database import get_pool
+        pool = await get_pool()
+        ratio = (new_value / original_value) if original_value and abs(original_value) > 1e-9 else None
+        async with pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO override_events
+                    (id, report_id, node_id, original_value, new_value, ratio,
+                     rationale, downstream_delta_pct, user_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            """, str(_uuid.uuid4()), report_id, node_id,
+                original_value, new_value, ratio, rationale, downstream_delta_pct, user_id)
+    except Exception as e:
+        logger.warning("insert_override_event failed (non-fatal): %s", e)
 
 
 async def save_baseline(report_id: str, nodes: dict) -> int:
