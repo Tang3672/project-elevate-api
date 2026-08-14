@@ -2569,3 +2569,155 @@ async def market_model_reset(
     )
     await store.save(reset_m)
     return _build_override_response(old_m, reset_m)
+
+
+# ── market-model.js NL assumption endpoints ──────────────────────────────────
+
+_ASSUMPTION_PARSE_PROMPT = """You parse a PI's natural-language market assumption into a list of
+typed operations against a 4-key market model.
+
+Model keys (all numeric):
+  buyer_population  — number of eligible buyers (integer count)
+  spend_per_unit    — annualised spend per buyer in USD (float)
+  sam_rate          — fraction of buyers reachable (0.0–1.0)
+  som_rate          — 5-year market penetration fraction (0.0–1.0)
+
+Operation types:
+  gate   — multiplicative filter: value × factor (factor in [0,1])
+  set    — override to a specific absolute value
+  cap    — ceiling: new value = min(current, cap)
+  floor  — floor: new value = max(current, floor)
+  note   — on-record only; no numeric change (for qualitative observations)
+
+Return ONLY valid JSON, no prose:
+{
+  "ops": [
+    {
+      "op":          "gate" | "set" | "cap" | "floor" | "note",
+      "target":      "buyer_population" | "spend_per_unit" | "sam_rate" | "som_rate",
+      "value":       <number>,
+      "label":       "<short human label for the ledger>",
+      "quoted_span": "<verbatim fragment from input that justifies this op>",
+      "confidence":  <0.0–1.0>,
+      "unit":        "<optional display unit string>"
+    }
+  ],
+  "clarifying_question": null | "<question to ask if a required number is missing>"
+}
+
+Rules:
+- If the text mentions a fraction or percentage of buyers, use gate on buyer_population.
+- If the text mentions a price ceiling or cap, use cap on spend_per_unit.
+- If the text is qualitative with no number, use note (omit target/value).
+- Rates (sam_rate, som_rate) must be in [0, 1]; convert percentages to decimals.
+- Set clarifying_question when the intent is clear but a required number is absent.
+- Do not invent facts; only extract what the text says."""
+
+
+async def _parse_assumption_nl(text: str, state: dict, ops: list) -> dict:
+    """Call Claude to parse NL text into market model operations."""
+    import os, json as _json
+    import httpx
+
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise ValueError("ANTHROPIC_API_KEY not set")
+
+    context = f"""Current model state: {_json.dumps(state)}
+Existing ops already applied: {_json.dumps(ops)}
+
+New assumption text from the PI:
+"{text}"
+
+Return the parsed ops JSON."""
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json={
+                "model":      "claude-haiku-4-5-20251001",
+                "max_tokens": 512,
+                "temperature": 0,
+                "system":     _ASSUMPTION_PARSE_PROMPT,
+                "messages":   [{"role": "user", "content": context}],
+            },
+        )
+    resp.raise_for_status()
+    raw = resp.json()["content"][0]["text"].strip()
+
+    # Strip markdown fences
+    if raw.startswith("```"):
+        parts = raw.split("```")
+        raw = parts[1] if len(parts) > 1 else raw
+        if raw.startswith("json"):
+            raw = raw[4:]
+    return _json.loads(raw.strip())
+
+
+class _ParseBody(BaseModel):
+    text: str = Field(..., min_length=1, max_length=2000)
+    state: dict = Field(default_factory=dict)
+    ops: list    = Field(default_factory=list)
+
+
+class _ApplyBody(BaseModel):
+    text: str = Field(default="")
+    ops:  list = Field(default_factory=list)
+
+
+@router.post("/reports/{report_id}/assumptions/parse")
+async def parse_assumption(
+    report_id: str,
+    body: _ParseBody,
+    current_user=Depends(get_current_user),
+):
+    """Parse a natural-language assumption into typed market model operations.
+
+    Called by market-model.js when the user clicks Interpret. Returns ops
+    that the frontend previews before the user chooses to apply or discard.
+    """
+    try:
+        result = await _parse_assumption_nl(body.text, body.state, body.ops)
+    except Exception as exc:
+        logger.error("assumption parse failed: %s", exc)
+        raise HTTPException(status_code=502, detail=f"LLM parse error: {exc}")
+    return result
+
+
+@router.post("/reports/{report_id}/assumptions/apply")
+async def apply_assumption(
+    report_id: str,
+    body: _ApplyBody,
+    current_user=Depends(get_current_user),
+):
+    """Persist applied assumption ops for a report (best-effort stub).
+
+    The frontend applies changes client-side immediately. Full persistence
+    (reload survivability) requires wiring to the report store — tracked
+    as a follow-on task. For now this endpoint accepts the call and returns
+    ok so the frontend's fire-and-forget POST does not error.
+    """
+    logger.info("assumptions/apply: report=%s ops=%d (persistence not yet wired)",
+                report_id, len(body.ops))
+    return {"ok": True}
+
+
+@router.delete("/reports/{report_id}/assumptions/{assumption_id}")
+async def delete_assumption(
+    report_id: str,
+    assumption_id: str,
+    current_user=Depends(get_current_user),
+):
+    """Remove a persisted assumption op (best-effort stub).
+
+    Acceptance here keeps the frontend ledger remove flow clean.
+    Full persistence is tracked as a follow-on task.
+    """
+    logger.info("assumptions/delete: report=%s id=%s (persistence not yet wired)",
+                report_id, assumption_id)
+    return {"ok": True}

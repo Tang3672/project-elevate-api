@@ -159,21 +159,19 @@ class TestRejectedAxes:
 
 class TestPlacement:
 
-    def test_axis_decisions_before_triangulation_in_render(self):
+    def test_axis_decisions_present_in_render(self):
+        # Fix 1 removed the triangulation block entirely; this test now verifies
+        # that axis_decisions is present and triangulation is gone from the renderer.
         src = _render_section(_app())
-        ad_pos  = src.find("r.axis_decisions")
-        tri_pos = src.find("r.triangulation")
-        assert ad_pos != -1 and tri_pos != -1, "both sections must exist"
-        assert ad_pos < tri_pos, (
-            "Axis decisions must appear before triangulation in renderPIReport — "
-            "segmentation choice logically precedes the number-computation method"
+        assert src.find("r.axis_decisions") != -1, "r.axis_decisions must be present in renderPIReport"
+        assert src.find("r.triangulation") == -1, (
+            "r.triangulation must be absent — Fix 1 deleted the triangulation block"
         )
 
-    def test_axis_decisions_before_triangulation_in_pdf(self):
+    def test_axis_decisions_present_in_pdf(self):
+        # Same as above: triangulation gone, axis_decisions present.
         src = _pdf_section(_app())
-        ad_pos  = src.find("r.axis_decisions")
-        tri_pos = src.find("r.triangulation")
-        assert ad_pos != -1 and tri_pos != -1, "both sections must exist in PDF renderer"
-        assert ad_pos < tri_pos, (
-            "Axis decisions must appear before triangulation in downloadPDF"
+        assert src.find("r.axis_decisions") != -1, "r.axis_decisions must be present in downloadPDF"
+        assert src.find("r.triangulation") == -1, (
+            "r.triangulation must be absent in downloadPDF — Fix 1 deleted the block"
         )

@@ -592,11 +592,16 @@ def filter_literature_citations(
         # prior retrieval filter.  A score < 6 means <30% idea-word overlap, almost
         # certainly off-topic (e.g. apathy paper recalled for cloud sync platform).
         #
-        # PMID-backed: gate is threshold 0 (never fires here) — PubMed search
-        # already filtered for domain relevance. The additional research-tool strict
-        # gate above (inside the PMID resolved block) catches fully-resolved PMIDs
-        # that still have zero overlap with the product idea.
-        threshold = _RELEVANCE_THRESHOLD_NULL_PMID if not pmid else _RELEVANCE_THRESHOLD_PMID
+        # PMID resolved: gate is threshold 6 (fix 7) — we scored the real abstract;
+        # if it doesn't match the idea it's irrelevant regardless of the PMID.
+        #
+        # PMID unresolvable (network error, non-existent): threshold 0 — we have no
+        # better metadata than what came in; let the B-09 domain filter decide.
+        # The G.3 strict zero-overlap gate above catches research-tool mismatches
+        # when resolution succeeds, so unresolvable-PMID passthrough is safe.
+        threshold = (_RELEVANCE_THRESHOLD_NULL_PMID if not pmid
+                     else _RELEVANCE_THRESHOLD_PMID if _pmid_resolved_ok
+                     else 0)
         score = _keyword_relevance_score(
             c.get("title") or "",
             c.get("abstract") or "",
