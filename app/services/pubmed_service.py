@@ -521,6 +521,7 @@ def filter_literature_citations(
         # ── PMID path (unchanged from Part A) ────────────────────────────────
         else:
             resolved = resolve_pmid(pmid)
+            _pmid_resolved_ok = resolved is not None
             if resolved is None:
                 # Unresolvable PMID (network error or non-existent): pass through.
                 # Hard drop only when a PMID resolves to a DIFFERENT title.
@@ -546,15 +547,31 @@ def filter_literature_citations(
                 if checked_relevance != c.get("relevance", ""):
                     c = {**c, "relevance": checked_relevance}
 
+                # G.3 strict gate for research tools: if a PMID resolves to real
+                # metadata but has zero keyword overlap with the product idea, it's a
+                # false-positive retrieval (e.g. "laryngeal mask airways" for a soil
+                # moisture sensor). Drop it. Doesn't fire for clinical products or
+                # unresolvable PMIDs (those fall through to the main threshold gate).
+                if _is_non_clinical_product(sub_expert_id) and idea:
+                    _strict_score = _keyword_relevance_score(
+                        resolved.get("title", ""), resolved.get("abstract", ""), idea
+                    )
+                    if _strict_score == 0:
+                        logger.debug(
+                            "G.3 strict gate (research tool, verified PMID): dropped '%s' (score=0)",
+                            resolved.get("title", "")[:80],
+                        )
+                        continue
+
         # ── G.3 relevance gate — ALL citations (B-01 fix) ───────────────────────
         # null-PMID: strict gate (threshold 6) — these are LLM-recalled with no
         # prior retrieval filter.  A score < 6 means <30% idea-word overlap, almost
         # certainly off-topic (e.g. apathy paper recalled for cloud sync platform).
         #
-        # PMID-backed: lenient gate (threshold 1) — PubMed search already filtered
-        # for domain relevance.  We only drop papers with ZERO keyword overlap
-        # (completely different vocabulary), not borderline-relevant ones like
-        # REDCap (research informatics) cited for Hublink (research data platform).
+        # PMID-backed: gate is threshold 0 (never fires here) — PubMed search
+        # already filtered for domain relevance. The additional research-tool strict
+        # gate above (inside the PMID resolved block) catches fully-resolved PMIDs
+        # that still have zero overlap with the product idea.
         threshold = _RELEVANCE_THRESHOLD_NULL_PMID if not pmid else _RELEVANCE_THRESHOLD_PMID
         score = _keyword_relevance_score(
             c.get("title") or "",

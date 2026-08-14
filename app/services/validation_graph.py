@@ -479,10 +479,22 @@ Respond ONLY with JSON:
 If all facts check out: {"flags": []}"""
 
 
+_RESEARCH_TOOL_SIDS = frozenset({
+    "research_tool_non_clinical", "research_infrastructure_saas", "research_tool_agronomy",
+})
+
+
 async def factual_verifier_node(state: PIReportState) -> dict:
     """Verifies epidemiological and biological facts."""
     logger.info("Factual verifier running")
     try:
+        # Skip for research tools — verifier only knows clinical/AMR/oncology reference data;
+        # running it on agronomy or non-clinical research reports produces spurious ERRORs.
+        _sid = state.get("sub_expert_id", "") or ""
+        if _sid in _RESEARCH_TOOL_SIDS or "research_tool" in _sid or "research_infrastructure" in _sid:
+            logger.info("Factual verifier: skipped for research tool archetype (%s)", _sid)
+            return {"factual_flags": [], "factual_error": None}
+
         di = state["report"].get("disease_intelligence", {})
         if not di:
             return {"factual_flags": [], "factual_error": None}

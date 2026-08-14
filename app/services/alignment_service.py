@@ -196,6 +196,7 @@ async def generate_pi_report(
     # C.2: resolve domain — explicit intake value wins; otherwise derive from sub_expert_id.
     _RESEARCH_SUB_EXPERTS = frozenset({
         "research_tool_non_clinical", "research_infrastructure_saas",
+        "research_tool_agronomy",
     })
     _CLINICAL_SUB_EXPERTS = frozenset({
         "drug_amr", "drug_oncology", "drug_cns", "drug_cardiology", "drug_metabolic",
