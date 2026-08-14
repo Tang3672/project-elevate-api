@@ -470,7 +470,7 @@ def _verify_claims_against_abstract(relevance: str, abstract: str) -> str:
 
 
 _RELEVANCE_THRESHOLD_NULL_PMID = 6   # null-PMID (LLM-recalled): strict gate
-_RELEVANCE_THRESHOLD_PMID      = 0   # PMID-backed: B-09 signal gate handles domain filtering
+_RELEVANCE_THRESHOLD_PMID      = 6   # fix 7: same threshold for PMID-backed; score abstract first
 _RELEVANCE_THRESHOLD = _RELEVANCE_THRESHOLD_NULL_PMID  # alias used by tests
 
 
@@ -566,6 +566,10 @@ def filter_literature_citations(
                 checked_relevance = _verify_claims_against_abstract(c.get("relevance", ""), abstract)
                 if checked_relevance != c.get("relevance", ""):
                     c = {**c, "relevance": checked_relevance}
+                # fix 7: provide the real abstract for relevance scoring below
+                # (it's not in c unless the title mismatched and triggered a full merge)
+                if abstract and not c.get("abstract"):
+                    c = {**c, "abstract": abstract}
 
                 # G.3 strict gate for research tools: if a PMID resolves to real
                 # metadata but has zero keyword overlap with the product idea, it's a
