@@ -3041,10 +3041,17 @@ def _enforce_market_consistency(report, deriv) -> None:
         if ms is None:
             return
         tam = round(float(getattr(deriv, "us_tam_usd", 0) or 0))
+        if tam <= 0:
+            return
+        # Fix 2: write TAM unconditionally — buyer_population × spend_per_unit is the
+        # single source of truth; never let LLM-generated json overwrite it.
+        ms.total_addressable_market_usd = float(tam)
+
         sam_raw = float(getattr(deriv, "us_sam_usd", 0) or 0)
         som_raw = float(getattr(deriv, "us_som_usd", 0) or 0)
-        if tam <= 0 or sam_raw <= 0:
+        if sam_raw <= 0:
             return
+        assert sam_raw <= tam, f"SAM {sam_raw:,.0f} > TAM {tam:,.0f}"
         pen = round(sam_raw / tam * 100, 1)            # clean reachable-penetration %
         sam = round(tam * pen / 100)                   # exactly TAM × pen%
         cap = round(som_raw / sam_raw * 100, 1) if sam_raw else 0.0
@@ -3070,7 +3077,6 @@ def _enforce_market_consistency(report, deriv) -> None:
         }.get(_arch, "buyers × annual revenue per buyer")
 
         from app.services.buyer_model import HORIZON_YEARS as _HORIZON_YEARS
-        ms.total_addressable_market_usd = float(tam)
         ms.serviceable_market_usd = float(sam)
         ms.formula = (
             f"TAM = ${tam:,.0f} ({_fmt(tam)}, {_tam_basis}). "

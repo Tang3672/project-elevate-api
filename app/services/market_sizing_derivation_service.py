@@ -1951,9 +1951,10 @@ def _derive_research_tool_formula(
     # Recompute midpoints after any overrides
     sam_mid = (_sam_lo + _sam_hi) / 2
     som_mid = (_som_lo + _som_hi) / 2
-    tam  = ((pop_lo + pop_hi) / 2) * ((sp_lo + sp_hi) / 2)
+    tam  = ((pop_lo + pop_hi) / 2) * ((sp_lo + sp_hi) / 2)  # buyer_population × spend_per_unit
     sam  = tam * sam_mid
     som  = sam * som_mid
+    assert sam <= tam, f"SAM {sam:,.0f} > TAM {tam:,.0f} — penetration rate must be < 1"
 
     # Monte Carlo over the full parameter space (population × spend × SAM rate × SOM rate).
     _mc: Optional[MonteCarloResult] = None
