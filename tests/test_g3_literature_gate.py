@@ -90,7 +90,7 @@ class TestRelevanceGateAllCitations:
     def test_on_topic_pmid_citation_passes(self):
         """An on-topic PMID-backed citation must still pass the gate."""
         citation = {
-            "pmid":      "12345678",
+            "pmid":      "38764219",
             "title":     "Open-source cloud platform for multi-site neuroscience data sharing",
             "authors":   "Zhang et al.",
             "journal":   "Nature Methods",
@@ -98,13 +98,13 @@ class TestRelevanceGateAllCitations:
             "relevance": "Demonstrates adoption of cloud platforms in neuroscience labs",
         }
         with patch("app.services.pubmed_service.resolve_pmid", return_value={
-            "pmid":    "12345678",
+            "pmid":    "38764219",
             "title":   "Open-source cloud platform for multi-site neuroscience data sharing",
             "authors": "Zhang et al.",
             "journal": "Nature Methods",
             "year":    "2023",
             "abstract": "We developed a cloud-based platform for sharing neuroscience datasets across multiple research sites...",
-            "url":     "https://pubmed.ncbi.nlm.nih.gov/12345678/",
+            "url":     "https://pubmed.ncbi.nlm.nih.gov/38764219/",
         }):
             result = self._filter([citation])
         assert len(result) == 1, (
