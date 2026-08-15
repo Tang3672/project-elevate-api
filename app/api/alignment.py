@@ -2670,6 +2670,33 @@ class _ApplyBody(BaseModel):
     ops:  list = Field(default_factory=list)
 
 
+_REGEN_SYSTEM_PROMPT = """You rewrite one paragraph of a market sizing report after the user
+adjusted the model inputs. Your output becomes the new paragraph — nothing else.
+
+Rules:
+1. Keep the same structure and approximate sentence count as the original.
+2. Update every specific number to the new values supplied.
+3. If a qualitative judgment (e.g. "does not support a priced round") is no longer
+   accurate given the updated figures, revise it to match the new magnitude.
+4. Keep the same analytical voice and tense.
+5. For any market value you write, use a placeholder token so the frontend can
+   keep the number live. Tokens (use exactly as written):
+     {{buyer_population}}  — eligible buyer count
+     {{spend_per_unit}}    — annualised spend per buyer (USD)
+     {{tam}}               — total addressable market (USD)
+     {{sam}}               — serviceable addressable market (USD)
+     {{som}}               — serviceable obtainable market (USD)
+6. Output ONLY the paragraph text. No headers, markdown, explanation, or surrounding quotes."""
+
+
+class _RegenBody(BaseModel):
+    section:         str  = Field(default="")
+    original_text:   str  = Field(default="", max_length=4000)
+    current_values:  dict = Field(default_factory=dict)
+    baseline_values: dict = Field(default_factory=dict)
+    assumptions:     list = Field(default_factory=list)
+
+
 @router.post("/reports/{report_id}/assumptions/parse")
 async def parse_assumption(
     report_id: str,
@@ -2738,3 +2765,93 @@ async def delete_assumption(
     except Exception as exc:
         logger.warning("delete_nl_assumption non-fatal: %s", exc)
     return {"ok": True}
+
+
+@router.post("/reports/{report_id}/assumptions/regenerate-section")
+async def regenerate_section(
+    report_id: str,
+    body: _RegenBody,
+    current_user=Depends(get_current_user),
+):
+    """Rewrite one narrative paragraph using the updated market model values.
+
+    Called when the user clicks 'Regenerate this section' on a stale paragraph.
+    Uses Haiku to rewrite the prose; placeholders in the output are replaced with
+    data-node-tagged spans so the numbers remain live after injection.
+    """
+    import os, httpx
+
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY not configured")
+
+    def _usd(v):
+        v = float(v or 0)
+        if v >= 1e9: return f'${v/1e9:.1f}B'
+        if v >= 1e6: return f'${v/1e6:.1f}M'
+        if v >= 1e3: return f'${round(v/1e3):,}K'
+        return f'${round(v):,}'
+
+    def _int_fmt(v):
+        return f'{round(float(v or 0)):,}'
+
+    cv = body.current_values
+    bv = body.baseline_values
+
+    assumptions_txt = "\n".join(
+        f"  {o.get('op','?')} {o.get('target','?')}"
+        f"{'×' if o.get('op')=='gate' else ' ='}{o.get('value','?')}: "
+        f"\"{o.get('quoted_span','')}\"" for o in (body.assumptions or [])
+    ) or "  (none)"
+
+    user_msg = (
+        f"Original paragraph:\n\"\"\"{body.original_text}\"\"\"\n\n"
+        f"Baseline: TAM {_usd(bv.get('tam',0))}, SAM {_usd(bv.get('sam',0))}, "
+        f"SOM {_usd(bv.get('som',0))}\n\n"
+        f"Updated values:\n"
+        f"  Buyer population: {_int_fmt(cv.get('buyer_population',0))}\n"
+        f"  Spend/unit: {_usd(cv.get('spend_per_unit',0))}\n"
+        f"  TAM: {_usd(cv.get('tam',0))}\n"
+        f"  SAM: {_usd(cv.get('sam',0))}\n"
+        f"  SOM: {_usd(cv.get('som',0))}\n\n"
+        f"Assumptions applied by the user:\n{assumptions_txt}\n\n"
+        "Rewrite the paragraph. Use {{buyer_population}}, {{spend_per_unit}}, "
+        "{{tam}}, {{sam}}, {{som}} as placeholder tokens for every market figure."
+    )
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json={
+                    "model":       "claude-haiku-4-5-20251001",
+                    "max_tokens":  512,
+                    "temperature": 0.3,
+                    "system":      _REGEN_SYSTEM_PROMPT,
+                    "messages":    [{"role": "user", "content": user_msg}],
+                },
+            )
+        resp.raise_for_status()
+        raw = resp.json()["content"][0]["text"].strip().strip('"')
+    except Exception as exc:
+        logger.error("regenerate_section failed: %s", exc)
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    # Replace {{key}} placeholders with formatted + data-node-tagged spans
+    FMT = {
+        "tam": _usd, "sam": _usd, "som": _usd,
+        "spend_per_unit": _usd, "buyer_population": _int_fmt,
+    }
+    html = raw
+    for key, fn in FMT.items():
+        placeholder = "{{" + key + "}}"
+        if placeholder in html:
+            span = f'<span class="mv" data-node="{key}">{fn(cv.get(key, 0))}</span>'
+            html = html.replace(placeholder, span)
+
+    return {"html": html}
