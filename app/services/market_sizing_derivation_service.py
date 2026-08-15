@@ -1672,6 +1672,37 @@ _SAM_LO, _SAM_MID, _SAM_HI = 0.15, 0.30, 0.45   # early-adopter fraction
 _SOM_LO, _SOM_MID, _SOM_HI = 0.08, 0.15, 0.25   # 5-yr SAM penetration
 
 
+def _query_nih_reporter_total(search_text: str, timeout: float = 3.0) -> "Optional[int]":
+    """Fetch active R-series grant count from NIH RePORTER for search_text.
+    No API key required. Returns project count or None on any error."""
+    try:
+        import requests as _req
+        resp = _req.post(
+            "https://api.reporter.nih.gov/v2/projects/search",
+            json={
+                "criteria": {
+                    "advanced_text_search": {
+                        "operator": "and",
+                        "search_field": "projecttitle,abstract",
+                        "search_text": search_text,
+                    },
+                    "fiscal_years": [2023, 2024, 2025],
+                    "is_active": True,
+                    "activity_codes": ["R01", "R21", "R15", "R41", "R43"],
+                },
+                "offset": 0,
+                "limit": 1,
+                "include_fields": ["ProjectNum"],
+            },
+            timeout=timeout,
+        )
+        resp.raise_for_status()
+        return int(resp.json().get("meta", {}).get("total") or 0) or None
+    except Exception as _e:
+        logger.debug("NIH RePORTER query failed (non-fatal): %s", _e)
+        return None
+
+
 def _parse_numeric_range(text: str) -> "tuple[float, float] | None":
     """Extract (lo, hi) from option text like '1,000–5,000 labs' or '$2,000–$8,000/yr'.
     Returns None if no parseable range found."""
@@ -1948,6 +1979,29 @@ def _derive_research_tool_formula(
         if _user_overrides.get("som"):
             _som_lo, _som_hi = _user_overrides["som"]
 
+    # Live NIH RePORTER query — replaces the PI's market-size guess with a count
+    # grounded in actual grant data. Skipped when population was derived from
+    # instrument requirements (more specific than a grant search).
+    _skip_reporter = (_user_overrides.get("pop", "")).startswith("instrument requirement")
+    if not _skip_reporter:
+        _nih_kw = " ".join(
+            [therapeutic_area]
+            + [w for w in (idea or "").lower().split()[:15] if len(w) > 4]
+        )[:150].strip()
+        _nih_total = _query_nih_reporter_total(_nih_kw)
+        if _nih_total and _nih_total > 200:
+            # RePORTER total = grant count; unique PIs ≈ total × 0.65
+            # (many PIs hold multiple concurrent awards)
+            _nih_lo = max(int(_nih_total * 0.65), 100)
+            _nih_hi = _nih_total
+            pop_lo, pop_hi = _nih_lo, _nih_hi
+            pop_src = (
+                f"NIH RePORTER (live, FY2023–25): {_nih_total:,} active R-series grants "
+                f"matching '{_nih_kw[:60]}'; estimated {_nih_lo:,}–{_nih_hi:,} unique PIs"
+            )
+            logger.info("NIH RePORTER: %d grants → pop %d–%d for '%s'",
+                        _nih_total, _nih_lo, _nih_hi, _nih_kw[:60])
+
     # Recompute midpoints after any overrides
     sam_mid = (_sam_lo + _sam_hi) / 2
     som_mid = (_som_lo + _som_hi) / 2
@@ -2082,7 +2136,8 @@ def _derive_research_tool_formula(
     _mc_note = ""
     if _mc is not None:
         _mc_note = (
-            f" Monte Carlo ({_mc.n_samples:,} samples): "
+            f" Monte Carlo ({_mc.n_samples:,} samples, baseline parameter range — "
+            f"apply user gates to see adjusted values): "
             f"TAM P5–P95 = {_fmt(_mc.tam_p5)}–{_fmt(_mc.tam_p95)}; "
             f"SOM P25–P75 = {_fmt(_mc.som_p25)}–{_fmt(_mc.som_p75)}. "
             f"Dominant uncertainty: {_mc.sensitivity_ranking[0].parameter} "

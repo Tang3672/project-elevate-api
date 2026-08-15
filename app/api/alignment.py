@@ -15,6 +15,7 @@ from typing import Optional
 
 from app.services.alignment_service import generate_alignment_report, generate_pi_report
 from app.api.auth import get_current_user, get_optional_user
+from app.api.admin_auth import require_admin_key
 from app.models.alignment import AlignmentReport, PIReport
 
 logger = logging.getLogger(__name__)
@@ -438,8 +439,8 @@ async def get_examples():
 
 
 @router.get("/pi-report/mock")
-async def mock_pi_report():
-    """Mock endpoint for frontend testing — returns sample report without calling Claude."""
+async def mock_pi_report(_: None = Depends(require_admin_key)):
+    """Mock endpoint for internal testing only — requires admin key."""
     return {
         "executive_summary": "This novel beta-lactam targets MRSA outpatient skin infections with an estimated 119,247 annual U.S. cases [SOURCE: CDC AR Threats 2019 | https://www.cdc.gov/antimicrobial-resistance/data-research/threats/index.html]. The QIDP pathway provides +5 years exclusivity and Priority Review, with a $180-320M development cost and $285M addressable U.S. market.",
         "expert_domain": "drug_amr",

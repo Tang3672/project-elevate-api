@@ -714,29 +714,33 @@ async def run_report_verification(report) -> None:
                 _corrected = set(_fixed.keys())
                 _remaining = [e for e in _errs
                               if section_for_flag(e.get("field", ""), e.get("issue", "")) not in _corrected]
-                _n_fixed = len(_errs) - len(_remaining)
+                # Count only non-MATH errors — MATH is handled client-side and filtered
+                # from the badge, so claiming a MATH correction in the count misleads.
+                def _is_math(e): return (e.get("category") or "").upper() == "MATH"
+                _n_display_errs = [e for e in _errs if not _is_math(e)]
+                _n_display_remain = [e for e in _remaining if not _is_math(e)]
+                _n_fixed_display = len(_n_display_errs) - len(_n_display_remain)
                 _val = dict(_val)
                 _val["errors"] = _remaining
                 # Never claim "resolved" — only "attempted". True resolution requires
                 # re-verification which we don't run here (would add 30+ s).
-                _val["self_corrected"] = _n_fixed
+                _val["self_corrected"] = _n_fixed_display
                 if _remaining:
                     _val["status"] = "ERROR"
                     _val["summary"] = (
-                        f"Attempted correction on {_n_fixed} issue(s); "
-                        f"{len(_remaining)} flagged issue(s) remain — review required."
+                        f"{len(_n_display_remain)} issue(s) flagged"
+                        + (f" · correction attempted on {_n_fixed_display}" if _n_fixed_display else "")
+                        + " — review required."
                     )
                 else:
-                    # All errors had corrections applied, but we can't confirm they
-                    # worked without re-running the verifier. Mark as FLAG not PASS.
                     _val["status"] = "FLAG"
                     _val["summary"] = (
-                        f"Corrections applied to {_n_fixed} flagged issue(s). "
-                        f"Re-run the report to confirm resolution."
-                    )
+                        f"Correction attempted on {_n_fixed_display} issue(s). "
+                        f"Re-run to verify."
+                    ) if _n_fixed_display else "No flagged issues remaining."
                 report.validation = _val
-                logger.info("Self-correction: applied corrections to %d/%d errors",
-                            _n_fixed, len(_errs))
+                logger.info("Self-correction: attempted on %d/%d display errors",
+                            _n_fixed_display, len(_n_display_errs))
     except Exception as _cor_e:
         logger.warning("Self-correction failed (non-fatal): %s", _cor_e)
 
