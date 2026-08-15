@@ -4,10 +4,12 @@ from app.utils import fmt_usd
 
 
 @pytest.mark.parametrize("value,expected", [
-    # Sub-million → K, never $0M
+    # Sub-million → K only for values ≥ $10,000, never $0M
     (438_750,    "$439K"),
-    (1_000,      "$1K"),
-    (999_999,    "$1000K"),     # right at the boundary; K tier uses no thousands comma
+    (10_000,     "$10K"),       # threshold: exactly $10K
+    (9_999,      "$9,999"),     # just below threshold: shown as full dollar
+    (1_000,      "$1,000"),     # below threshold: full dollar, not $1K
+    (999_999,    "$1000K"),     # right at the million boundary; K tier uses no thousands comma
     (500,        "$500"),
     (0,          "$0"),
 

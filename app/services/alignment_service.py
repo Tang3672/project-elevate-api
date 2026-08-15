@@ -1992,13 +1992,30 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
     # These are implementation references that must never appear in user-facing text.
     try:
         import re as _re_spec
+        # Broader pattern: also catch "per H-10 rules" / "(per B-01)" so the
+        # surrounding context doesn't leave orphaned "per  rules" residue.
         _SPEC_ID_RE = _re_spec.compile(
-            r"\b(?:H|B|F|S)-\d{2}\b"           # H-07, B-01, S-06, F-03, etc.
-            r"|spec\s+v\d+"                      # "spec v4", "spec v3"
-            r"|\(H-\d{2}\s+(?:fix|formula|compliant)\)"   # "(H-07 formula)"
-            r"|\(B-\d{2}\s+\w+\)",               # "(B-01 rule)"
+            r"\bper\s+[HBFS]-\d{2}(?:\s+\w+){0,2}"  # "per H-10 rules", "per B-01 formula"
+            r"|\b(?:H|B|F|S)-\d{2}\b"            # H-07, B-01, S-06, F-03, etc.
+            r"|spec\s+v\d+"                       # "spec v4", "spec v3"
+            r"|\(H-\d{2}\s+(?:fix|formula|compliant)\)"  # "(H-07 formula)"
+            r"|\(B-\d{2}\s+\w+\)"                # "(B-01 rule)"
+            r"|\(per\s+[HBFS]-\d{2}[^)]*\)",     # "(per H-10 rules)"
             _re_spec.I,
         )
+
+        def _scrub_str(s: str) -> str:
+            return _SPEC_ID_RE.sub("", s).strip() if _SPEC_ID_RE.search(s) else s
+
+        def _scrub_val(v):
+            if isinstance(v, str):
+                return _scrub_str(v)
+            if isinstance(v, list):
+                return [_scrub_val(item) for item in v]
+            if isinstance(v, dict):
+                return {k: _scrub_val(dv) for k, dv in v.items()}
+            return v
+
         _SPEC_STR_FIELDS = (
             "executive_summary", "confidence_note", "methodology_note",
             "positioning_statement", "guiding_question", "limitations",
@@ -2009,18 +2026,25 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
         for _sf in _SPEC_STR_FIELDS:
             _sv = getattr(report, _sf, None)
             if isinstance(_sv, str) and _SPEC_ID_RE.search(_sv):
-                setattr(report, _sf, _SPEC_ID_RE.sub("", _sv).strip())
+                setattr(report, _sf, _scrub_str(_sv))
                 logger.info("spec-id scrubber: removed spec identifiers from '%s'", _sf)
         for _lf in _SPEC_LIST_FIELDS:
             _lv = getattr(report, _lf, None)
             if isinstance(_lv, list):
                 _cleaned_list = [
-                    _SPEC_ID_RE.sub("", s).strip() if isinstance(s, str) else s
+                    _scrub_str(s) if isinstance(s, str) else s
                     for s in _lv
                 ]
                 if _cleaned_list != _lv:
                     setattr(report, _lf, _cleaned_list)
                     logger.info("spec-id scrubber: removed spec identifiers from list '%s'", _lf)
+        # Scrub citation dicts — relevance/title/note fields can contain internal IDs.
+        _lit = getattr(report, "literature_citations", None)
+        if isinstance(_lit, list) and _lit:
+            _lit_clean = [_scrub_val(c) if isinstance(c, dict) else c for c in _lit]
+            if _lit_clean != _lit:
+                report.literature_citations = _lit_clean
+                logger.info("spec-id scrubber: scrubbed literature_citations")
     except Exception as _spec_e:
         logger.warning("spec-id scrubber failed (non-fatal): %s", _spec_e)
 
@@ -3039,78 +3063,105 @@ def _enforce_market_consistency(report, deriv) -> None:
     """Overwrite the market-sizing headline figures + formula with internally-exact
     arithmetic from the deterministic derivation, so SAM = TAM × penetration% and
     SOM = SAM × capture% hold to the dollar (no LLM rounding drift for the Math
-    Verifier to flag). Best-effort; leaves the report untouched on any problem."""
-    try:
-        ms = getattr(report, "market_sizing", None)
-        if ms is None:
-            return
-        tam = round(float(getattr(deriv, "us_tam_usd", 0) or 0))
-        if tam <= 0:
-            return
-        # Fix 2: write TAM unconditionally — buyer_population × spend_per_unit is the
-        # single source of truth; never let LLM-generated json overwrite it.
-        ms.total_addressable_market_usd = float(tam)
+    Verifier to flag).
 
+    Structured as three independent phases so a failure in phase 2 or 3 can never
+    block phase 1 (headline TAM). The three phases are:
+      1. Write headline TAM (always runs when derivation has a positive TAM).
+      2. Write headline SAM, SOM, and formula string.
+      3. Sync step-table values to match the headline figures.
+    """
+    ms = getattr(report, "market_sizing", None)
+    if ms is None:
+        return
+    try:
+        tam = round(float(getattr(deriv, "us_tam_usd", 0) or 0))
+    except Exception:
+        return
+    if tam <= 0:
+        return
+
+    # Phase 1 — headline TAM: isolated so nothing can block it.
+    try:
+        ms.total_addressable_market_usd = float(tam)
+        logger.debug("market consistency: TAM headline → $%s", f"{tam:,.0f}")
+    except Exception as e:
+        logger.warning("market consistency phase-1 (TAM headline) failed: %s", e)
+        return
+
+    # Phase 2 — headline SAM/SOM and formula string.
+    sam = 0
+    som = 0
+    try:
         sam_raw = float(getattr(deriv, "us_sam_usd", 0) or 0)
         som_raw = float(getattr(deriv, "us_som_usd", 0) or 0)
-        if sam_raw <= 0:
-            return
-        assert sam_raw <= tam, f"SAM {sam_raw:,.0f} > TAM {tam:,.0f}"
-        pen = round(sam_raw / tam * 100, 1)            # clean reachable-penetration %
-        sam = round(tam * pen / 100)                   # exactly TAM × pen%
-        cap = round(som_raw / sam_raw * 100, 1) if sam_raw else 0.0
-        som = round(sam * cap / 100)                   # exactly SAM × cap%
-
-        def _fmt(v):
-            from app.utils import fmt_usd
-            return fmt_usd(v)
-
-        # Describe TAM in the unit the derivation actually used — a SaMD is priced per
-        # hospital site, a diagnostic per test, a device per procedure — NOT per patient.
-        _arch = (getattr(deriv, "archetype", "") or "").lower()
-        _tam_basis = {
-            "research_tool_non_clinical":  "NIH-funded labs × annualised spend per lab",
-            "research_infrastructure_saas":"eligible research institutions × annual site-license fee",
-            "software_samd":               "eligible hospital sites × annual SaaS license",
-            "in_vitro_diagnostic":         "annual test volume × price per test",
-            "medical_device_surgical":     "annual procedures × device revenue per procedure",
-            "medical_device_capital":      "installed base × equipment ASP",
-            "combination":                 "blended device + software/diagnostic revenue streams",
-            "gene_cell_therapy":           "annual treated cohort × one-time price",
-            "vaccine":                     "population at risk × immunization rate × price",
-        }.get(_arch, "buyers × annual revenue per buyer")
-
-        from app.services.buyer_model import HORIZON_YEARS as _HORIZON_YEARS
-        ms.serviceable_market_usd = float(sam)
-        ms.formula = (
-            f"TAM = ${tam:,.0f} ({_fmt(tam)}, {_tam_basis}). "
-            f"SAM = TAM × {pen}% reachable penetration = ${sam:,.0f} ({_fmt(sam)}). "
-            f"SOM = SAM × {cap}% ({_HORIZON_YEARS}-yr penetration midpoint) = ${som:,.0f} ({_fmt(som)}). "
-            f"US, annual; figures from the deterministic bottom-up derivation."
-        )
-
-        # B-01: propagate the code-computed TAM/SAM/SOM into every matching step so
-        # the step table never disagrees with the headline (B-01: LLM sometimes sets the
-        # TAM step to the pessimistic endpoint while the label says "midpoint").
-        # B-10: strip duplicate step-number prefixes ("Step 1 - Step 1 - …").
-        import re as _re_b01
-        _dedup = _re_b01.compile(r"^Step\s+(\d+)\s*[-–—]\s*Step\s+\1\s*[-–—]\s*", _re_b01.I)
-        for step in (getattr(ms, "steps", None) or []):
-            # Dedup label first so the keyword check below sees clean text
-            raw_lbl = getattr(step, "label", "") or ""
-            clean_lbl = _dedup.sub("", raw_lbl).strip(" –—-")
-            if clean_lbl != raw_lbl:
-                step.label = clean_lbl
-            lbl_lo = step.label.lower()
-            # Overwrite step value so step ↔ headline agree
-            if "total addressable" in lbl_lo or (" tam" in lbl_lo and "sam" not in lbl_lo):
-                step.value = float(tam)
-            elif "serviceable addressable" in lbl_lo or ("sam" in lbl_lo and "som" not in lbl_lo):
-                step.value = float(sam)
-            elif "obtainable" in lbl_lo or "som" in lbl_lo:
-                step.value = float(som)
+        if sam_raw > 0:
+            if sam_raw > tam:
+                logger.warning(
+                    "market consistency: SAM ($%s) > TAM ($%s) — capping SAM at TAM",
+                    f"{sam_raw:,.0f}", f"{tam:,.0f}",
+                )
+                sam_raw = float(tam)
+            pen = round(sam_raw / tam * 100, 1)
+            sam = round(tam * pen / 100)
+            cap = round(som_raw / sam_raw * 100, 1) if sam_raw else 0.0
+            som = round(sam * cap / 100)
+            ms.serviceable_market_usd = float(sam)
+            try:
+                from app.utils import fmt_usd as _fmt_usd
+                from app.services.buyer_model import HORIZON_YEARS as _HORIZON_YEARS
+                _arch = (getattr(deriv, "archetype", "") or "").lower()
+                _tam_basis = {
+                    "research_tool_non_clinical":   "NIH-funded labs × annualised spend per lab",
+                    "research_infrastructure_saas": "eligible research institutions × annual site-license fee",
+                    "software_samd":                "eligible hospital sites × annual SaaS license",
+                    "in_vitro_diagnostic":          "annual test volume × price per test",
+                    "medical_device_surgical":      "annual procedures × device revenue per procedure",
+                    "medical_device_capital":       "installed base × equipment ASP",
+                    "combination":                  "blended device + software/diagnostic revenue streams",
+                    "gene_cell_therapy":            "annual treated cohort × one-time price",
+                    "vaccine":                      "population at risk × immunization rate × price",
+                }.get(_arch, "buyers × annual revenue per buyer")
+                ms.formula = (
+                    f"TAM = ${tam:,.0f} ({_fmt_usd(tam)}, {_tam_basis}). "
+                    f"SAM = TAM × {pen}% reachable penetration = ${sam:,.0f} ({_fmt_usd(sam)}). "
+                    f"SOM = SAM × {cap}% ({_HORIZON_YEARS}-yr penetration midpoint) = ${som:,.0f} ({_fmt_usd(som)}). "
+                    f"US, annual; figures from the deterministic bottom-up derivation."
+                )
+            except Exception as _fe:
+                logger.warning("market consistency phase-2 formula failed (non-fatal): %s", _fe)
     except Exception as e:
-        logger.warning("market consistency enforcement skipped: %s", e)
+        logger.warning("market consistency phase-2 (SAM/SOM/formula) failed: %s", e)
+
+    # Phase 3 — sync step-table values.
+    import re as _re_b01
+    _dedup = _re_b01.compile(r"^Step\s+(\d+)\s*[-–—]\s*Step\s+\1\s*[-–—]\s*", _re_b01.I)
+    _tam_re = _re_b01.compile(r"\btam\b")
+    _sam_re = _re_b01.compile(r"\bsam\b")
+    _som_re = _re_b01.compile(r"\bsom\b")
+    try:
+        for step in (getattr(ms, "steps", None) or []):
+            try:
+                raw_lbl = getattr(step, "label", "") or ""
+                clean_lbl = _dedup.sub("", raw_lbl).strip(" –—-")
+                if clean_lbl != raw_lbl:
+                    step.label = clean_lbl
+                lbl_lo = step.label.lower()
+                # B-01: SOM before SAM before TAM — labels often cross-reference
+                # the tier above (e.g. "SAM = 40% of **TAM**") so check most
+                # specific first to avoid mis-classifying.
+                if "obtainable" in lbl_lo or _som_re.search(lbl_lo):
+                    if som > 0:
+                        step.value = float(som)
+                elif "serviceable addressable" in lbl_lo or _sam_re.search(lbl_lo):
+                    if sam > 0:
+                        step.value = float(sam)
+                elif "total addressable" in lbl_lo or _tam_re.search(lbl_lo):
+                    step.value = float(tam)
+            except Exception as _se:
+                logger.warning("market consistency phase-3 step update failed: %s", _se)
+    except Exception as e:
+        logger.warning("market consistency phase-3 (steps) failed: %s", e)
 
 
 async def _call_claude(context: str, system_prompt: str, max_tokens: int = 2000,

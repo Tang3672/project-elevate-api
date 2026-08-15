@@ -145,7 +145,7 @@ def _confidence_for(source_url: str, data_source: str, assumptions: list[str]) -
 def _fmt_usd(v: float) -> str:
     if v >= 1e9:  return f"${v/1e9:.1f}B"
     if v >= 1e6:  return f"${v/1e6:.0f}M"
-    if v >= 1e3:  return f"${v/1e3:.0f}K"
+    if v >= 1e4:  return f"${v/1e3:.0f}K"
     return f"${v:,.0f}"
 
 
