@@ -2642,7 +2642,8 @@ Return ONLY valid JSON, no prose:
       "label":       "<short human label for the ledger>",
       "quoted_span": "<verbatim fragment from input that justifies this op>",
       "confidence":  <0.0–1.0>,
-      "unit":        "<optional display unit string>"
+      "unit":        "<optional display unit string>",
+      "replaces":    null | "<id of an existing op this supersedes>"
     }
   ],
   "clarifying_question": null | "<question to ask if a required number is missing>"
@@ -2654,7 +2655,19 @@ Rules:
 - If the text is qualitative with no number, use note (omit target/value).
 - Rates (sam_rate, som_rate) must be in [0, 1]; convert percentages to decimals.
 - Set clarifying_question when the intent is clear but a required number is absent.
-- Do not invent facts; only extract what the text says."""
+- Do not invent facts; only extract what the text says.
+
+REVISION DETECTION — critical:
+The PI may revise an earlier assumption rather than add a new one. You are given the
+currently applied ops with their ids, targets, and quoted spans. If the new statement
+corrects or restates one of them — same target, same underlying concept — set
+"replaces" to that op's id. Phrases like "actually", "more like", "I meant",
+"make that", "closer to", "it's really", "correction:" signal revision.
+
+Example: if ops contains {"id":"o1","target":"buyer_population","label":"a third of labs"}
+and the new text says "its more like a fifth of the labs", return
+{"op":"gate","target":"buyer_population","value":0.2,"replaces":"o1",...}
+NOT a second stacking gate."""
 
 
 async def _parse_assumption_nl(text: str, state: dict, ops: list) -> dict:
@@ -2666,8 +2679,16 @@ async def _parse_assumption_nl(text: str, state: dict, ops: list) -> dict:
     if not api_key:
         raise ValueError("ANTHROPIC_API_KEY not set")
 
+    # Build a concise ops manifest so the LLM can identify which op to replace
+    _ops_manifest = [
+        {"id": o.get("id",""), "target": o.get("target",""), "label": o.get("label",""),
+         "quoted_span": o.get("quoted_span","")[:60]}
+        for o in (ops or []) if o.get("op") != "note"
+    ]
+
     context = f"""Current model state: {_json.dumps(state)}
-Existing ops already applied: {_json.dumps(ops)}
+Currently applied ops (for revision detection):
+{_json.dumps(_ops_manifest, indent=2)}
 
 New assumption text from the PI:
 "{text}"

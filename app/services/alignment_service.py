@@ -101,6 +101,23 @@ _BANNED_OUTPUT_STRINGS = [
     "specify source",
     "[date removed",
     "nih-funded funded",
+    # P0-1: EDGAR pipeline not yet built — no seed-factor corrections until priors.json ships
+    "edgar calibration",
+    "edgar-corrected",
+    "edgar correction",
+    # P1: developer instructions must never reach user-facing output
+    "note: if",
+    "before proceeding",
+    "flag the gap",
+    "should be validated",
+    "operator should",
+    # Spec/tracking IDs that belong in PRs, not output
+    "(h-07 formula)",
+    "(h-10 rules)",
+    "per h-",
+    "per b-",
+    "per f-",
+    "per s-",
 ]
 
 

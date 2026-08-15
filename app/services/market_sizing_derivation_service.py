@@ -1999,8 +1999,7 @@ def _derive_research_tool_formula(
                 f"Observed spend: ${sp_lo*3:,.0f}–${sp_hi*3:,.0f} per cycle from primary PI interviews. "
                 f"Annualised: divide by 3 → ${sp_lo:,.0f}–${sp_hi:,.0f}/yr. "
                 f"Source: {sp_src}. "
-                f"NOTE: if the product's asking price exceeds the observed spend ceiling, "
-                f"flag the gap in a serviceable-buyer reconciliation section before proceeding."
+                f"If the asking price exceeds the observed spend ceiling, this gap should appear in the reconciliation."
             ),
             data_source=sp_src,
             assumptions=[
@@ -2302,44 +2301,6 @@ def generate_market_sizing_derivation(
         deriv = _derive_samd_formula(idea, dn, therapeutic_area, us_patient_population, signals)
     else:
         deriv = _derive_pharma_formula(idea, dn, therapeutic_area, us_patient_population, archetype, signals)
-
-    # G.14: Apply EDGAR forecast-to-outcome calibration correction.
-    # Bottom-up models systematically overstate; the factor is the median ratio from
-    # cross-referencing S-1 TAM claims against realized 10-K revenue.
-    try:
-        from app.db import edgar_calibration_repository as _edgar
-        _ctam, _csam, _csom, _factor, _note = _edgar.apply_calibration(
-            deriv.us_tam_usd, deriv.us_sam_usd, deriv.us_som_usd, archetype
-        )
-        if _factor != 1.0 and _note:
-            deriv.us_tam_usd             = _ctam
-            deriv.us_sam_usd             = _csam
-            deriv.us_som_usd             = _csom
-            deriv.tam_fmt                = _fmt(_ctam)
-            deriv.sam_fmt                = _fmt(_csam)
-            deriv.som_fmt                = _fmt(_csom)
-            deriv.edgar_calibration_factor = _factor
-            deriv.edgar_calibration_note   = _note
-            deriv.key_assumptions = [_note] + (deriv.key_assumptions or [])
-            # Scale Monte Carlo distribution by the same factor so P50 ≈ corrected TAM
-            if deriv.monte_carlo is not None:
-                mc = deriv.monte_carlo
-                from dataclasses import replace as _dc_replace
-                deriv.monte_carlo = _dc_replace(mc,
-                    tam_p5  = mc.tam_p5  / _factor,
-                    tam_p25 = mc.tam_p25 / _factor,
-                    tam_p50 = mc.tam_p50 / _factor,
-                    tam_p75 = mc.tam_p75 / _factor,
-                    tam_p95 = mc.tam_p95 / _factor,
-                    sam_p25 = mc.sam_p25 / _factor,
-                    sam_p50 = mc.sam_p50 / _factor,
-                    sam_p75 = mc.sam_p75 / _factor,
-                    som_p25 = mc.som_p25 / _factor,
-                    som_p50 = mc.som_p50 / _factor,
-                    som_p75 = mc.som_p75 / _factor,
-                )
-    except Exception as _ec:
-        logger.warning("edgar_calibration: apply failed (non-fatal): %s", _ec)
 
     return deriv
 
