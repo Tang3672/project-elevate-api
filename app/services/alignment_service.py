@@ -2005,12 +2005,12 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
         # Broader pattern: also catch "per H-10 rules" / "(per B-01)" so the
         # surrounding context doesn't leave orphaned "per  rules" residue.
         _SPEC_ID_RE = _re_spec.compile(
-            r"\bper\s+[HBFS]-\d{2}(?:\s+\w+){0,2}"  # "per H-10 rules", "per B-01 formula"
-            r"|\b(?:H|B|F|S)-\d{2}\b"            # H-07, B-01, S-06, F-03, etc.
-            r"|spec\s+v\d+"                       # "spec v4", "spec v3"
-            r"|\(H-\d{2}\s+(?:fix|formula|compliant)\)"  # "(H-07 formula)"
-            r"|\(B-\d{2}\s+\w+\)"                # "(B-01 rule)"
-            r"|\(per\s+[HBFS]-\d{2}[^)]*\)",     # "(per H-10 rules)"
+            r"\bper\s+[HBFS]-\d+(?:\s+\w+){0,2}"   # "per H-10 rules", "per B-1 formula"
+            r"|\b(?:H|B|F|S)-\d+\b"                 # H-07, B-1, S-6, F-03, etc.
+            r"|spec\s+v\d+"                          # "spec v4", "spec v3"
+            r"|\(H-\d+\s+(?:fix|formula|compliant)\)"  # "(H-7 formula)"
+            r"|\(B-\d+\s+\w+\)"                     # "(B-1 rule)"
+            r"|\(per\s+[HBFS]-\d+[^)]*\)",          # "(per H-10 rules)"
             _re_spec.I,
         )
 
@@ -2579,7 +2579,7 @@ def _parse_expert_response(data, idea, product_type, expert, demand_results, hos
         market_geography       = _geo_obj,
         recommended_next_steps = data.get("recommended_next_steps", []),
         strategic_playbook     = data.get("strategic_playbook", []),
-        literature_citations   = _filter_lit(data.get("literature_citations", []), idea, sub_expert_id),
+        literature_citations   = _filter_lit(data.get("literature_citations", []), idea, sub_expert_id) or None,
         limitations            = data.get("limitations"),
         signals_searched       = total_signals,
         hospital_needs_searched = len(hospital_matches_raw),
@@ -2695,7 +2695,7 @@ async def _generate_antibiotic_report(
         market_geography=geography,
         recommended_next_steps=data.get("recommended_next_steps", []),
         strategic_playbook=data.get("strategic_playbook", []),
-        literature_citations=_filter_lit(data.get("literature_citations", []), idea, "drug_amr"),
+        literature_citations=_filter_lit(data.get("literature_citations", []), idea, "drug_amr") or None,
         limitations=data.get("limitations"),
         signals_searched=total_signals,
         hospital_needs_searched=len(hospital_matches_raw),
@@ -2830,7 +2830,7 @@ async def _generate_generic_pi_report(
         market_geography=geography,
         recommended_next_steps=data.get("recommended_next_steps", []),
         strategic_playbook=data.get("strategic_playbook", []),
-        literature_citations=_filter_lit(data.get("literature_citations", []), idea, ""),
+        literature_citations=_filter_lit(data.get("literature_citations", []), idea, "") or None,
         limitations=data.get("limitations"),
         signals_searched=total_signals,
         hospital_needs_searched=len(hospital_matches_raw),
@@ -2913,7 +2913,7 @@ def _parse_legacy_response(claude_response, idea, demand_results, hospital_match
         related_conditions=data.get("related_conditions", []),
         recommended_next_steps=data.get("recommended_next_steps", []),
         strategic_playbook=data.get("strategic_playbook", []),
-        literature_citations=_filter_lit(data.get("literature_citations", []), idea, ""),
+        literature_citations=_filter_lit(data.get("literature_citations", []), idea, "") or None,
         limitations=data.get("limitations"),
         idea_submitted=idea,
         signals_searched=total_signals,
