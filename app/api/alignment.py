@@ -2724,6 +2724,21 @@ async def parse_assumption(
     except Exception as exc:
         logger.error("assumption parse failed: %s", exc)
         raise HTTPException(status_code=502, detail=f"LLM parse error: {exc}")
+
+    _DERIVED = {"tam", "sam", "som"}
+    for _op in result.get("ops", []):
+        if _op.get("target") in _DERIVED:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Op targets derived field '{_op['target']}'; only buyer_population, spend_per_unit, sam_rate, som_rate are editable.",
+            )
+        _span = _op.get("quoted_span", "")
+        if _span and _span not in body.text:
+            raise HTTPException(
+                status_code=422,
+                detail=f"quoted_span not found verbatim in input: {_span!r}",
+            )
+
     return result
 
 
