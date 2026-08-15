@@ -1,5 +1,7 @@
 import asyncio
 import os
+
+ENGINE_BUILD_SHA: str = os.environ.get("RAILWAY_GIT_COMMIT_SHA", "dev")[:8]
 """
 PI Alignment Service v2
 =======================
@@ -525,6 +527,7 @@ async def generate_pi_report(
     report.mismatch_warning = router_result.mismatch_warning
     report.run_manifest    = _run_manifest
     report.domain          = _resolved_domain
+    report.engine_version  = ENGINE_BUILD_SHA
 
     # C.1/C.2: attach axis selection/rejection decisions
     try:
@@ -533,6 +536,16 @@ async def generate_pi_report(
         report.axis_decisions = format_axis_decisions(_axis_decisions)
     except Exception as _axis_e:
         logger.warning("Axis selection failed (non-fatal): %s", _axis_e)
+
+    # §8: fix known LLM duplicate-word artifacts before verification sees the text
+    try:
+        _rj = json.dumps(report.model_dump(mode="json"))
+        _rj2 = re.sub(r'NIH-funded funded', 'NIH-funded', _rj, flags=re.IGNORECASE)
+        if _rj2 != _rj:
+            report = report.model_validate(json.loads(_rj2))
+            logger.info("Output sanitize: removed NIH-funded duplicate")
+    except Exception as _san_e:
+        logger.debug("Output sanitize (non-fatal): %s", _san_e)
 
     if skip_verification:
         # Verification (validation + trust + self-correction) is run in the
