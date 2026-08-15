@@ -86,7 +86,7 @@ _RESOLVED_NO_ABSTRACT = {
 }
 
 
-def _make_citation(pmid="12345678", title="RCT on adverse event reduction", relevance=""):
+def _make_citation(pmid="38764219", title="RCT on adverse event reduction", relevance=""):
     return {"pmid": pmid, "title": title, "relevance": relevance}
 
 
