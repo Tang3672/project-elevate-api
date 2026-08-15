@@ -1259,6 +1259,7 @@ MARKET SIZING FOR RESEARCH TOOLS:
 COMPETITIVE LANDSCAPE:
 - Real competitors are: (1) the STATUS QUO / DIY (SD card retrieval, lab-built scripts, manual protocols) — this is the primary incumbent; (2) commercial research hardware relevant to the specific domain (e.g., Movisens for human physiology research; METER Group / Onset HOBO for environmental sensing; Noldus for behavioral research); (3) generic IoT platforms a capable lab could assemble (Golioth, Blues, Balena, Memfault).
 - FDA device registries contain ZERO relevant competitors for non-clinical research tools.
+- SBIR/STTR awardees in a different product domain are NOT competitors. A drug company, a clinical diagnostic company, or any company whose product does not substitute for this specific workflow is NOT a competitor. Never cite cross-domain SBIR awards as evidence of competitive threat or market validation.
 - A competitor analysis that does not name the status quo / inertia as the primary competitor is incomplete.
 
 REGULATORY STATUS:
@@ -1271,6 +1272,11 @@ VALUE PROPOSITION FRAMEWORK:
 - Research labs care about: data reliability, reduced human burden in long-duration experiments, integration with existing analysis pipelines (Python, R, MATLAB), battery life/power, cost per data point, ease of deployment by non-engineers.
 - They do NOT care about: HIPAA (unless human subjects), hospital workflow integration, EHR compatibility, reimbursement.
 - The winning positioning is: does this make long-duration, unattended data collection more reliable and less labour-intensive for the average academic lab?
+
+SOURCING RULES FOR QUANTITATIVE CLAIMS:
+- Any specific number (hours per year, adoption rate, time savings, error rate, headcount) MUST be attributed to an external source: a published paper, a survey, NIH RePORTER data, or stated user research. Never attribute a specific metric to "internal model", "our model", or "estimated by the tool".
+- If no external source exists for a quantitative claim, omit the number and describe the phenomenon qualitatively instead.
+- "Estimated X hours/yr per lab" is only acceptable when followed by a citation (e.g., "Johnson et al. 2023, J Neurosci Methods"). Without a citation, drop the number.
 
 PRICING STRATEGY:
 - One-time purchase + optional support: simplest; matches capital budget cycles.
@@ -1291,7 +1297,9 @@ SECTIONS TO INCLUDE:
 - BANNED VOCABULARY: 510(k), De Novo, PMA, Breakthrough Device, predicate, NTAP, CPT, J-code, DRG, WAC, DALY, peak revenue. Flag and substitute N/A if found.
 - BUYER: must be academic_pi or core_facility, not hospital_enterprise or IDN.
 - TAM DENOMINATOR: must be labs with NIH/NSF funding or equivalent research population, not hospital count.
-- COMPETITIVE SECTION: must name status quo / DIY as the primary competitor. Flag if missing.
+- COMPETITIVE SECTION: must name status quo / DIY as the primary competitor. Flag if missing. No cross-domain SBIR citations.
+- DECISION AUTHORITY: the profile must state PI as primary buyer (>90% for typical purchases). "unknown — not assessed" is only valid when no buyer information is available at all — it must never appear alongside a percentage estimate in the same field.
+- QUANTITATIVE CLAIMS: any specific metric (hours/yr, time saved, error rate) must have an external citation. Reject claims sourced to "internal model" or "our estimate".
 - PRICING: no WAC, no list-price with PBM. Only lab-appropriate models.
 - REGULATORY: no 510(k) pathway unless product has a clinical claim. If regulatory status is ambiguous, render a decision tree, not two parallel narratives.
 - SCORES: clinical feasibility rubric does not apply — render as N/A, score=null, not 0.0."""
