@@ -1983,8 +1983,18 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
                         logger.info("B-01: stripped authored panel scores from '%s' (research tool)", _b01_fname)
         # Also scrub the formula string itself if it has horizon contradiction
         _ms = getattr(report, "market_sizing", None)
-        if _ms and hasattr(_ms, "formula") and isinstance(_ms.formula, str):
-            _ms.formula = _fix_som_horizon(_ms.formula)
+        if _ms:
+            if hasattr(_ms, "formula") and isinstance(_ms.formula, str):
+                _ms.formula = _fix_som_horizon(_ms.formula)
+            # Strip "Reconciled via 3-method triangulation" from methodology_note —
+            # the triangulation section was removed from the UI but the computation
+            # string still leaks into LLM-generated methodology prose.
+            if hasattr(_ms, "methodology_note") and isinstance(_ms.methodology_note, str):
+                _TRIANG_RE = _re_h08.compile(
+                    r"Reconciled\s+via\s+\d+-method\s+triangulation[^.]*\.",
+                    _re_h08.I,
+                )
+                _ms.methodology_note = _TRIANG_RE.sub("", _ms.methodology_note).strip()
     except Exception as _h08_e:
         logger.warning("H-08/B-02 market math cleanup failed (non-fatal): %s", _h08_e)
 
