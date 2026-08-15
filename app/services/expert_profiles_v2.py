@@ -1294,12 +1294,12 @@ SECTIONS TO INCLUDE:
 - Adversarial Review Pass (for each recommendation: supporting case + structural risk + what would change this)
 - Guiding Question (one decision test the team applies to future choices)""",
     critic_rules = """RESEARCH TOOL CRITIC RULES:
-- BANNED VOCABULARY: 510(k), De Novo, PMA, Breakthrough Device, predicate, NTAP, CPT, J-code, DRG, WAC, DALY, peak revenue. Flag and substitute N/A if found.
+- BANNED VOCABULARY: 510(k), De Novo, PMA, Breakthrough Device, predicate, NTAP, CPT, J-code, DRG, WAC, DALY, peak revenue, /course (drug course pricing). Flag and substitute N/A if found.
 - BUYER: must be academic_pi or core_facility, not hospital_enterprise or IDN.
 - TAM DENOMINATOR: must be labs with NIH/NSF funding or equivalent research population, not hospital count.
 - COMPETITIVE SECTION: must name status quo / DIY as the primary competitor. Flag if missing. No cross-domain SBIR citations.
 - DECISION AUTHORITY: the profile must state PI as primary buyer (>90% for typical purchases). "unknown — not assessed" is only valid when no buyer information is available at all — it must never appear alongside a percentage estimate in the same field.
-- QUANTITATIVE CLAIMS: any specific metric (hours/yr, time saved, error rate) must have an external citation. Reject claims sourced to "internal model" or "our estimate".
+- QUANTITATIVE CLAIMS: any specific metric (hours/yr, time saved, error rate, % lift) must have an external citation. Reject claims sourced to "internal model" or "our estimate". Round-number percentage lifts (e.g., "30% improvement", "50% reduction") with no citation are fabrications — omit them.
 - PRICING: no WAC, no list-price with PBM. Only lab-appropriate models.
 - REGULATORY: no 510(k) pathway unless product has a clinical claim. If regulatory status is ambiguous, render a decision tree, not two parallel narratives.
 - SCORES: clinical feasibility rubric does not apply — render as N/A, score=null, not 0.0."""

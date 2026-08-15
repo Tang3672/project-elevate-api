@@ -769,7 +769,7 @@ CRITICAL RULES:
 You must respond with ONLY a valid JSON object. No markdown, no preamble. Use this exact schema:
 
 {
-  "executive_summary": "<2-3 sentence summary citing specific numbers>",
+  "executive_summary": "<2-3 sentence summary citing specific numbers — dollar figures must match total_addressable_market_usd exactly; do not round>",
 
   "disease_intelligence": {
     "condition": "<primary pathogen or disease>",
@@ -2379,7 +2379,7 @@ If the exact guidance is not listed above, use the general FDA guidance search: 
 4. For buyer segments: source_url is MANDATORY. Real examples: https://www.aha.org/statistics/fast-facts-us-hospitals, https://www.cancer.gov/research/infrastructure/cancer-centers/find, https://data.cms.gov/, https://www.curesma.org/about-sma/. NEVER leave source_url empty or as empty strings the buyer data.
 
 {
-  "executive_summary": "<2 sentences, under 300 chars>",
+  "executive_summary": "<2 sentences, under 300 chars — dollar figures must match total_addressable_market_usd exactly; do not round (e.g. use $68.8M not $69M)>",
   "literature_citations": [{"pmid":"<PMID copied verbatim from the retrieved papers in your context — NEVER invent a PMID>","title":"<title copied from retrieved context — NEVER invent or paraphrase>","authors":"<authors from retrieved context>","journal":"<journal from retrieved context>","year":"<year from retrieved context>","url":"https://pubmed.ncbi.nlm.nih.gov/<PMID>/","relevance":"<under 100 chars>"}],
   "disease_intelligence": {
     "condition": "<condition name>",
