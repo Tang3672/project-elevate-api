@@ -1991,7 +1991,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
             # string still leaks into LLM-generated methodology prose.
             if hasattr(_ms, "methodology_note") and isinstance(_ms.methodology_note, str):
                 _TRIANG_RE = _re_h08.compile(
-                    r"Reconciled\s+via\s+\d+-method\s+triangulation[^.]*\.",
+                    r"Reconciled\s+via\s+\d+-method\s+triangulation[^.]*\.?",
                     _re_h08.I,
                 )
                 _ms.methodology_note = _TRIANG_RE.sub("", _ms.methodology_note).strip()
