@@ -258,9 +258,20 @@ async def get_pi_report_async(payload: PIReportRequest, current_user = Depends(g
             # Phase 2: run verification (validation + trust + self-correction) in the
             # background, then patch the job so the badges fill in client-side.
             try:
-                from app.services.alignment_service import run_report_verification, attach_competitive_landscape
+                from app.services.alignment_service import run_report_verification, attach_competitive_landscape, _enforce_market_consistency
                 await attach_competitive_landscape(report)   # reliable server-side sweep
                 await run_report_verification(report)
+                # Re-enforce market consistency after verification: self-correction can
+                # rewrite market_sizing from a fresh LLM call, losing the derivation values.
+                try:
+                    _msd2 = getattr(report, "market_sizing_derivation", None)
+                    if _msd2 and isinstance(_msd2, dict):
+                        class _DerivProxy:
+                            def __init__(self, d):
+                                self.__dict__.update(d)
+                        _enforce_market_consistency(report, _DerivProxy(_msd2))
+                except Exception as _re_e:
+                    logger.warning("Post-verification market re-enforcement failed (non-fatal): %s", _re_e)
                 rd2 = report.model_dump(mode="json")
                 try:
                     from app.services.url_validator import clean_report_urls
