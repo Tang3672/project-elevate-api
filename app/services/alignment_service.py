@@ -1992,13 +1992,30 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
     # These are implementation references that must never appear in user-facing text.
     try:
         import re as _re_spec
+        # Broader pattern: also catch "per H-10 rules" / "(per B-01)" so the
+        # surrounding context doesn't leave orphaned "per  rules" residue.
         _SPEC_ID_RE = _re_spec.compile(
-            r"\b(?:H|B|F|S)-\d{2}\b"           # H-07, B-01, S-06, F-03, etc.
-            r"|spec\s+v\d+"                      # "spec v4", "spec v3"
-            r"|\(H-\d{2}\s+(?:fix|formula|compliant)\)"   # "(H-07 formula)"
-            r"|\(B-\d{2}\s+\w+\)",               # "(B-01 rule)"
+            r"\bper\s+[HBFS]-\d{2}(?:\s+\w+){0,2}"  # "per H-10 rules", "per B-01 formula"
+            r"|\b(?:H|B|F|S)-\d{2}\b"            # H-07, B-01, S-06, F-03, etc.
+            r"|spec\s+v\d+"                       # "spec v4", "spec v3"
+            r"|\(H-\d{2}\s+(?:fix|formula|compliant)\)"  # "(H-07 formula)"
+            r"|\(B-\d{2}\s+\w+\)"                # "(B-01 rule)"
+            r"|\(per\s+[HBFS]-\d{2}[^)]*\)",     # "(per H-10 rules)"
             _re_spec.I,
         )
+
+        def _scrub_str(s: str) -> str:
+            return _SPEC_ID_RE.sub("", s).strip() if _SPEC_ID_RE.search(s) else s
+
+        def _scrub_val(v):
+            if isinstance(v, str):
+                return _scrub_str(v)
+            if isinstance(v, list):
+                return [_scrub_val(item) for item in v]
+            if isinstance(v, dict):
+                return {k: _scrub_val(dv) for k, dv in v.items()}
+            return v
+
         _SPEC_STR_FIELDS = (
             "executive_summary", "confidence_note", "methodology_note",
             "positioning_statement", "guiding_question", "limitations",
@@ -2009,18 +2026,25 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
         for _sf in _SPEC_STR_FIELDS:
             _sv = getattr(report, _sf, None)
             if isinstance(_sv, str) and _SPEC_ID_RE.search(_sv):
-                setattr(report, _sf, _SPEC_ID_RE.sub("", _sv).strip())
+                setattr(report, _sf, _scrub_str(_sv))
                 logger.info("spec-id scrubber: removed spec identifiers from '%s'", _sf)
         for _lf in _SPEC_LIST_FIELDS:
             _lv = getattr(report, _lf, None)
             if isinstance(_lv, list):
                 _cleaned_list = [
-                    _SPEC_ID_RE.sub("", s).strip() if isinstance(s, str) else s
+                    _scrub_str(s) if isinstance(s, str) else s
                     for s in _lv
                 ]
                 if _cleaned_list != _lv:
                     setattr(report, _lf, _cleaned_list)
                     logger.info("spec-id scrubber: removed spec identifiers from list '%s'", _lf)
+        # Scrub citation dicts — relevance/title/note fields can contain internal IDs.
+        _lit = getattr(report, "literature_citations", None)
+        if isinstance(_lit, list) and _lit:
+            _lit_clean = [_scrub_val(c) if isinstance(c, dict) else c for c in _lit]
+            if _lit_clean != _lit:
+                report.literature_citations = _lit_clean
+                logger.info("spec-id scrubber: scrubbed literature_citations")
     except Exception as _spec_e:
         logger.warning("spec-id scrubber failed (non-fatal): %s", _spec_e)
 
