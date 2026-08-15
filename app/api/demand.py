@@ -9,7 +9,7 @@ GET  /api/v1/demand/search                   — search demand signals (semantic
 """
 
 import logging
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 from typing import Optional
 
 from app.db.demand_repository import (
@@ -19,10 +19,11 @@ from app.db.demand_repository import (
 from app.services.embedding_service import embed_text
 from app.ingestion.pipeline import build_connector_registry
 from app.scheduler.ingestion_scheduler import trigger_connector, trigger_full_pipeline
+from app.api.admin_auth import require_admin_key
 
 logger = logging.getLogger(__name__)
 
-admin_router = APIRouter()
+admin_router = APIRouter(dependencies=[Depends(require_admin_key)])
 demand_router = APIRouter()
 
 

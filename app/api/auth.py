@@ -31,6 +31,7 @@ from app.services.auth_service import (
     verify_google_token,
 )
 from app.db.database import get_pool
+from app.api.admin_auth import require_admin_key
 from app.db.user_repository import (
     create_user, get_user_by_email, get_user_by_id,
     get_user_by_google_id, update_user_google_id,
@@ -435,9 +436,6 @@ Plan:        {plan}
 Message:     {message or '(none)'}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━
-View all submissions:
-https://web-staging-production-9c6a.up.railway.app/api/v1/auth/waitlist/admin?key=elevate_admin_2026
-
 Reply to this person: {email}
 ━━━━━━━━━━━━━━━━━━━━━━━━
 """,
@@ -468,10 +466,8 @@ ijw91021@gmail.com
 
 
 @router.get("/waitlist/admin")
-async def view_waitlist(key: str = ""):
-    """View all waitlist submissions. Protected by simple key."""
-    if key != "elevate_admin_2026":
-        raise HTTPException(status_code=403, detail="Invalid key")
+async def view_waitlist(_: None = Depends(require_admin_key)):
+    """View all waitlist submissions. Protected by ADMIN_KEY env var."""
     pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
