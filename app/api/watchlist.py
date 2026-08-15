@@ -26,10 +26,11 @@ from app.db.watchlist_repository import (
     delete_watchlist, get_user_alerts, get_watchlist_alerts,
     mark_alerts_seen, get_unread_count,
 )
+from app.api.admin_auth import require_admin_key
 
 logger = logging.getLogger(__name__)
 router       = APIRouter()
-admin_router = APIRouter()
+admin_router = APIRouter(dependencies=[Depends(require_admin_key)])
 
 
 # ── Watchlists ────────────────────────────────────────────────────────────────
