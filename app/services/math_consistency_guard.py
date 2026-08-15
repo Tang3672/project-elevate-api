@@ -120,14 +120,16 @@ def _check_horizon_contradiction(market_sizing: dict) -> list[dict]:
     # when contradicting HORIZON_YEARS appears alongside another year).
     non_canonical = years - {HORIZON_YEARS}
     if len(years) >= 2 and non_canonical:
-        return [_flag(
+        f = _flag(
             "market_sizing.formula",
             f"Contradictory SOM horizon: found year references {sorted(years)} "
             f"in formula/methodology_note — canonical horizon is {HORIZON_YEARS} yr. "
             f"This produces three different SOM horizons in one report (B-08).",
             f"Ensure all horizon mentions use the canonical {HORIZON_YEARS}-yr "
             f"penetration midpoint. Remove 'Year-1 capture' phrasing.",
-        )]
+        )
+        f["sub_category"] = "horizon"
+        return [f]
     return []
 
 

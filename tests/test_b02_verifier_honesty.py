@@ -19,8 +19,8 @@ import pytest
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
-def _flag(severity: str, category: str, issue: str = "test issue") -> dict:
-    return {
+def _flag(severity: str, category: str, issue: str = "test issue", sub_category: str | None = None) -> dict:
+    f = {
         "severity":   severity,
         "category":   category,
         "field":      "test_field",
@@ -28,6 +28,9 @@ def _flag(severity: str, category: str, issue: str = "test issue") -> dict:
         "suggestion": "fix it",
         "agent":      "Test Agent",
     }
+    if sub_category is not None:
+        f["sub_category"] = sub_category
+    return f
 
 
 def _run_arbitrator(**flag_lists) -> dict:
@@ -81,10 +84,10 @@ def _run_formatter(**flag_lists) -> dict:
 class TestBlockingVerdict:
 
     def test_math_error_gives_blocking_not_error(self):
-        """A MATH ERROR must produce BLOCKING verdict, not plain ERROR."""
-        result = _run_arbitrator(math=[_flag("ERROR", "MATH", "TAM ≠ pop × price")])
+        """A horizon MATH ERROR must produce BLOCKING verdict, not plain ERROR."""
+        result = _run_arbitrator(math=[_flag("ERROR", "MATH", "TAM ≠ pop × price", sub_category="horizon")])
         assert result["_verdict"] == "BLOCKING", (
-            f"MATH ERROR must give BLOCKING verdict, got {result['_verdict']!r}"
+            f"horizon MATH ERROR must give BLOCKING verdict, got {result['_verdict']!r}"
         )
 
     def test_blocking_sets_validation_passed_false(self):
@@ -111,9 +114,9 @@ class TestBlockingVerdict:
         assert result["_verdict"] != "BLOCKING"
 
     def test_mixed_math_error_and_source_error_gives_blocking(self):
-        """When MATH ERRORs and other ERRORs coexist, BLOCKING wins."""
+        """When horizon MATH ERRORs and other ERRORs coexist, BLOCKING wins."""
         result = _run_arbitrator(
-            math=[_flag("ERROR", "MATH")],
+            math=[_flag("ERROR", "MATH", sub_category="horizon")],
             source=[_flag("ERROR", "SOURCE")],
         )
         assert result["_verdict"] == "BLOCKING"
@@ -132,7 +135,7 @@ class TestExportBlockedField:
 
     def test_blocking_sets_export_blocked_true(self):
         """validation.export_blocked must be True when verdict is BLOCKING."""
-        val = _run_formatter(math=[_flag("ERROR", "MATH")])
+        val = _run_formatter(math=[_flag("ERROR", "MATH", sub_category="horizon")])
         assert val["export_blocked"] is True, (
             f"export_blocked must be True for BLOCKING verdict, got {val['export_blocked']!r}"
         )
@@ -157,7 +160,7 @@ class TestExportBlockedField:
 
     def test_blocking_summary_mentions_export(self):
         """BLOCKING summary must say 'export' or 'blocked' so the user knows why."""
-        val = _run_formatter(math=[_flag("ERROR", "MATH", "TAM inconsistency")])
+        val = _run_formatter(math=[_flag("ERROR", "MATH", "TAM inconsistency", sub_category="horizon")])
         summary = (val.get("summary") or "").lower()
         assert "block" in summary or "export" in summary, (
             f"BLOCKING summary must mention 'block' or 'export'. Got: {val.get('summary')!r}"
@@ -165,7 +168,7 @@ class TestExportBlockedField:
 
     def test_blocking_status_string(self):
         """Status field must literally be the string 'BLOCKING'."""
-        val = _run_formatter(math=[_flag("ERROR", "MATH")])
+        val = _run_formatter(math=[_flag("ERROR", "MATH", sub_category="horizon")])
         assert val["status"] == "BLOCKING"
 
     def test_pass_summary_does_not_mention_blocking(self):

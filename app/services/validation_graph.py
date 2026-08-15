@@ -557,16 +557,17 @@ def _is_blocking_error(flag: dict) -> bool:
     """
     Returns True only for non-MATH ERRORs severe enough to block PDF export.
 
-    MATH-category flags are emitted by the server-side math guard, which compares
-    the stored total_addressable_market_usd against step values. That stored field
-    reflects the initial derivation and may lag behind user edits made via the
-    client-side buyer model. The client guard in market-model.js is the authoritative
-    arithmetic check (it computes from the live edited model). Running both produces
-    contradicting badges, so MATH errors are downgraded here to non-blocking ERRORs.
+    Horizon-contradiction MATH flags (sub_category="horizon") block export — they
+    reflect a genuine content error (two different SOM time-horizons in one report)
+    that cannot be dismissed as a stale-value artifact.
+
+    Arithmetic MATH flags (TAM/SAM step-vs-headline, pop×price) do NOT block.
+    The server guard compares against total_addressable_market_usd as stored at
+    report-generation time; user edits via the buyer-model UI update the live model
+    but the stored field may lag. The client guard in market-model.js is the
+    authoritative arithmetic checker for the live model.
     """
-    if flag.get("category") == "MATH":
-        return False
-    return flag.get("severity") == "ERROR"
+    return flag.get("category") == "MATH" and flag.get("sub_category") == "horizon"
 
 
 def arbitrator_node(state: PIReportState) -> dict:
