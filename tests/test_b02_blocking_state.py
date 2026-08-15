@@ -215,17 +215,26 @@ class TestFlagSchema:
 # ══════════════════════════════════════════════════════════════════════════════
 
 class TestIsBlockingError:
-    """Guard flags are MATH ERRORs and must be classified as blocking."""
+    """MATH was the only ever-blocking category; client guard is now authoritative."""
 
     def _blocking(self, flag: dict) -> bool:
         from app.services.validation_graph import _is_blocking_error
         return _is_blocking_error(flag)
 
-    def test_math_error_from_guard_is_blocking(self):
+    def test_math_error_from_guard_is_not_blocking(self):
+        """Server-side MATH flags must not block export — client guard is authoritative.
+
+        The server math guard compares against stored total_addressable_market_usd which
+        lags behind user edits via the client buyer model. Blocking on stale data
+        contradicts the client guard's live 'Model consistent' badge.
+        """
         ms = _ms(tam=45_833_333, tam_step=20_000_000)
         flags = _guard(ms)
-        assert flags, "Expected at least one flag"
-        assert all(self._blocking(f) for f in flags)
+        assert flags, "Expected at least one flag from the guard"
+        assert not any(self._blocking(f) for f in flags), (
+            "MATH-category flags must not block PDF export — "
+            "client guard in market-model.js is the authoritative arithmetic checker"
+        )
 
     def test_math_warning_not_blocking(self):
         flag = {"severity": "WARNING", "category": "MATH", "field": "x", "issue": "", "suggestion": ""}
@@ -259,7 +268,14 @@ class TestFormatterBlocksExport:
         from app.services.validation_graph import formatter_node
         return formatter_node(_formatter_state(math_flags))
 
-    def test_math_error_sets_export_blocked_true(self):
+    def test_math_error_does_not_set_export_blocked(self):
+        """MATH errors must not block export — client guard is authoritative.
+
+        Previously MATH was the only category that set export_blocked=True. That
+        guard compared against a stale stored TAM that lagged behind user edits.
+        With _is_blocking_error returning False for all flags, export is never
+        blocked server-side; the client guard in market-model.js controls this.
+        """
         flag = {
             "severity": "ERROR", "category": "MATH",
             "field": "market_sizing.steps.tam",
@@ -269,8 +285,8 @@ class TestFormatterBlocksExport:
         }
         result = self._run([flag])
         val = result["validated_report"]["validation"]
-        assert val["export_blocked"] is True, (
-            "A MATH ERROR must set export_blocked=True in the validation block"
+        assert val["export_blocked"] is False, (
+            "MATH ERRORs must not set export_blocked — client guard is authoritative"
         )
 
     def test_no_flags_export_not_blocked(self):
@@ -278,7 +294,8 @@ class TestFormatterBlocksExport:
         val = result["validated_report"]["validation"]
         assert val["export_blocked"] is False
 
-    def test_math_error_status_is_blocking(self):
+    def test_arithmetic_math_error_status_is_error(self):
+        """Arithmetic MATH flags (no horizon sub_category) produce ERROR status, not BLOCKING."""
         flag = {
             "severity": "ERROR", "category": "MATH",
             "field": "market_sizing.total_addressable_market_usd",
@@ -287,7 +304,7 @@ class TestFormatterBlocksExport:
             "agent": "Math Consistency Guard",
         }
         result = self._run([flag])
-        assert result["validated_report"]["validation"]["status"] == "BLOCKING"
+        assert result["validated_report"]["validation"]["status"] == "ERROR"
 
     def test_non_math_error_does_not_block(self):
         flag = {
@@ -301,12 +318,13 @@ class TestFormatterBlocksExport:
         val = result["validated_report"]["validation"]
         assert val["export_blocked"] is False
 
-    def test_blocking_summary_text_present(self):
+    def test_horizon_math_error_blocking_summary(self):
+        """Horizon contradiction flags (sub_category=horizon) produce BLOCKING summary."""
         flag = {
-            "severity": "ERROR", "category": "MATH",
-            "field": "market_sizing.steps.tam",
-            "issue": "mismatch",
-            "suggestion": "fix",
+            "severity": "ERROR", "category": "MATH", "sub_category": "horizon",
+            "field": "market_sizing.formula",
+            "issue": "Contradictory SOM horizon: Year-1 vs 5-yr",
+            "suggestion": "Use canonical 5-yr horizon throughout",
             "agent": "Math Consistency Guard",
         }
         result = self._run([flag])

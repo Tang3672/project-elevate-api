@@ -223,7 +223,7 @@ class TestGatherResearchToolIntel:
     def _run(self, sub_id: str = "research_tool_non_clinical") -> dict:
         import asyncio
         from app.services.competitive_intelligence_service import _gather_research_tool_intel
-        return asyncio.get_event_loop().run_until_complete(
+        return asyncio.run(
             _gather_research_tool_intel("neurotech_wearable", sub_id)
         )
 
@@ -262,7 +262,7 @@ class TestGatherResearchToolIntel:
     def test_research_infrastructure_also_gated(self):
         import asyncio
         from app.services.competitive_intelligence_service import _gather_research_tool_intel
-        intel = asyncio.get_event_loop().run_until_complete(
+        intel = asyncio.run(
             _gather_research_tool_intel("data_management", "research_infrastructure_saas")
         )
         for s in intel.get("strategic_playbook", []):

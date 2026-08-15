@@ -555,12 +555,19 @@ async def parallel_verifier_node(state: PIReportState) -> dict:
 
 def _is_blocking_error(flag: dict) -> bool:
     """
-    A MATH-category ERROR blocks PDF export because an arithmetic inconsistency
-    in market sizing produces a factually wrong artifact that must not be shared.
-    Other ERRORs (source quality, regulatory concerns) are serious but not
-    automatically blocking — the user can still export with a visible warning.
+    Returns True only for non-MATH ERRORs severe enough to block PDF export.
+
+    Horizon-contradiction MATH flags (sub_category="horizon") block export — they
+    reflect a genuine content error (two different SOM time-horizons in one report)
+    that cannot be dismissed as a stale-value artifact.
+
+    Arithmetic MATH flags (TAM/SAM step-vs-headline, pop×price) do NOT block.
+    The server guard compares against total_addressable_market_usd as stored at
+    report-generation time; user edits via the buyer-model UI update the live model
+    but the stored field may lag. The client guard in market-model.js is the
+    authoritative arithmetic checker for the live model.
     """
-    return flag.get("severity") == "ERROR" and flag.get("category") == "MATH"
+    return flag.get("category") == "MATH" and flag.get("sub_category") == "horizon"
 
 
 def arbitrator_node(state: PIReportState) -> dict:

@@ -769,7 +769,7 @@ CRITICAL RULES:
 You must respond with ONLY a valid JSON object. No markdown, no preamble. Use this exact schema:
 
 {
-  "executive_summary": "<2-3 sentence summary citing specific numbers>",
+  "executive_summary": "<2-3 sentence summary citing specific numbers — dollar figures must match total_addressable_market_usd exactly; do not round>",
 
   "disease_intelligence": {
     "condition": "<primary pathogen or disease>",
@@ -1983,8 +1983,18 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
                         logger.info("B-01: stripped authored panel scores from '%s' (research tool)", _b01_fname)
         # Also scrub the formula string itself if it has horizon contradiction
         _ms = getattr(report, "market_sizing", None)
-        if _ms and hasattr(_ms, "formula") and isinstance(_ms.formula, str):
-            _ms.formula = _fix_som_horizon(_ms.formula)
+        if _ms:
+            if hasattr(_ms, "formula") and isinstance(_ms.formula, str):
+                _ms.formula = _fix_som_horizon(_ms.formula)
+            # Strip "Reconciled via 3-method triangulation" from methodology_note —
+            # the triangulation section was removed from the UI but the computation
+            # string still leaks into LLM-generated methodology prose.
+            if hasattr(_ms, "methodology_note") and isinstance(_ms.methodology_note, str):
+                _TRIANG_RE = _re_h08.compile(
+                    r"Reconciled\s+via\s+\d+-method\s+triangulation[^.]*\.?",
+                    _re_h08.I,
+                )
+                _ms.methodology_note = _TRIANG_RE.sub("", _ms.methodology_note).strip()
     except Exception as _h08_e:
         logger.warning("H-08/B-02 market math cleanup failed (non-fatal): %s", _h08_e)
 
@@ -1995,12 +2005,12 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
         # Broader pattern: also catch "per H-10 rules" / "(per B-01)" so the
         # surrounding context doesn't leave orphaned "per  rules" residue.
         _SPEC_ID_RE = _re_spec.compile(
-            r"\bper\s+[HBFS]-\d{2}(?:\s+\w+){0,2}"  # "per H-10 rules", "per B-01 formula"
-            r"|\b(?:H|B|F|S)-\d{2}\b"            # H-07, B-01, S-06, F-03, etc.
-            r"|spec\s+v\d+"                       # "spec v4", "spec v3"
-            r"|\(H-\d{2}\s+(?:fix|formula|compliant)\)"  # "(H-07 formula)"
-            r"|\(B-\d{2}\s+\w+\)"                # "(B-01 rule)"
-            r"|\(per\s+[HBFS]-\d{2}[^)]*\)",     # "(per H-10 rules)"
+            r"\bper\s+[HBFS]-\d+(?:\s+\w+){0,2}"   # "per H-10 rules", "per B-1 formula"
+            r"|\b(?:H|B|F|S)-\d+\b"                 # H-07, B-1, S-6, F-03, etc.
+            r"|spec\s+v\d+"                          # "spec v4", "spec v3"
+            r"|\(H-\d+\s+(?:fix|formula|compliant)\)"  # "(H-7 formula)"
+            r"|\(B-\d+\s+\w+\)"                     # "(B-1 rule)"
+            r"|\(per\s+[HBFS]-\d+[^)]*\)",          # "(per H-10 rules)"
             _re_spec.I,
         )
 
@@ -2369,7 +2379,7 @@ If the exact guidance is not listed above, use the general FDA guidance search: 
 4. For buyer segments: source_url is MANDATORY. Real examples: https://www.aha.org/statistics/fast-facts-us-hospitals, https://www.cancer.gov/research/infrastructure/cancer-centers/find, https://data.cms.gov/, https://www.curesma.org/about-sma/. NEVER leave source_url empty or as empty strings the buyer data.
 
 {
-  "executive_summary": "<2 sentences, under 300 chars>",
+  "executive_summary": "<2 sentences, under 300 chars — dollar figures must match total_addressable_market_usd exactly; do not round (e.g. use $68.8M not $69M)>",
   "literature_citations": [{"pmid":"<PMID copied verbatim from the retrieved papers in your context — NEVER invent a PMID>","title":"<title copied from retrieved context — NEVER invent or paraphrase>","authors":"<authors from retrieved context>","journal":"<journal from retrieved context>","year":"<year from retrieved context>","url":"https://pubmed.ncbi.nlm.nih.gov/<PMID>/","relevance":"<under 100 chars>"}],
   "disease_intelligence": {
     "condition": "<condition name>",
@@ -2569,7 +2579,7 @@ def _parse_expert_response(data, idea, product_type, expert, demand_results, hos
         market_geography       = _geo_obj,
         recommended_next_steps = data.get("recommended_next_steps", []),
         strategic_playbook     = data.get("strategic_playbook", []),
-        literature_citations   = _filter_lit(data.get("literature_citations", []), idea, sub_expert_id),
+        literature_citations   = _filter_lit(data.get("literature_citations", []), idea, sub_expert_id) or None,
         limitations            = data.get("limitations"),
         signals_searched       = total_signals,
         hospital_needs_searched = len(hospital_matches_raw),
@@ -2685,7 +2695,7 @@ async def _generate_antibiotic_report(
         market_geography=geography,
         recommended_next_steps=data.get("recommended_next_steps", []),
         strategic_playbook=data.get("strategic_playbook", []),
-        literature_citations=_filter_lit(data.get("literature_citations", []), idea, "drug_amr"),
+        literature_citations=_filter_lit(data.get("literature_citations", []), idea, "drug_amr") or None,
         limitations=data.get("limitations"),
         signals_searched=total_signals,
         hospital_needs_searched=len(hospital_matches_raw),
@@ -2820,7 +2830,7 @@ async def _generate_generic_pi_report(
         market_geography=geography,
         recommended_next_steps=data.get("recommended_next_steps", []),
         strategic_playbook=data.get("strategic_playbook", []),
-        literature_citations=_filter_lit(data.get("literature_citations", []), idea, ""),
+        literature_citations=_filter_lit(data.get("literature_citations", []), idea, "") or None,
         limitations=data.get("limitations"),
         signals_searched=total_signals,
         hospital_needs_searched=len(hospital_matches_raw),
@@ -2903,7 +2913,7 @@ def _parse_legacy_response(claude_response, idea, demand_results, hospital_match
         related_conditions=data.get("related_conditions", []),
         recommended_next_steps=data.get("recommended_next_steps", []),
         strategic_playbook=data.get("strategic_playbook", []),
-        literature_citations=_filter_lit(data.get("literature_citations", []), idea, ""),
+        literature_citations=_filter_lit(data.get("literature_citations", []), idea, "") or None,
         limitations=data.get("limitations"),
         idea_submitted=idea,
         signals_searched=total_signals,

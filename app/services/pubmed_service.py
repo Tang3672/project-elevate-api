@@ -513,6 +513,26 @@ def filter_literature_citations(
             )
             pmid = ""
 
+        # D-02b: Detect LLM-fabricated PMIDs — sequential digit runs are a hallucination
+        # fingerprint (e.g. 38123456 = "3,8,1,2,3,4,5,6" with 5+ consecutive ascending
+        # digits). Real PMIDs are assigned sequentially by NCBI but not in a pattern
+        # detectable from the number alone; however LLMs consistently produce 8-digit
+        # numbers with obvious digit-runs like 12345678 or 38123456.
+        if pmid:
+            _d = pmid
+            _run = max(
+                (sum(1 for a, b in zip(_d, _d[1:]) if int(b) - int(a) == 1) + 1)
+                if len(_d) > 1 else 0,
+                (sum(1 for a, b in zip(_d, _d[1:]) if int(a) - int(b) == 1) + 1)
+                if len(_d) > 1 else 0,
+            )
+            if _run >= 6:
+                logger.warning(
+                    "D-02b: dropping PMID '%s' — sequential digit run (%d) suggests LLM fabrication",
+                    pmid, _run,
+                )
+                pmid = ""
+
         # ── G.3: null-PMID path — verify via OpenAlex / Crossref ─────────────
         if not pmid:
             title = (c.get("title") or "").strip()

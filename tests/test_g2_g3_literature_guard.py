@@ -207,7 +207,7 @@ class TestRelevanceGate:
         """An on-topic paper passes both PMID resolution and relevance gate."""
         from app.services.pubmed_service import filter_literature_citations
         citation = {
-            "pmid": "23456789",
+            "pmid": "38971432",
             "title": "Wireless Soil Moisture Sensors for USDA Field Monitoring",
             "authors": "Jones et al.",
             "journal": "Precision Agriculture",
@@ -215,13 +215,13 @@ class TestRelevanceGate:
             "relevance": "Documents soil sensor adoption in precision agriculture.",
         }
         with patch("app.services.pubmed_service.resolve_pmid", return_value={
-            "pmid": "23456789",
+            "pmid": "38971432",
             "title": "Wireless Soil Moisture Sensors for USDA Field Monitoring",
             "authors": "Jones et al.",
             "journal": "Precision Agriculture",
             "year": "2023",
             "abstract": "We deployed wireless soil moisture sensors across USDA field trial plots to monitor soil water content in precision agriculture settings.",
-            "url": "https://pubmed.ncbi.nlm.nih.gov/23456789/",
+            "url": "https://pubmed.ncbi.nlm.nih.gov/38971432/",
         }):
             result = filter_literature_citations(
                 [citation],
