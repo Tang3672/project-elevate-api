@@ -131,6 +131,93 @@ def _has_banned_output(text: str) -> list[str]:
 # PUBLIC ENTRY POINTS
 # ══════════════════════════════════════════════════════════════════════════════
 
+
+def _compute_axis_lift_hints(idea: str, demand_results: list, domain: str) -> dict:
+    """Derive per-axis lift estimates from the idea text and retrieved signals.
+
+    Returns a dict mapping axis_id → float [0, 1] so that identical-domain
+    reports with different ideas produce different axis orderings instead of the
+    same static typical_lift ordering every run.  Only fires for research-tool
+    domains; returns {} for clinical/commercial domains (which have their own
+    domain predicates and are not affected by static ordering the same way).
+    """
+    if domain != "LIFE_SCIENCES_RESEARCH":
+        return {}
+
+    _idea   = (idea or "").lower()
+    _titles = " ".join((s.get("title") or "") for s in demand_results).lower()
+    _srcs   = [(s.get("source") or "").lower() for s in demand_results]
+    _comb   = _idea + " " + _titles
+
+    def _frac(keywords: list) -> float:
+        return sum(1.0 for kw in keywords if kw in _comb) / max(len(keywords), 1)
+
+    # carnegie_tier: higher when idea targets R1/doctoral research context
+    _r1 = _frac(["r1 university", "research university", "doctoral", "phd",
+                 "graduate research", "laboratory", "research lab"])
+    # department: higher when idea names a specific academic discipline
+    _dept = _frac(["neuroscience", "biology", "chemistry", "physics", "immunology",
+                   "oncology", "genomics", "proteomics", "ecology", "materials science"])
+    # funding_agency: higher when NIH/NSF source signals present
+    _n_nih = sum(1 for s in _srcs if "nih" in s or "reporter" in s or "pubmed" in s)
+    _n_nsf = sum(1 for s in _srcs if "nsf" in s)
+    _fund_frac = (_n_nih + _n_nsf) / max(len(_srcs), 1)
+    # award_band: higher when grant-size or mechanism keywords appear
+    _grant = _frac(["r01", "r21", "r15", "r41", "r43", "sbir", "sttr",
+                    "grant award", "funded", "nih award"])
+    # lab_size: inversely related to award-band signal (small labs dominant without big-grant mention)
+    # current_solution: higher when competitor or status-quo mentions found
+    _tool = _frac(["alternative", "competitor", "existing solution", "instead of",
+                   "incumbent", "status quo", "replace", "switch from"])
+    # geography_us_region: higher when geographic concentration in signals
+    _geo = _frac(["california", "massachusetts", "new york", "boston", "cambridge",
+                  "midwest", "northeast", "west coast", "bay area"])
+    # purchase_cadence: higher when grant-cycle language present
+    _cycle = _frac(["grant cycle", "fiscal year", "renewal", "no-cost extension",
+                    "annual subscription", "budget cycle"])
+
+    return {
+        "carnegie_tier":       round(min(0.15 + _r1 * 0.15, 0.30), 2),
+        "department":          round(min(0.12 + _dept * 0.16, 0.28), 2),
+        "funding_agency":      round(min(0.10 + _fund_frac * 0.15, 0.25), 2),
+        "award_band":          round(min(0.08 + _grant * 0.14, 0.22), 2),
+        "lab_size":            round(max(0.10, 0.18 - _grant * 0.08), 2),
+        "current_solution":    round(min(0.14 + _tool * 0.14, 0.28), 2),
+        "geography_us_region": round(min(0.06 + _geo * 0.14, 0.20), 2),
+        "purchase_cadence":    round(min(0.06 + _cycle * 0.12, 0.18), 2),
+    }
+
+
+# ── P1 §1 evidence_base source filter ────────────────────────────────────────
+
+import re as _eb_re
+_BAD_EVIDENCE_SOURCE_RE = _eb_re.compile(
+    r'the transmitter|nih transmitter|>[\d,]+\s+grants?\s+since\s+\d{4}'
+    r'|cumulative.*grant|grant.*since\s+19\d{2}'
+    r'|mordor intelligence|grand view research|marketsandmarkets'
+    r'|allied market research|imarc group|fortune business insights'
+    r'|precedence research|global market insights',
+    _eb_re.IGNORECASE,
+)
+
+
+def _filter_evidence_base_sources(evidence_base: dict) -> dict:
+    """Remove spurious source_types_used entries (aggregator sites, NIH newsletter,
+    cumulative historical grant counts) from the LLM-generated evidence_base."""
+    if not isinstance(evidence_base, dict):
+        return evidence_base
+    srcs = evidence_base.get("source_types_used")
+    if isinstance(srcs, list):
+        filtered = [s for s in srcs if not _BAD_EVIDENCE_SOURCE_RE.search(str(s))]
+        if len(filtered) != len(srcs):
+            logger.info(
+                "evidence_base: filtered %d spurious source(s) from source_types_used",
+                len(srcs) - len(filtered),
+            )
+            evidence_base = {**evidence_base, "source_types_used": filtered}
+    return evidence_base
+
+
 async def generate_pi_report(
     idea:           str,
     product_type:   str = "other",
@@ -546,10 +633,11 @@ async def generate_pi_report(
     report.domain          = _resolved_domain
     report.engine_version  = ENGINE_BUILD_SHA
 
-    # C.1/C.2: attach axis selection/rejection decisions
+    # C.1/C.2: attach axis selection/rejection decisions with idea-specific lift hints
     try:
         from app.market.axis_library import select_axes, format_axis_decisions
-        _axis_decisions = select_axes(_resolved_domain, report.expert_domain or "")
+        _lift_hints = _compute_axis_lift_hints(idea, demand_results, _resolved_domain)
+        _axis_decisions = select_axes(_resolved_domain, report.expert_domain or "", lift_hints=_lift_hints)
         report.axis_decisions = format_axis_decisions(_axis_decisions)
     except Exception as _axis_e:
         logger.warning("Axis selection failed (non-fatal): %s", _axis_e)
@@ -2551,8 +2639,8 @@ def _parse_expert_response(data, idea, product_type, expert, demand_results, hos
 
     # ── S-01…S-09: parse and validate new strategic sections ──────────────────
 
-    # S-01 Evidence Base
-    evidence_base = data.get("evidence_base") or {}
+    # S-01 Evidence Base — filter spurious source entries before storage
+    evidence_base = _filter_evidence_base_sources(data.get("evidence_base") or {})
 
     # S-02 Value Driver Ranking
     vdr = [r for r in data.get("value_driver_ranking", []) if isinstance(r, dict)]

@@ -305,18 +305,28 @@ def is_candidate(defn: AxisDefinition, domain: str) -> bool:
 
 # ── Selection engine ──────────────────────────────────────────────────────────
 
-def select_axes(domain: str, expert_domain: str) -> list[AxisDecision]:
+def select_axes(
+    domain: str,
+    expert_domain: str,
+    lift_hints: "dict[str, float] | None" = None,
+) -> list[AxisDecision]:
     """Evaluate AXIS_LIBRARY against a product classification.
 
     Returns an AxisDecision for every axis — selected (applies_when=True)
     and rejected (applies_when=False) — sorted selected-first by descending
-    typical_lift, then rejected in their library order.
+    est_lift, then rejected in their library order.
+
+    lift_hints: optional per-axis lift overrides (axis_id → float 0–1) derived
+    from the retrieved signals for this idea. When present, est_lift is the hint
+    value instead of typical_lift, so identical-domain runs produce idea-specific
+    orderings.
 
     The rejection list is an explicit output: omitting it would remove the
     key signal that distinguishes expert segmentation from naive enumeration.
     """
     domain       = (domain       or "").upper()
     expert_domain = (expert_domain or "").lower()
+    _hints       = lift_hints or {}
 
     selected: list[AxisDecision] = []
     rejected: list[AxisDecision] = []
@@ -339,13 +349,14 @@ def select_axes(domain: str, expert_domain: str) -> list[AxisDecision]:
         if fires:
             domain_label = domain.replace("_", " ").lower()
             reason = f"Selected: relevant segmentation axis for {domain_label} products."
+            est_lift = _hints.get(defn.id, defn.typical_lift)
             selected.append(AxisDecision(
                 axis_id=defn.id,
                 label=defn.label,
                 family=defn.family,
                 selected=True,
                 reason=reason,
-                est_lift=defn.typical_lift,
+                est_lift=round(est_lift, 2),
                 data_available=True,
             ))
         else:
