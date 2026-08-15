@@ -18,12 +18,39 @@ Panels run in parallel inside the existing asyncio.gather — zero latency overh
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from typing import Optional, List
 
 import httpx
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_usd_range(s: str) -> str:
+    """Normalize LLM-generated USD range strings.
+
+    Converts sub-$1M amounts expressed as decimal millions ($0.05M) to thousands
+    ($50K). This fixes the recurring fmt_usd issue where Haiku emits "$0.05M–$0.15M"
+    for a $50K–$150K range.
+
+    Examples:
+        "$0.05M–$0.15M" → "$50K–$150K"
+        "$0.5M–$2M"     → "$500K–$2M"   (0.5M = 500K; only sub-1 affected)
+        "$5M–$30M"      → "$5M–$30M"    (unchanged)
+        "$50K–$150K"    → "$50K–$150K"  (unchanged)
+    """
+    if not s:
+        return s
+
+    def _replace(m: re.Match) -> str:
+        val = float(m.group(1))
+        if val < 1.0:
+            k = int(round(val * 1000))
+            return f"${k}K"
+        return m.group(0)
+
+    return re.sub(r"\$(\d+(?:\.\d+)?)M", _replace, s)
 
 HAIKU_MODEL = "claude-haiku-4-5-20251001"
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
@@ -110,6 +137,7 @@ def _regulatory_hint(sub_expert_id: str) -> str:
 _RESEARCH_TOOL_ARCHETYPES = frozenset({
     "research_tool_non_clinical",
     "research_infrastructure_saas",
+    "research_tool_agronomy",
 })
 
 # ── Per-domain commercial hints for the commercial panel ─────────────────────
@@ -121,8 +149,19 @@ _COMMERCIAL_DOMAIN_HINTS: dict[str, str] = {
         "Budget line: grant direct costs, equipment line. "
         "Revenue model: per-lab subscription or one-time site license — NOT WAC pricing, NOT CPT, NOT J-code. "
         "Primary competitor: status quo (manual SD cards, lab-built scripts). "
-        "Pricing comparable: commercial research data loggers (ActiGraph, Empatica research tier, Movisens). "
+        "Pricing comparable: commercial research instrumentation relevant to the domain (e.g., Movisens/Empatica for physiology; METER Group/Onset for environmental; Noldus for behavioral). "
         "Do NOT reference hospital systems, DRG, NTAP, or drug pricing as comparables."
+    ),
+    "research_tool_agronomy": (
+        "Buyer is an academic agronomist, crop scientist, or environmental researcher funded by USDA-NIFA or NSF. "
+        "Purchase cadence: every 3-5 years (grant cycle). "
+        "Observed spend band: $5k-$20k per deployment; annualised ≈ $2k-$6k/yr. "
+        "Budget line: USDA-NIFA SBIR/STTR or NSF grant direct costs, equipment line. "
+        "Revenue model: per-site license or hardware + subscription — NOT WAC, NOT CPT, NOT J-code. "
+        "Primary SBIR funder: USDA-NIFA (nifa.usda.gov/grants) — NOT NIH. NSF is secondary. "
+        "Pricing comparable: environmental/soil sensing hardware (METER Group, Onset HOBO, Decagon, Sentek). "
+        "Do NOT reference ActiGraph, Empatica, hospital systems, DRG, NTAP, or drug pricing as comparables. "
+        "Do NOT cite NIH RePORTER as the buyer population source; use USDA CRIS or NSF Award Search instead."
     ),
     "research_infrastructure_saas": (
         "Buyer is an academic PI or core facility director funded by institutional or federal grants. "
@@ -430,7 +469,7 @@ async def _run_commercial_panel(
         '  "moat_basis": "<what specifically creates or undermines the moat in one sentence>",\n'
         '  "yrs_to_peak_revenue": <integer, years post-launch to peak annual revenue>,\n'
         '  "reimbursement_mechanism": "<primary code/pathway, e.g., J-code, DRG+NTAP, CPT, self-pay>",\n'
-        '  "licensing_upfront_range": "<$XM-$YM upfront based on deal comps for this stage>",\n'
+        '  "licensing_upfront_range": "<use K for amounts under $1M, e.g. $50K-$150K not $0.05M-$0.15M; for larger deals use $XM-$YM>",\n'
         '  "licensing_royalty_range": "<X%-Y% royalty on net sales (academic) or X%-Y% (corporate)>"\n'
         "}"
     )
@@ -451,7 +490,7 @@ async def _run_commercial_panel(
             moat_basis                 = str(data.get("moat_basis", "")),
             yrs_to_peak_revenue        = int(data.get("yrs_to_peak_revenue", 5)),
             reimbursement_mechanism    = str(data.get("reimbursement_mechanism", "")),
-            licensing_upfront_range    = str(data.get("licensing_upfront_range", "")),
+            licensing_upfront_range    = _normalize_usd_range(str(data.get("licensing_upfront_range", ""))),
             licensing_royalty_range    = str(data.get("licensing_royalty_range", "")),
         )
     except Exception as e:

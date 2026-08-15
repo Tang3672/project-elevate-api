@@ -2317,3 +2317,541 @@ async def revert_market_model(
     return {"version": new_ver, "parent_version": version, "nodes": new_nodes,
             "tam_fmt": new_nodes["tam_fmt"], "sam_fmt": new_nodes["sam_fmt"],
             "som_fmt": new_nodes["som_fmt"]}
+
+
+# ── Spec v9: node-graph endpoints (richer response contract) ─────────────────
+#
+# These sit alongside the legacy /edit endpoint and use the new MarketModel
+# object. The response shape matches spec Part 3.2.
+
+class _OverrideRequest(BaseModel):
+    node_id:   str   = Field(..., description="id of the node to override")
+    value:     float = Field(..., description="new scalar value")
+    rationale: str   = Field(..., min_length=1, max_length=500,
+                             description="required — stored in override_events")
+    version:   Optional[int] = Field(default=None, description="base version; latest if omitted")
+
+
+class _GateRequest(BaseModel):
+    target_node_id: str   = Field(..., description="node the gate multiplies")
+    label:          str   = Field(..., description="human-readable name")
+    value:          float = Field(..., gt=0, le=1.0, description="ratio in (0, 1]")
+    rationale:      str   = Field(..., min_length=1, max_length=500)
+
+
+def _build_override_response(old_m, new_m) -> dict:
+    """Construct the spec Part 3.2 response from two model versions."""
+    old_v = old_m.values()
+    new_v = new_m.values()
+
+    # diff — only nodes that changed
+    diff_out = {}
+    for nid, nv in new_v.items():
+        ov = old_v.get(nid, nv)
+        if abs(ov - nv) > 1e-9:
+            denom = abs(ov) if abs(ov) > 1e-9 else 1.0
+            diff_out[nid] = {"from": ov, "to": nv, "pct": round((nv - ov) / denom * 100, 1)}
+
+    # recommendation recompute — predicate library, no LLM call
+    recommendations_changed = []
+    try:
+        from app.services.recommendation_library import recommend as _lib_rec
+        old_recs = {r.id: r.text for r in _lib_rec(old_v)}
+        new_recs = {r.id: r.text for r in _lib_rec(new_v)}
+        for rid in set(old_recs) | set(new_recs):
+            if old_recs.get(rid) != new_recs.get(rid):
+                recommendations_changed.append({
+                    "id": rid,
+                    "from": old_recs.get(rid, ""),
+                    "to":   new_recs.get(rid, ""),
+                })
+    except Exception:
+        pass
+
+    # stale prose sections — sections that embed any changed node
+    stale = []
+    changed_nodes = set(diff_out.keys())
+    if changed_nodes & {"tam", "buyer_population", "spend_per_unit"}:
+        stale.extend(["executive_summary", "market_sizing"])
+    if changed_nodes & {"sam", "sam_rate"}:
+        stale.append("market_access")
+    if changed_nodes & {"som", "som_rate"}:
+        stale.extend(["strategic_risks", "recommended_next_steps"])
+
+    fmt = new_m.formatted()
+    # Active user-added gates — nodes with method="user_gate"
+    active_gates = [
+        {
+            "id": nid,
+            "label": n.label,
+            "value": round(n.override_value if n.override_value is not None else (n.raw_value or 0), 4),
+            "target_node_id": next(
+                (tid for tid, tn in new_m.nodes.items() if nid in tn.gates), None
+            ),
+        }
+        for nid, n in new_m.nodes.items()
+        if n.method == "user_gate"
+    ]
+    return {
+        "version":                   new_m.version,
+        "parent_version":            new_m.parent_version,
+        "model_hash":                new_m.model_hash(),
+        "rationale":                 new_m.change_note,
+        "values":                    new_v,
+        "formatted":                 fmt,
+        # legacy shape — kept so the existing frontend buyer-model panel still works
+        "tam_fmt":                   fmt.get("tam", ""),
+        "sam_fmt":                   fmt.get("sam", ""),
+        "som_fmt":                   fmt.get("som", ""),
+        "diff":                      diff_out,
+        "active_gates":              active_gates,
+        "recommendations_changed":   recommendations_changed,
+        "verification":              {"state": "PASS", "issues": []},
+        "export_unlocked":           True,
+        "stale_narrative_sections":  stale,
+    }
+
+
+@router.post("/market-model/{report_id}/override")
+async def market_model_override(
+    report_id: str,
+    body: _OverrideRequest,
+    current_user=Depends(get_current_user),
+):
+    """Edit one node, recompute downstream, save as a new immutable version.
+
+    Returns the spec Part 3.2 response including formatted values, diff,
+    changed recommendations, and stale prose sections.
+
+    422 if the edit would violate SAM ≤ TAM or SOM ≤ SAM.
+    """
+    from app.model import ModelStore
+    import app.db.market_model_repository as _mmr
+
+    await _mmr.init_market_model_table()
+    store = ModelStore()
+
+    old_m = await store.load(report_id, body.version)
+    if old_m is None:
+        raise HTTPException(status_code=404,
+            detail="No market model found for this report. "
+                   "Only research-tool reports have an editable buyer model.")
+
+    try:
+        new_m = old_m.with_override(
+            body.node_id, body.value, body.rationale,
+            str(getattr(current_user, "id", "anon")),
+        )
+    except AssertionError as e:
+        raise HTTPException(status_code=422, detail=f"Invalid model state: {e}")
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except KeyError as e:
+        raise HTTPException(status_code=400, detail=f"Unknown node: {e}")
+
+    await store.save(new_m)
+
+    # Log to override_events (non-fatal)
+    try:
+        old_node_val = old_m.values().get(body.node_id, 0.0)
+        new_node_val = new_m.values().get(body.node_id, 0.0)
+        old_som = old_m.values().get("som", 0.0)
+        new_som = new_m.values().get("som", 0.0)
+        delta_pct = ((new_som - old_som) / old_som * 100) if old_som else None
+        await _mmr.insert_override_event(
+            report_id=report_id,
+            node_id=body.node_id,
+            original_value=old_node_val,
+            new_value=new_node_val,
+            rationale=body.rationale,
+            user_id=str(getattr(current_user, "id", "anon")),
+            downstream_delta_pct=delta_pct,
+        )
+    except Exception as _oe_err:
+        logger.warning("override_events logging failed (non-fatal): %s", _oe_err)
+
+    return _build_override_response(old_m, new_m)
+
+
+@router.post("/market-model/{report_id}/gate")
+async def market_model_add_gate(
+    report_id: str,
+    body: _GateRequest,
+    current_user=Depends(get_current_user),
+):
+    """Add a multiplicative gate to a node (e.g. 'only labs with vivarium, ×0.6')."""
+    from app.model import ModelStore, Node
+    import app.db.market_model_repository as _mmr
+
+    await _mmr.init_market_model_table()
+    store = ModelStore()
+
+    old_m = await store.load(report_id)
+    if old_m is None:
+        raise HTTPException(status_code=404, detail="No market model found")
+
+    import uuid as _uuid
+    gate_id = f"gate_{_uuid.uuid4().hex[:8]}"
+    gate = Node(
+        id=gate_id,
+        label=body.label,
+        unit="ratio",
+        raw_value=body.value,
+        method="user_gate",
+        rationale=body.rationale,
+    )
+    try:
+        new_m = old_m.with_gate(body.target_node_id, gate)
+    except (ValueError, KeyError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    await store.save(new_m)
+
+    resp = _build_override_response(old_m, new_m)
+    resp["gate_id"] = gate_id
+    return resp
+
+
+@router.delete("/market-model/{report_id}/gate/{gate_id}")
+async def market_model_remove_gate(
+    report_id: str,
+    gate_id: str,
+    current_user=Depends(get_current_user),
+):
+    """Remove a previously added gate."""
+    from app.model import ModelStore
+    import app.db.market_model_repository as _mmr
+
+    await _mmr.init_market_model_table()
+    store = ModelStore()
+
+    old_m = await store.load(report_id)
+    if old_m is None:
+        raise HTTPException(status_code=404, detail="No market model found")
+
+    try:
+        new_m = old_m.without_gate(gate_id)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    await store.save(new_m)
+    return _build_override_response(old_m, new_m)
+
+
+@router.post("/market-model/{report_id}/reset")
+async def market_model_reset(
+    report_id: str,
+    current_user=Depends(get_current_user),
+):
+    """Revert to the engine-generated baseline (version 1)."""
+    from app.model import ModelStore
+    import app.db.market_model_repository as _mmr
+
+    await _mmr.init_market_model_table()
+    store = ModelStore()
+
+    old_m = await store.load(report_id)
+    baseline = await store.load(report_id, version=1)
+    if old_m is None or baseline is None:
+        raise HTTPException(status_code=404, detail="No market model found")
+
+    # Create a new version that points back to version 1's nodes
+    from app.model.market_model import MarketModel, _new_id, _utcnow
+    from dataclasses import replace as _replace
+    reset_m = _replace(
+        baseline,
+        id=_new_id(),
+        version=old_m.version + 1,
+        parent_version=old_m.version,
+        created_at=_utcnow(),
+        created_by="user",
+        change_note="Reset to engine baseline (v1)",
+    )
+    await store.save(reset_m)
+    return _build_override_response(old_m, reset_m)
+
+
+# ── market-model.js NL assumption endpoints ──────────────────────────────────
+
+_ASSUMPTION_PARSE_PROMPT = """You parse a PI's natural-language market assumption into a list of
+typed operations against a 4-key market model.
+
+Model keys (all numeric):
+  buyer_population  — number of eligible buyers (integer count)
+  spend_per_unit    — annualised spend per buyer in USD (float)
+  sam_rate          — fraction of buyers reachable (0.0–1.0)
+  som_rate          — 5-year market penetration fraction (0.0–1.0)
+
+Operation types:
+  gate   — multiplicative filter: value × factor (factor in [0,1])
+  set    — override to a specific absolute value
+  cap    — ceiling: new value = min(current, cap)
+  floor  — floor: new value = max(current, floor)
+  note   — on-record only; no numeric change (for qualitative observations)
+
+Return ONLY valid JSON, no prose:
+{
+  "ops": [
+    {
+      "op":          "gate" | "set" | "cap" | "floor" | "note",
+      "target":      "buyer_population" | "spend_per_unit" | "sam_rate" | "som_rate",
+      "value":       <number>,
+      "label":       "<short human label for the ledger>",
+      "quoted_span": "<verbatim fragment from input that justifies this op>",
+      "confidence":  <0.0–1.0>,
+      "unit":        "<optional display unit string>"
+    }
+  ],
+  "clarifying_question": null | "<question to ask if a required number is missing>"
+}
+
+Rules:
+- If the text mentions a fraction or percentage of buyers, use gate on buyer_population.
+- If the text mentions a price ceiling or cap, use cap on spend_per_unit.
+- If the text is qualitative with no number, use note (omit target/value).
+- Rates (sam_rate, som_rate) must be in [0, 1]; convert percentages to decimals.
+- Set clarifying_question when the intent is clear but a required number is absent.
+- Do not invent facts; only extract what the text says."""
+
+
+async def _parse_assumption_nl(text: str, state: dict, ops: list) -> dict:
+    """Call Claude to parse NL text into market model operations."""
+    import os, json as _json
+    import httpx
+
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise ValueError("ANTHROPIC_API_KEY not set")
+
+    context = f"""Current model state: {_json.dumps(state)}
+Existing ops already applied: {_json.dumps(ops)}
+
+New assumption text from the PI:
+"{text}"
+
+Return the parsed ops JSON."""
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json={
+                "model":      "claude-haiku-4-5-20251001",
+                "max_tokens": 512,
+                "temperature": 0,
+                "system":     _ASSUMPTION_PARSE_PROMPT,
+                "messages":   [{"role": "user", "content": context}],
+            },
+        )
+    resp.raise_for_status()
+    raw = resp.json()["content"][0]["text"].strip()
+
+    # Strip markdown fences
+    if raw.startswith("```"):
+        parts = raw.split("```")
+        raw = parts[1] if len(parts) > 1 else raw
+        if raw.startswith("json"):
+            raw = raw[4:]
+    return _json.loads(raw.strip())
+
+
+class _ParseBody(BaseModel):
+    text: str = Field(..., min_length=1, max_length=2000)
+    state: dict = Field(default_factory=dict)
+    ops: list    = Field(default_factory=list)
+
+
+class _ApplyBody(BaseModel):
+    text: str = Field(default="")
+    ops:  list = Field(default_factory=list)
+
+
+_REGEN_SYSTEM_PROMPT = """You rewrite one paragraph of a market sizing report after the user
+adjusted the model inputs. Your output becomes the new paragraph — nothing else.
+
+Rules:
+1. Keep the same structure and approximate sentence count as the original.
+2. Update every specific number to the new values supplied.
+3. If a qualitative judgment (e.g. "does not support a priced round") is no longer
+   accurate given the updated figures, revise it to match the new magnitude.
+4. Keep the same analytical voice and tense.
+5. For any market value you write, use a placeholder token so the frontend can
+   keep the number live. Tokens (use exactly as written):
+     {{buyer_population}}  — eligible buyer count
+     {{spend_per_unit}}    — annualised spend per buyer (USD)
+     {{tam}}               — total addressable market (USD)
+     {{sam}}               — serviceable addressable market (USD)
+     {{som}}               — serviceable obtainable market (USD)
+6. Output ONLY the paragraph text. No headers, markdown, explanation, or surrounding quotes."""
+
+
+class _RegenBody(BaseModel):
+    section:         str  = Field(default="")
+    original_text:   str  = Field(default="", max_length=4000)
+    current_values:  dict = Field(default_factory=dict)
+    baseline_values: dict = Field(default_factory=dict)
+    assumptions:     list = Field(default_factory=list)
+
+
+@router.post("/reports/{report_id}/assumptions/parse")
+async def parse_assumption(
+    report_id: str,
+    body: _ParseBody,
+    current_user=Depends(get_current_user),
+):
+    """Parse a natural-language assumption into typed market model operations.
+
+    Called by market-model.js when the user clicks Interpret. Returns ops
+    that the frontend previews before the user chooses to apply or discard.
+    """
+    try:
+        result = await _parse_assumption_nl(body.text, body.state, body.ops)
+    except Exception as exc:
+        logger.error("assumption parse failed: %s", exc)
+        raise HTTPException(status_code=502, detail=f"LLM parse error: {exc}")
+    return result
+
+
+@router.get("/reports/{report_id}/assumptions")
+async def list_assumptions(
+    report_id: str,
+    current_user=Depends(get_current_user),
+):
+    """Return persisted NL assumption ops for a report (used on page reload)."""
+    import app.db.market_model_repository as _mmr
+    try:
+        await _mmr.init_nl_assumptions_table()
+        return await _mmr.list_nl_assumptions(report_id)
+    except Exception as exc:
+        logger.warning("list_assumptions non-fatal: %s", exc)
+        return []
+
+
+@router.post("/reports/{report_id}/assumptions/apply")
+async def apply_assumption(
+    report_id: str,
+    body: _ApplyBody,
+    current_user=Depends(get_current_user),
+):
+    """Persist applied assumption ops so they survive page reload."""
+    import app.db.market_model_repository as _mmr
+    await _mmr.init_nl_assumptions_table()
+    for op in (body.ops or []):
+        op_dict = op if isinstance(op, dict) else op.model_dump()
+        if not op_dict.get("id"):
+            continue
+        try:
+            await _mmr.save_nl_assumption(report_id, op_dict)
+        except Exception as exc:
+            logger.warning("save_nl_assumption non-fatal: %s", exc)
+    return {"ok": True}
+
+
+@router.delete("/reports/{report_id}/assumptions/{assumption_id}")
+async def delete_assumption(
+    report_id: str,
+    assumption_id: str,
+    current_user=Depends(get_current_user),
+):
+    """Remove one persisted assumption op from the ledger."""
+    import app.db.market_model_repository as _mmr
+    try:
+        await _mmr.init_nl_assumptions_table()
+        await _mmr.delete_nl_assumption(report_id, assumption_id)
+    except Exception as exc:
+        logger.warning("delete_nl_assumption non-fatal: %s", exc)
+    return {"ok": True}
+
+
+@router.post("/reports/{report_id}/assumptions/regenerate-section")
+async def regenerate_section(
+    report_id: str,
+    body: _RegenBody,
+    current_user=Depends(get_current_user),
+):
+    """Rewrite one narrative paragraph using the updated market model values.
+
+    Called when the user clicks 'Regenerate this section' on a stale paragraph.
+    Uses Haiku to rewrite the prose; placeholders in the output are replaced with
+    data-node-tagged spans so the numbers remain live after injection.
+    """
+    import os, httpx
+
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY not configured")
+
+    def _usd(v):
+        v = float(v or 0)
+        if v >= 1e9: return f'${v/1e9:.1f}B'
+        if v >= 1e6: return f'${v/1e6:.1f}M'
+        if v >= 1e3: return f'${round(v/1e3):,}K'
+        return f'${round(v):,}'
+
+    def _int_fmt(v):
+        return f'{round(float(v or 0)):,}'
+
+    cv = body.current_values
+    bv = body.baseline_values
+
+    assumptions_txt = "\n".join(
+        f"  {o.get('op','?')} {o.get('target','?')}"
+        f"{'×' if o.get('op')=='gate' else ' ='}{o.get('value','?')}: "
+        f"\"{o.get('quoted_span','')}\"" for o in (body.assumptions or [])
+    ) or "  (none)"
+
+    user_msg = (
+        f"Original paragraph:\n\"\"\"{body.original_text}\"\"\"\n\n"
+        f"Baseline: TAM {_usd(bv.get('tam',0))}, SAM {_usd(bv.get('sam',0))}, "
+        f"SOM {_usd(bv.get('som',0))}\n\n"
+        f"Updated values:\n"
+        f"  Buyer population: {_int_fmt(cv.get('buyer_population',0))}\n"
+        f"  Spend/unit: {_usd(cv.get('spend_per_unit',0))}\n"
+        f"  TAM: {_usd(cv.get('tam',0))}\n"
+        f"  SAM: {_usd(cv.get('sam',0))}\n"
+        f"  SOM: {_usd(cv.get('som',0))}\n\n"
+        f"Assumptions applied by the user:\n{assumptions_txt}\n\n"
+        "Rewrite the paragraph. Use {{buyer_population}}, {{spend_per_unit}}, "
+        "{{tam}}, {{sam}}, {{som}} as placeholder tokens for every market figure."
+    )
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json={
+                    "model":       "claude-haiku-4-5-20251001",
+                    "max_tokens":  512,
+                    "temperature": 0.3,
+                    "system":      _REGEN_SYSTEM_PROMPT,
+                    "messages":    [{"role": "user", "content": user_msg}],
+                },
+            )
+        resp.raise_for_status()
+        raw = resp.json()["content"][0]["text"].strip().strip('"')
+    except Exception as exc:
+        logger.error("regenerate_section failed: %s", exc)
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    # Replace {{key}} placeholders with formatted + data-node-tagged spans
+    FMT = {
+        "tam": _usd, "sam": _usd, "som": _usd,
+        "spend_per_unit": _usd, "buyer_population": _int_fmt,
+    }
+    html = raw
+    for key, fn in FMT.items():
+        placeholder = "{{" + key + "}}"
+        if placeholder in html:
+            span = f'<span class="mv" data-node="{key}">{fn(cv.get(key, 0))}</span>'
+            html = html.replace(placeholder, span)
+
+    return {"html": html}

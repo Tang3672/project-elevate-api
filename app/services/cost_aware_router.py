@@ -94,6 +94,7 @@ def classify_task(idea: str, product_type: str, *, sub_expert_id: str = "",
     return {
         "modality": modality,
         "product_category": product_type,
+        "sub_expert_id": sub_expert_id,     # needed by plan_sources for domain-gated source routing
         "development_stage": development_stage,
         "evidence_availability": evidence,
         "regulatory_risk": reg_risk,
@@ -142,25 +143,47 @@ def plan_models(profile: dict, complexity: float) -> dict:
 
 
 # Modality → prioritized source connectors (which to query and in what order).
+# Clinical-only sources (openFDA, ClinicalTrials.gov, CDC PLACES, CMS data) must
+# NOT appear for research tools or agriculture — those corpora index regulated
+# clinical products and produce irrelevant results for lab instruments and sensors.
 _SOURCE_MAP = {
-    "small_molecule": ["openFDA", "ClinicalTrials.gov", "DailyMed", "CMS ASP", "PubMed", "Google Patents"],
-    "biologic":       ["openFDA", "ClinicalTrials.gov", "Open Targets", "CMS ASP", "PubMed", "Google Patents"],
-    "gene_cell":      ["ClinicalTrials.gov", "ClinVar", "Orphanet", "NIH GARD", "openFDA", "PubMed"],
-    "vaccine":        ["ClinicalTrials.gov", "openFDA", "WHO GHO", "CDC Surveillance", "PubMed"],
-    "device":         ["openFDA", "ClinicalTrials.gov", "CMS Quality", "County Health Rankings", "Google Patents"],
-    "diagnostic":     ["openFDA", "CMS ASP", "cBioPortal", "Open Targets", "PubMed"],
-    "digital":        ["ClinicalTrials.gov", "CMS Quality", "AHRQ MEPS", "PubMed"],
-    "other":          ["openFDA", "ClinicalTrials.gov", "PubMed", "Google Patents"],
+    "small_molecule":   ["openFDA", "ClinicalTrials.gov", "DailyMed", "CMS ASP", "PubMed", "Google Patents"],
+    "biologic":         ["openFDA", "ClinicalTrials.gov", "Open Targets", "CMS ASP", "PubMed", "Google Patents"],
+    "gene_cell":        ["ClinicalTrials.gov", "ClinVar", "Orphanet", "NIH GARD", "openFDA", "PubMed"],
+    "vaccine":          ["ClinicalTrials.gov", "openFDA", "WHO GHO", "CDC Surveillance", "PubMed"],
+    "device":           ["openFDA", "ClinicalTrials.gov", "CMS Quality", "County Health Rankings", "Google Patents"],
+    "diagnostic":       ["openFDA", "CMS ASP", "cBioPortal", "Open Targets", "PubMed"],
+    "digital":          ["ClinicalTrials.gov", "CMS Quality", "AHRQ MEPS", "PubMed"],
+    # Research tool and agriculture domains: NIH/NSF grant databases and OpenAlex
+    # are the correct corpora — not clinical registries or drug databases.
+    "research_tool":    ["NIH RePORTER", "NSF Awards", "OpenAlex", "Google Patents", "Semantic Scholar"],
+    "research_infra":   ["NIH RePORTER", "NSF Awards", "OpenAlex", "Google Patents", "Semantic Scholar"],
+    "agriculture":      ["USDA NIFA", "NSF Awards", "USDA NASS", "OpenAlex", "Google Patents"],
+    "other":            ["openFDA", "ClinicalTrials.gov", "PubMed", "Google Patents"],
 }
 
 
 def plan_sources(profile: dict) -> dict:
     """Choose which sources to query; escalate to slower tiers only when thin."""
     modality = profile.get("modality", "other")
+    sub_expert_id = profile.get("sub_expert_id", "") or ""
+
+    # Research tool and agriculture archetypes override modality-based lookup:
+    # their correct corpora are grant databases (NIH, NSF, USDA), not clinical registries.
+    if sub_expert_id.startswith("research_tool") or sub_expert_id.startswith("research_infrastructure"):
+        modality = "research_tool"
+    elif sub_expert_id.startswith("research_infra"):
+        modality = "research_infra"
+    elif "agronomy" in sub_expert_id or "agriculture" in sub_expert_id or "agri" in sub_expert_id:
+        modality = "agriculture"
+
     sources = _SOURCE_MAP.get(modality, _SOURCE_MAP["other"])
     escalate_tiers = profile.get("evidence_availability") == "low"
-    # Funding/IP sweep is always worth it for full reports.
-    if profile.get("required_output_type") == "full_report":
+    # Funding/IP sweep is always worth it for full reports, but only for clinical domains
+    # (NIH Reporter and EDGAR are already in the research tool plan above).
+    if profile.get("required_output_type") == "full_report" and modality not in (
+        "research_tool", "research_infra", "agriculture"
+    ):
         for extra in ("NIH Reporter (SBIR/STTR)", "SEC EDGAR"):
             if extra not in sources:
                 sources = sources + [extra]

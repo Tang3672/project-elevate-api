@@ -147,6 +147,38 @@ class TestRelevanceGateAllCitations:
             "B-01 fix removed the pmid guard — update the comment too."
         )
 
+    def test_partial_overlap_pmid_citation_dropped(self):
+        """fix 7: a paper with partial keyword overlap (score 1-5) must be dropped.
+
+        Old _RELEVANCE_THRESHOLD_PMID=0 let these through. The obituary paper
+        PMID 396584 '[Feliks Sawicki (1929-1979)]' matched 'Hub' in Hublink and
+        scored >0 but well below 6 — it was displayed with the header
+        'Cite these in grant applications and investor materials.'
+        """
+        citation = {
+            "pmid":      "396584",
+            "title":     "[Feliks Sawicki (1929-1979)]",
+            "authors":   "Anonymous",
+            "journal":   "Wiadomosci Lekarskie",
+            "year":      "1979",
+            "relevance": "Not directly relevant; closest indexed 'Hub' trial",
+        }
+        with patch("app.services.pubmed_service.resolve_pmid", return_value={
+            "pmid":     "396584",
+            "title":    "[Feliks Sawicki (1929-1979)]",
+            "authors":  "",
+            "journal":  "Wiadomosci Lekarskie",
+            "year":     "1979",
+            "abstract": "",
+            "url":      "https://pubmed.ncbi.nlm.nih.gov/396584/",
+        }):
+            result = self._filter([citation])
+        assert result == [], (
+            "Obituary paper (PMID 396584) matched on substring 'Hub' — must be "
+            "dropped by threshold=6 gate even though score > 0. "
+            "v7 B-01 symptom: this paper was shown with 'Cite these in grant applications.'"
+        )
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 2.  Relevance scoring — accuracy check

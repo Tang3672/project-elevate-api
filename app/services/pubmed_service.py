@@ -470,7 +470,7 @@ def _verify_claims_against_abstract(relevance: str, abstract: str) -> str:
 
 
 _RELEVANCE_THRESHOLD_NULL_PMID = 6   # null-PMID (LLM-recalled): strict gate
-_RELEVANCE_THRESHOLD_PMID      = 0   # PMID-backed: B-09 signal gate handles domain filtering
+_RELEVANCE_THRESHOLD_PMID      = 6   # fix 7: same threshold for PMID-backed; score abstract first
 _RELEVANCE_THRESHOLD = _RELEVANCE_THRESHOLD_NULL_PMID  # alias used by tests
 
 
@@ -493,15 +493,35 @@ def filter_literature_citations(
     if not citations:
         return citations
 
+    # Sentinel title prefixes that some retrieval paths emit as "no results" entries.
+    # These are plumbing artifacts, not papers — drop them unconditionally.
+    _SENTINEL_PREFIXES = (
+        "no pubmed", "no publications", "not indexed", "no results",
+        "no papers found", "not available", "no literature",
+    )
+
     verified = []
     for c in citations:
         pmid = (c.get("pmid") or "").strip()
+
+        # D-02: PMC IDs (PMC\d+) are NOT PubMed IDs. Also drop sentinel non-numeric
+        # values like "N/A", "NA", "None". Real PMIDs are purely numeric.
+        # Non-numeric "PMIDs" are treated as null-PMID → stricter gate applies.
+        if pmid and (pmid.upper().startswith("PMC") or not pmid.lstrip("-").isdigit()):
+            logger.debug(
+                "D-02: non-numeric or PMC-namespace ID '%s' treated as null-PMID", pmid
+            )
+            pmid = ""
 
         # ── G.3: null-PMID path — verify via OpenAlex / Crossref ─────────────
         if not pmid:
             title = (c.get("title") or "").strip()
             if not title:
                 logger.debug("G.3: dropping citation with no PMID and no title")
+                continue
+            # Drop sentinel "no results" titles before attempting any external lookup.
+            if title.lower().startswith(_SENTINEL_PREFIXES) or title.lower() in ("n/a", "na", "none"):
+                logger.debug("D-02: dropping sentinel no-result entry '%s'", title[:60])
                 continue
             external = resolve_via_openalex(title) or resolve_via_crossref(title)
             if external is None:
@@ -521,6 +541,7 @@ def filter_literature_citations(
         # ── PMID path (unchanged from Part A) ────────────────────────────────
         else:
             resolved = resolve_pmid(pmid)
+            _pmid_resolved_ok = resolved is not None
             if resolved is None:
                 # Unresolvable PMID (network error or non-existent): pass through.
                 # Hard drop only when a PMID resolves to a DIFFERENT title.
@@ -545,17 +566,42 @@ def filter_literature_citations(
                 checked_relevance = _verify_claims_against_abstract(c.get("relevance", ""), abstract)
                 if checked_relevance != c.get("relevance", ""):
                     c = {**c, "relevance": checked_relevance}
+                # fix 7: provide the real abstract for relevance scoring below
+                # (it's not in c unless the title mismatched and triggered a full merge)
+                if abstract and not c.get("abstract"):
+                    c = {**c, "abstract": abstract}
+
+                # G.3 strict gate for research tools: if a PMID resolves to real
+                # metadata but has zero keyword overlap with the product idea, it's a
+                # false-positive retrieval (e.g. "laryngeal mask airways" for a soil
+                # moisture sensor). Drop it. Doesn't fire for clinical products or
+                # unresolvable PMIDs (those fall through to the main threshold gate).
+                if _is_non_clinical_product(sub_expert_id) and idea:
+                    _strict_score = _keyword_relevance_score(
+                        resolved.get("title", ""), resolved.get("abstract", ""), idea
+                    )
+                    if _strict_score == 0:
+                        logger.debug(
+                            "G.3 strict gate (research tool, verified PMID): dropped '%s' (score=0)",
+                            resolved.get("title", "")[:80],
+                        )
+                        continue
 
         # ── G.3 relevance gate — ALL citations (B-01 fix) ───────────────────────
         # null-PMID: strict gate (threshold 6) — these are LLM-recalled with no
         # prior retrieval filter.  A score < 6 means <30% idea-word overlap, almost
         # certainly off-topic (e.g. apathy paper recalled for cloud sync platform).
         #
-        # PMID-backed: lenient gate (threshold 1) — PubMed search already filtered
-        # for domain relevance.  We only drop papers with ZERO keyword overlap
-        # (completely different vocabulary), not borderline-relevant ones like
-        # REDCap (research informatics) cited for Hublink (research data platform).
-        threshold = _RELEVANCE_THRESHOLD_NULL_PMID if not pmid else _RELEVANCE_THRESHOLD_PMID
+        # PMID resolved: gate is threshold 6 (fix 7) — we scored the real abstract;
+        # if it doesn't match the idea it's irrelevant regardless of the PMID.
+        #
+        # PMID unresolvable (network error, non-existent): threshold 0 — we have no
+        # better metadata than what came in; let the B-09 domain filter decide.
+        # The G.3 strict zero-overlap gate above catches research-tool mismatches
+        # when resolution succeeds, so unresolvable-PMID passthrough is safe.
+        threshold = (_RELEVANCE_THRESHOLD_NULL_PMID if not pmid
+                     else _RELEVANCE_THRESHOLD_PMID if _pmid_resolved_ok
+                     else 0)
         score = _keyword_relevance_score(
             c.get("title") or "",
             c.get("abstract") or "",

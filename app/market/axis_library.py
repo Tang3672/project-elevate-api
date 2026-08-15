@@ -286,6 +286,23 @@ AXIS_LIBRARY: list[AxisDefinition] = [
 ]
 
 
+# ── Candidacy gate ────────────────────────────────────────────────────────────
+
+# Families that require a clinical patient-buyer. No lift value can override this.
+CLINICAL_FAMILIES: frozenset[str] = frozenset({"patient_demographic", "payer", "clinical"})
+
+
+def is_candidate(defn: AxisDefinition, domain: str) -> bool:
+    """Hard boolean gate: block clinical-family axes for non-clinical products.
+
+    Runs before applies_when() so no lift value or predicate can override it.
+    A product is clinical only when its domain is explicitly LIFE_SCIENCES_CLINICAL.
+    """
+    if domain != "LIFE_SCIENCES_CLINICAL" and defn.family in CLINICAL_FAMILIES:
+        return False
+    return True
+
+
 # ── Selection engine ──────────────────────────────────────────────────────────
 
 def select_axes(domain: str, expert_domain: str) -> list[AxisDecision]:
@@ -305,6 +322,19 @@ def select_axes(domain: str, expert_domain: str) -> list[AxisDecision]:
     rejected: list[AxisDecision] = []
 
     for defn in AXIS_LIBRARY:
+        # Hard gate runs first — no lift value can override it
+        if not is_candidate(defn, domain):
+            rejected.append(AxisDecision(
+                axis_id=defn.id,
+                label=defn.label,
+                family=defn.family,
+                selected=False,
+                reason=defn.rejection_reason,
+                est_lift=None,
+                data_available=True,
+            ))
+            continue
+
         fires = defn.applies_when(domain, expert_domain)
         if fires:
             domain_label = domain.replace("_", " ").lower()

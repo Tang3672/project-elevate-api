@@ -2,7 +2,7 @@
 
 Verifies:
   1. swing_pct is always bounded in [0, 500] in _run_research_tool_sensitivity
-  2. impact_pct is always bounded in [0, 500] in sensitivity_analysis
+  2. impact_pct uses max one-sided deviation / base_tam (not full range / base_tam)
   3. som_base <= 0 raises ValueError (degenerate baseline guard)
 """
 from __future__ import annotations
@@ -11,45 +11,64 @@ import math
 import pytest
 
 
-# ── market_segmentation.py: impact_pct clamp ─────────────────────────────────
+# ── market_segmentation.py: impact_pct formula ───────────────────────────────
 
-def _make_segment_tree(base_value: float, high_value: float):
-    """Build a minimal single-leaf SegmentTree for sensitivity tests."""
+def _make_three_node_tree(root_value: float, mid_frac: float, leaf_frac: float, price_usd: float):
+    """
+    Build a root → assumed_mid → derived_leaf tree.
+
+    Sensitivity analysis operates on intermediate assumed nodes, not price-bearing
+    leaves. _compute_tam_from_node_vals recomputes leaf value from its parent's
+    propagated value, so the assumed node must be an ancestor of the leaf.
+    """
     from app.services.market_segmentation import SegmentNode, SegmentTree
 
+    mid_value  = root_value * mid_frac
+    leaf_value = mid_value  * leaf_frac
     root = SegmentNode(
         id="root", label="All labs", parent_id=None,
-        value=base_value, unit="labs", method="assumed",
-        low=base_value * 0.5, high=high_value, confidence=0.5,
-        price_model={"annual_usd": 5_000, "tier": "academic"},
+        value=root_value, unit="labs", method="retrieved",
+        low=root_value * 0.8, high=root_value * 1.2, confidence=0.85,
+        price_model=None,
     )
-    tree = SegmentTree(nodes=[root], root_id="root", product_name="Test Tool")
-    return tree
+    mid = SegmentNode(
+        id="mid", label="Funnel labs", parent_id="root",
+        value=mid_value, unit="labs", method="assumed",
+        low=mid_value * 0.5, high=mid_value * 1.5, confidence=0.5,
+        price_model=None,
+    )
+    leaf = SegmentNode(
+        id="leaf", label="Addressable labs", parent_id="mid",
+        value=leaf_value, unit="labs", method="derived",
+        low=leaf_value * 0.5, high=leaf_value * 1.5, confidence=0.6,
+        price_model={"annual_usd": price_usd, "tier": "academic"},
+    )
+    return SegmentTree(nodes=[root, mid, leaf], root_id="root", product_name="Test Tool")
 
 
-def test_sensitivity_analysis_impact_pct_clamp():
-    """impact_pct must not exceed 500% even with extreme high_value."""
+def test_sensitivity_analysis_impact_pct_formula():
+    """±50% input variation on an intermediate node must produce ~50% impact_pct.
+
+    The old formula used abs(high - low) / base * 100 which gives ~100%.
+    The correct formula is max(abs(high - base), abs(low - base)) / base * 100 = ~50%.
+    """
     from app.services.market_segmentation import sensitivity_analysis
 
-    # high = 100x base → unclamped impact would be ~10,000%; clamped to 500%
-    tree = _make_segment_tree(base_value=1_000, high_value=100_000)
+    # mid_frac=0.5, leaf_frac=0.8 → base_tam = 1000 * 0.5 * 0.8 * 10000 = $4M
+    # varying mid ±50%: tam_low ≈ $2M, tam_high ≈ $6M
+    # impact_pct = max(|6M - 4M|, |2M - 4M|) / 4M * 100 = 50%
+    tree = _make_three_node_tree(root_value=1_000, mid_frac=0.5, leaf_frac=0.8, price_usd=10_000)
     result = sensitivity_analysis(tree)
-    assert isinstance(result, list)
-    for entry in result:
-        impact = entry.get("impact_pct", 0)
-        assert impact <= 500.0, (
-            f"impact_pct {impact} exceeds 500% cap in {entry.get('label', '?')}"
-        )
-        assert impact >= 0.0, (
-            f"impact_pct {impact} is negative in {entry.get('label', '?')}"
-        )
+    assert len(result) == 1
+    pct = result[0]["impact_pct"]
+    assert 45.0 <= pct <= 55.0, f"Expected ~50% impact for ±50% variation, got {pct}%"
 
 
 def test_sensitivity_analysis_returns_valid_structure():
     """sensitivity_analysis should always return a list."""
     from app.services.market_segmentation import sensitivity_analysis
 
-    tree = _make_segment_tree(base_value=2_000, high_value=4_000)
+    tree = _make_three_node_tree(root_value=2_000, mid_frac=0.4, leaf_frac=0.7, price_usd=7_000)
     result = sensitivity_analysis(tree)
     assert isinstance(result, list)
 

@@ -62,8 +62,9 @@ def test_case_insensitive_match():
 # ---------------------------------------------------------------------------
 
 _REAL_ABSTRACT = (
-    "A randomised controlled trial of 320 patients demonstrated a 42% reduction "
-    "in adverse events. Cost per patient was $1,200. Follow-up was 48 hours."
+    "A randomised controlled trial of 320 cancer patients treated with a novel drug "
+    "demonstrated a 42% reduction in adverse events. Cost per patient was $1,200. "
+    "Follow-up was 48 hours."
 )
 
 _RESOLVED_WITH_MATCH = {
@@ -76,7 +77,13 @@ _RESOLVED_WITH_MATCH = {
     "url":      "https://pubmed.ncbi.nlm.nih.gov/12345678/",
 }
 
-_RESOLVED_NO_ABSTRACT = {**_RESOLVED_WITH_MATCH, "abstract": ""}
+_RESOLVED_NO_ABSTRACT = {
+    **_RESOLVED_WITH_MATCH,
+    # Title must mention idea words (cancer, drug) so the relevance gate passes;
+    # abstract is intentionally empty to test the no-abstract code path.
+    "title":    "Cancer drug RCT on adverse event reduction",
+    "abstract": "",
+}
 
 
 def _make_citation(pmid="12345678", title="RCT on adverse event reduction", relevance=""):
@@ -100,11 +107,18 @@ def test_integration_fabricated_stat_flagged():
 
 
 def test_integration_no_abstract_relevance_unchanged():
-    citation = _make_citation(relevance="Authors report 99% cure rate.")
+    # Citation title matches the resolved title so the title is not replaced.
+    # The resolved abstract is empty so _verify_claims_against_abstract cannot
+    # flag the fabricated stat — the relevance must pass through unchanged.
+    # Both titles carry the idea words so the relevance gate (threshold=6) passes.
+    citation = _make_citation(
+        title="Cancer drug RCT on adverse event reduction",
+        relevance="Authors report 99% cure rate.",
+    )
     with patch("app.services.pubmed_service.resolve_pmid", return_value=_RESOLVED_NO_ABSTRACT):
         result = filter_literature_citations([citation], idea="cancer drug", sub_expert_id="oncology")
     assert len(result) == 1
-    # No abstract → can't verify → pass through unchanged
+    # No abstract → _verify_claims_against_abstract can't flag → relevance unchanged
     assert result[0]["relevance"] == "Authors report 99% cure rate."
 
 

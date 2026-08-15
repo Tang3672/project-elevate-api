@@ -98,6 +98,7 @@ _BANNED_OUTPUT_STRINGS = [
     "no api tokens",
     "specify source",
     "[date removed",
+    "nih-funded funded",
 ]
 
 
@@ -195,6 +196,7 @@ async def generate_pi_report(
     # C.2: resolve domain — explicit intake value wins; otherwise derive from sub_expert_id.
     _RESEARCH_SUB_EXPERTS = frozenset({
         "research_tool_non_clinical", "research_infrastructure_saas",
+        "research_tool_agronomy",
     })
     _CLINICAL_SUB_EXPERTS = frozenset({
         "drug_amr", "drug_oncology", "drug_cns", "drug_cardiology", "drug_metabolic",
@@ -2107,7 +2109,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
         try:
             from app.services.market_segmentation import (
                 LIFE_SCIENCES_RESEARCH as _SEG_TEMPLATE,
-                build_segment_tree, triangulate, monte_carlo, sensitivity_analysis,
+                build_segment_tree, sensitivity_analysis,
             )
             _seg_tree = await build_segment_tree(
                 template=_SEG_TEMPLATE,
@@ -2115,10 +2117,6 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
                 product_name=getattr(report, "product_name", "") or "",
                 ta=ta_for_deriv,
             )
-            # Triangulation (D.3): three independent methods + reconciliation
-            _triangulation = triangulate(_seg_tree)
-            # Monte Carlo (D.6): seed=42 for reproducibility (B-05 determinism)
-            _mc = monte_carlo(_seg_tree, n=5_000, seed=42)
             # Sensitivity analysis (D.7): tornado-chart ranked parameters
             _sensitivity = sensitivity_analysis(_seg_tree)
 
@@ -2130,39 +2128,14 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
                 "product_name": _seg_tree.product_name,
                 "nih_labs_retrieved": _seg_tree.nih_labs_retrieved,
             }
-            report.triangulation = {
-                "bottom_up":   _triangulation.bottom_up,
-                "top_down":    _triangulation.top_down,
-                "value_based": _triangulation.value_based,
-                "reconciled":  _triangulation.reconciled,
-                "monte_carlo": _mc,
-            }
             report.sensitivity = _sensitivity
-
-            # G.9: overwrite market_sizing TAM with triangulation reconciled TAM
-            # so there is one canonical number across both paths.
-            if report.market_sizing is not None:
-                _rec_tam = _triangulation.reconciled.get("tam_usd", 0)
-                if _rec_tam > 0:
-                    _old_tam = report.market_sizing.total_addressable_market_usd
-                    _note = report.market_sizing.methodology_note.rstrip(".")
-                    report.market_sizing = report.market_sizing.model_copy(update={
-                        "total_addressable_market_usd": _rec_tam,
-                        "methodology_note": (
-                            _note +
-                            " Reconciled via 3-method triangulation (BU 50% + TD 25% + VB 25%)."
-                        ).strip(),
-                    })
-                    logger.info(
-                        "G.9: TAM reconciled derivation=$%.0f → triangulation=$%.0f",
-                        _old_tam, _rec_tam,
-                    )
 
             # A.2: override axis_decisions with real computed lifts from the tree's
             # dimension_report so lifts vary by product rather than staying fixed.
             _dr = getattr(_seg_tree, "dimension_report", None) or {}
             if _dr.get("selected") is not None:
                 try:
+                    from app.market.axis_library import CLINICAL_FAMILIES as _CF
                     _selected = [
                         {
                             "axis_id":        d["id"],
@@ -2177,6 +2150,9 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
                             "data_available": True,
                         }
                         for d in _dr["selected"]
+                        # Hard gate: clinical-family axes never enter selected for non-clinical domains
+                        if _resolved_domain == "LIFE_SCIENCES_CLINICAL"
+                        or d.get("family", "") not in _CF
                     ]
                     _rejected_tree = [
                         {
@@ -2210,11 +2186,8 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
                     logger.warning("A.2: axis override failed (non-fatal): %s", _ax_e)
 
             logger.info(
-                "Part D: segmentation tree built (%d nodes), triangulated, "
-                "MC p10=$%.0f p90=$%.0f, %d sensitivity params",
+                "Part D: segmentation tree built (%d nodes), %d sensitivity params",
                 len(_seg_tree.nodes),
-                _mc.get("p10", 0),
-                _mc.get("p90", 0),
                 len(_sensitivity),
             )
         except Exception as _seg_e:
@@ -3072,10 +3045,17 @@ def _enforce_market_consistency(report, deriv) -> None:
         if ms is None:
             return
         tam = round(float(getattr(deriv, "us_tam_usd", 0) or 0))
+        if tam <= 0:
+            return
+        # Fix 2: write TAM unconditionally — buyer_population × spend_per_unit is the
+        # single source of truth; never let LLM-generated json overwrite it.
+        ms.total_addressable_market_usd = float(tam)
+
         sam_raw = float(getattr(deriv, "us_sam_usd", 0) or 0)
         som_raw = float(getattr(deriv, "us_som_usd", 0) or 0)
-        if tam <= 0 or sam_raw <= 0:
+        if sam_raw <= 0:
             return
+        assert sam_raw <= tam, f"SAM {sam_raw:,.0f} > TAM {tam:,.0f}"
         pen = round(sam_raw / tam * 100, 1)            # clean reachable-penetration %
         sam = round(tam * pen / 100)                   # exactly TAM × pen%
         cap = round(som_raw / sam_raw * 100, 1) if sam_raw else 0.0
@@ -3101,7 +3081,6 @@ def _enforce_market_consistency(report, deriv) -> None:
         }.get(_arch, "buyers × annual revenue per buyer")
 
         from app.services.buyer_model import HORIZON_YEARS as _HORIZON_YEARS
-        ms.total_addressable_market_usd = float(tam)
         ms.serviceable_market_usd = float(sam)
         ms.formula = (
             f"TAM = ${tam:,.0f} ({_fmt(tam)}, {_tam_basis}). "

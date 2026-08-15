@@ -193,8 +193,12 @@ class TestB09EdgeCases:
         assert not any("DESeq2" in t for t in titles), "DESeq2 must be blocked"
         assert not any("randomized controlled trial" in t for t in titles), "RCT must be blocked"
 
-    def test_citation_with_missing_title_passes(self):
-        """Citations with no title must not crash and should pass through."""
-        cits = [{"pmid": "123", "title": None, "authors": "Smith J", "year": 2024}]
+    def test_citation_with_missing_title_does_not_crash(self):
+        """Citations with no title must not raise an exception."""
+        # PMID 99999999999 does not exist in PubMed and will not resolve.
+        # The gate cannot score it, so it passes through to the B-09 domain check.
+        cits = [{"pmid": "99999999999", "title": None, "authors": "Smith J", "year": 2024}]
         result = filter_literature_citations(cits, HUBLINK_IDEA, RT_EXPERT)
-        assert len(result) == 1, "Citation with None title must pass (no title to match against)"
+        assert isinstance(result, list), "Must return a list without raising"
+        # If the PMID didn't resolve, no strict score → passes through
+        assert len(result) == 1, "Unresolvable PMID with None title must pass through"
