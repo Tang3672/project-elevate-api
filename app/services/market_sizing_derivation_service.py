@@ -1969,7 +1969,7 @@ def _derive_research_tool_formula(
         DerivationStep(
             step_num=1,
             title=f"Step 1 — Eligible buyer population ({domain_label})",
-            formula=f"{domain_label}: {pop_lo:,}–{pop_hi:,}",
+            formula=f"{domain_label}: {int(pop_lo):,}–{int(pop_hi):,}",
             value=float((pop_lo + pop_hi) / 2),
             unit="labs",
             source_paper=pop_src,
@@ -1977,7 +1977,7 @@ def _derive_research_tool_formula(
             explanation=(
                 f"Buyer is an academic PI, not a hospital enterprise. "
                 f"Population = {domain_label}. "
-                f"Range: {pop_lo:,} (conservative) to {pop_hi:,} (optimistic). "
+                f"Range: {int(pop_lo):,} (conservative) to {int(pop_hi):,} (optimistic). "
                 f"Source: {pop_src}."
             ),
             data_source=pop_src,
@@ -2011,9 +2011,9 @@ def _derive_research_tool_formula(
             step_num=3,
             title="Step 3 — Total Addressable Market (TAM — midpoint estimate)",
             formula=(
-                f"Pessimistic: {pop_lo:,} × ${sp_lo:,.0f} = {_fmt(pop_lo * sp_lo)} | "
+                f"Pessimistic: {int(pop_lo):,} × ${sp_lo:,.0f} = {_fmt(pop_lo * sp_lo)} | "
                 f"Midpoint: {int((pop_lo+pop_hi)/2):,} × ${int((sp_lo+sp_hi)/2):,} = {_fmt(tam)} | "
-                f"Optimistic: {pop_hi:,} × ${sp_hi:,.0f} = {_fmt(pop_hi * sp_hi)}"
+                f"Optimistic: {int(pop_hi):,} × ${sp_hi:,.0f} = {_fmt(pop_hi * sp_hi)}"
             ),
             value=float(tam),
             unit="USD",
@@ -2095,7 +2095,7 @@ def _derive_research_tool_formula(
         archetype_label="Research Tool / Non-Clinical Data Infrastructure (Buyer Model)",
         formula_name="Bottom-Up PI Buyer Model",
         formula_overview=(
-            f"TAM = {pop_lo:,}–{pop_hi:,} NIH-funded labs × "
+            f"TAM = {int(pop_lo):,}–{int(pop_hi):,} NIH-funded labs × "
             f"${sp_lo:,.0f}–${sp_hi:,.0f}/yr annualised spend = "
             f"{_fmt(pop_lo * sp_lo)}–{_fmt(pop_hi * sp_hi)} (midpoint {_fmt(tam)})"
         ),
@@ -2106,7 +2106,7 @@ def _derive_research_tool_formula(
         som_fmt=_fmt(som),
         key_assumptions=[
             "Buyer = academic PI on grant cycle (not hospital enterprise)",
-            f"Lab population: {pop_lo:,}–{pop_hi:,} eligible labs ({pop_src})",
+            f"Lab population: {int(pop_lo):,}–{int(pop_hi):,} eligible labs ({pop_src})",
             f"Annualised spend: ${sp_lo:,.0f}–${sp_hi:,.0f}/lab/yr ({sp_src})",
             f"SAM adoption rate: {_sam_lo:.0%}–{_sam_hi:.0%} (midpoint {sam_mid:.0%})" + (" — from workflow type" if _user_overrides.get("sam") else " — assumed"),
             f"SOM 5-yr penetration: {_som_lo:.0%}–{_som_hi:.0%} (midpoint {som_mid:.0%})" + (" — from adoption pathway" if _user_overrides.get("som") else " — assumed"),

@@ -2921,6 +2921,55 @@ async def regenerate_section(
         logger.error("regenerate_section failed: %s", exc)
         raise HTTPException(status_code=502, detail=str(exc))
 
+    # Validate: no numeric market literals should remain after stripping {{tokens}}.
+    # If the LLM wrote "$527K" or "1,666 labs" instead of {{som}}/{{buyer_population}},
+    # retry once with a stricter prompt at lower temperature.
+    import re as _re_val
+    _LITERAL_NUM_RE = _re_val.compile(
+        r'\$[\d,]+(?:\.\d+)?[KMBkmb]?|\b\d{3,}[\d,.]*\b'
+    )
+    def _has_literal_nums(text: str) -> bool:
+        stripped = _re_val.sub(r'\{\{[^}]+\}\}', '', text)
+        return bool(_LITERAL_NUM_RE.search(stripped))
+
+    if _has_literal_nums(raw):
+        logger.warning("regenerate_section: numeric literal in output, retrying with stricter prompt")
+        _retry_prefix = (
+            "IMPORTANT: your previous draft contained hardcoded numbers. "
+            "You MUST replace every market figure with the exact {{token}} placeholder — "
+            "never write digits for buyer counts, dollar amounts, or market sizes.\n\n"
+        )
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as _c2:
+                _r2 = await _c2.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers={
+                        "x-api-key": api_key,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json",
+                    },
+                    json={
+                        "model":       "claude-haiku-4-5-20251001",
+                        "max_tokens":  512,
+                        "temperature": 0.1,
+                        "system":      _REGEN_SYSTEM_PROMPT,
+                        "messages":    [{"role": "user", "content": _retry_prefix + user_msg}],
+                    },
+                )
+            _r2.raise_for_status()
+            raw = _r2.json()["content"][0]["text"].strip().strip('"')
+            if _has_literal_nums(raw):
+                raise HTTPException(
+                    status_code=422,
+                    detail="Regenerated section still contains hardcoded numbers after retry. "
+                           "Use the model inputs panel to see updated values."
+                )
+        except HTTPException:
+            raise
+        except Exception as _exc2:
+            logger.error("regenerate_section retry failed: %s", _exc2)
+            raise HTTPException(status_code=502, detail=str(_exc2))
+
     # Replace {{key}} placeholders with formatted + data-node-tagged spans
     FMT = {
         "tam": _usd, "sam": _usd, "som": _usd,
