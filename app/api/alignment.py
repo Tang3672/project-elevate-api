@@ -2847,6 +2847,35 @@ async def delete_assumption(
     return {"ok": True}
 
 
+class _RescoreBody(BaseModel):
+    som_usd: float
+    tam_usd: Optional[float] = None
+
+
+@router.post("/reports/{report_id}/rescore")
+async def rescore_assessment(
+    report_id: str,
+    body: _RescoreBody,
+    current_user=Depends(get_current_user),
+):
+    """Re-compute commercialization scores with gated SOM/TAM. Pure rules — no LLM.
+    Uses stored _input_signals from the original report so only the market signal changes."""
+    from app.services.report_jobs import get_job
+    job = await get_job(report_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Report not found")
+    report_data = job.get("report") or {}
+    cs = report_data.get("commercialization_scores") or {}
+    signals = dict(cs.get("_input_signals") or {})
+    if not signals:
+        raise HTTPException(status_code=422, detail="No stored signals for this report")
+    signals["som_usd"] = body.som_usd
+    if body.tam_usd is not None:
+        signals["tam_usd"] = body.tam_usd
+    from app.services.commercialization_decision_service import score_commercialization
+    return score_commercialization(signals)
+
+
 @router.post("/reports/{report_id}/assumptions/regenerate-section")
 async def regenerate_section(
     report_id: str,

@@ -386,8 +386,15 @@ def _recommendation(s: dict) -> str:
     overall = s["overall_priority"]
 
     if overall < 0.40:
-        return ("Deprioritize relative to the portfolio unless the key risks "
-                "(regulatory odds, IP whitespace, or market size) can be materially de-risked.")
+        # regulatory_feasibility is None for non-regulated products (research tools, software)
+        _is_regulated = s.get("regulatory_feasibility") is not None
+        _risk_list = (
+            "regulatory odds, IP whitespace, or market size"
+            if _is_regulated else
+            "IP whitespace, competitive differentiation, or market size"
+        )
+        return (f"Deprioritize relative to the portfolio unless the key risks "
+                f"({_risk_list}) can be materially de-risked.")
 
     # Primary action
     if sbir >= 0.65 and inv < 0.60:
