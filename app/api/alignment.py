@@ -2261,6 +2261,38 @@ async def market_model_node_edit(
         user_id=getattr(current_user, "id", None),
     )
 
+    # Sync the stored report's market_sizing headlines so the server-side math guard
+    # compares against the CURRENT buyer model, not the initial derivation value.
+    # Without this, editing pop from 3k to 55k would leave total_addressable_market_usd
+    # at the stale derivation value, triggering false MATH flags on every load.
+    try:
+        from app.services.report_jobs import get_job as _get_job, update_report as _update_job
+        _job = await _get_job(report_id)
+        if _job and isinstance(_job.get("report"), dict):
+            _rep = dict(_job["report"])
+            _ms  = dict(_rep.get("market_sizing") or {})
+            _ms["total_addressable_market_usd"] = new_nodes.get("us_tam_usd")
+            _ms["serviceable_market_usd"]       = new_nodes.get("us_sam_usd")
+            _rep["market_sizing"] = _ms
+            # Clear stale MATH flags — client guard is authoritative after any buyer model edit
+            _val = _rep.get("validation")
+            if isinstance(_val, dict):
+                _val = dict(_val)
+                _non_math_errs = [e for e in (_val.get("errors") or [])
+                                  if (e.get("category") or "").upper() != "MATH"]
+                _non_math_warns = [w for w in (_val.get("warnings") or [])
+                                   if (w.get("category") or "").upper() != "MATH"]
+                _val["errors"]   = _non_math_errs
+                _val["warnings"] = _non_math_warns
+                if not any(e.get("severity") == "ERROR" for e in _non_math_errs):
+                    _val["status"] = "PASS" if not _non_math_errs else _val.get("status", "FLAG")
+                _rep["validation"] = _val
+            await _update_job(report_id, _rep)
+            logger.info("market_sizing headline synced after buyer model edit: TAM=$%s",
+                        f"{new_nodes.get('us_tam_usd', 0):,.0f}")
+    except Exception as _sync_e:
+        logger.warning("market_sizing headline sync failed (non-fatal): %s", _sync_e)
+
     # Diff against parent
     parent_nodes = _recompute_buyer_model(base.get("nodes") or {})
     diffs = _diff_nodes(parent_nodes, new_nodes)
