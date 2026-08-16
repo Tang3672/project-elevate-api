@@ -200,6 +200,17 @@ _BAD_EVIDENCE_SOURCE_RE = _eb_re.compile(
     _eb_re.IGNORECASE,
 )
 
+# §1 data_point filter — SBIR program statistics say nothing about a product's
+# buyer population or unmet need; the LLM tends to add them when SBIR funding
+# context is injected. Drop any metric that matches these program-level patterns.
+_BAD_DI_DATA_POINT_RE = _eb_re.compile(
+    r'sbir[/\s]*sttr\s+annual\s+set.?aside'      # NIH SBIR/STTR annual set-aside: $1.4B+
+    r'|annual\s+sbir[/\s]*sttr?\s+set.?aside'
+    r'|institutes?\s+and\s+centers?\s+fund'       # Number of NIH Institutes and Centers funding SBIR
+    r'|sbir\s+phase\s+[i1]\s+awards?\s+in\b',    # NIAID SBIR Phase I awards in data science
+    _eb_re.IGNORECASE,
+)
+
 
 def _filter_evidence_base_sources(evidence_base: dict) -> dict:
     """Remove spurious source_types_used entries (aggregator sites, NIH newsletter,
@@ -216,6 +227,29 @@ def _filter_evidence_base_sources(evidence_base: dict) -> dict:
             )
             evidence_base = {**evidence_base, "source_types_used": filtered}
     return evidence_base
+
+
+def _filter_di_data_points(data_points: list) -> list:
+    """Drop SBIR program-level statistics from §1 disease_intelligence.data_points.
+
+    SBIR annual set-aside amounts, IC counts, and phase-award tallies are program
+    statistics — they say nothing about the product's buyer population or unmet need.
+    """
+    if not data_points:
+        return data_points
+    filtered = [
+        dp for dp in data_points
+        if not _BAD_DI_DATA_POINT_RE.search(
+            str(dp.get("metric", "")) + " " + str(dp.get("value", ""))
+        )
+    ]
+    dropped = len(data_points) - len(filtered)
+    if dropped:
+        logger.info(
+            "disease_intelligence: filtered %d SBIR program stat(s) from data_points",
+            dropped,
+        )
+    return filtered
 
 
 async def _async_empty_dict() -> dict:
@@ -2613,7 +2647,7 @@ def _parse_expert_response(data, idea, product_type, expert, demand_results, hos
     di_data = data.get("disease_intelligence", {})
     disease_intel = DiseaseIntelligence(
         condition          = di_data.get("condition", ""),
-        data_points        = [DiseaseDataPoint(**dp) for dp in di_data.get("data_points", [])],
+        data_points        = [DiseaseDataPoint(**dp) for dp in _filter_di_data_points(di_data.get("data_points", []))],
         resistance_profile = di_data.get("resistance_profile"),
         pipeline_status    = di_data.get("pipeline_status"),
         unmet_need_summary = di_data.get("unmet_need_summary", ""),
@@ -2768,7 +2802,7 @@ async def _generate_antibiotic_report(
     disease_intel = DiseaseIntelligence(
         condition=di_data.get("condition", ""),
         data_points=[
-            DiseaseDataPoint(**dp) for dp in di_data.get("data_points", [])
+            DiseaseDataPoint(**dp) for dp in _filter_di_data_points(di_data.get("data_points", []))
         ],
         resistance_profile=di_data.get("resistance_profile"),
         pipeline_status=di_data.get("pipeline_status"),
@@ -2935,7 +2969,7 @@ async def _generate_generic_pi_report(
     di_data = data.get("disease_intelligence", {})
     disease_intel = DiseaseIntelligence(
         condition=di_data.get("condition", ""),
-        data_points=[DiseaseDataPoint(**dp) for dp in di_data.get("data_points", [])],
+        data_points=[DiseaseDataPoint(**dp) for dp in _filter_di_data_points(di_data.get("data_points", []))],
         unmet_need_summary=di_data.get("unmet_need_summary", ""),
     ) if di_data else None
 
