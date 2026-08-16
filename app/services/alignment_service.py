@@ -210,8 +210,9 @@ _BAD_SBIR_PROGRAM_RE = _eb_re.compile(
     r'|sbir\s+phase\s+[i1]\s+awards?\s+in\b'          # NIAID SBIR Phase I awards in data science
     r'|sbir[/\s]*sttr\s+(success\s+rate|funding\s+rate|acceptance\s+rate)'  # SBIR success rate
     r'|sbir\s+phase\s+ii?\s+(maximum|award\s+ceiling|budget\s+cap|award\s+cap)'  # phase award caps
-    r'|nih\s+seed\s+(office|statistics|report|program\s+stat)'  # NIH SEED program stats page
-    r'|small\s+business\s+education\s+and\s+entrepreneurial\s+development',  # NIH SEED full name
+    r'|nih\s+seed\s+(office|statistics|report|program\s+stat|resources?)'  # NIH SEED program stats page
+    r'|small\s+business\s+education\s+and\s+entrepreneurial\s+development'  # NIH SEED full name
+    r'|sbir[/\s]*sttr\s+reauthorization|reauthorization.*sbir[/\s]*sttr',  # SBIR reauth act dates
     _eb_re.IGNORECASE,
 )
 
@@ -250,6 +251,7 @@ def _filter_di_data_points(data_points: list) -> list:
         dp for dp in data_points
         if not _BAD_DI_DATA_POINT_RE.search(
             str(dp.get("metric", "")) + " " + str(dp.get("value", ""))
+            + " " + str(dp.get("source", ""))
         )
     ]
     dropped = len(data_points) - len(filtered)
@@ -339,6 +341,18 @@ async def generate_pi_report(
     # Pre-bind so NameError is impossible even if the domain-resolution block below
     # (lines 145-152) is unreachable due to an early exception in route_expert().
     _resolved_domain: str = "LIFE_SCIENCES_CLINICAL"
+
+    # Record the raw prompt submission (best-effort, non-blocking)
+    _submission_id: int | None = None
+    try:
+        from app.db.prompt_sessions_repository import record_prompt_submission
+        _submission_id = await record_prompt_submission(
+            idea_text=idea,
+            user_id=user_id,
+            product_name=product_name,
+        )
+    except Exception as _ps_e:
+        logger.debug("prompt_submission record failed (non-fatal): %s", _ps_e)
 
     source_counts        = await get_signal_counts_by_source()
     total_signals        = sum(r["count"] for r in source_counts)
@@ -541,14 +555,15 @@ async def generate_pi_report(
         report_dict = report.model_dump(mode="json")
         report_dict = build_sources_from_report(report_dict)
         _raw_sources = report_dict.get("sources", [])
-        # Filter SBIR program-level facts from the LLM-generated bibliography (§1 path)
+        # Filter SBIR program stats and aggregator/newsletter sources from LLM bibliography
         _before = len(_raw_sources)
         _raw_sources = [
             s for s in _raw_sources
             if not _BAD_SBIR_PROGRAM_RE.search(str(s.get("name", "")))
+            and not _BAD_EVIDENCE_SOURCE_RE.search(str(s.get("name", "")))
         ]
         if len(_raw_sources) < _before:
-            logger.info("sources: filtered %d SBIR program stat(s) from bibliography",
+            logger.info("sources: filtered %d spurious citation(s) from bibliography",
                         _before - len(_raw_sources))
         report.sources = _raw_sources
 
@@ -2484,6 +2499,20 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
         report.report_id = report_id_for(report.model_dump(mode="json"))
     except Exception as _s7_e:
         logger.debug("report_id wiring failed (non-fatal): %s", _s7_e)
+
+    # Back-fill prompt submission with sub_expert_id and report_id now that both are known
+    if _submission_id:
+        try:
+            from app.db.prompt_sessions_repository import record_prompt_submission as _rps
+            from app.db.database import get_pool as _gp
+            _pool = await _gp()
+            async with _pool.acquire() as _conn:
+                await _conn.execute(
+                    "UPDATE prompt_submissions SET sub_expert_id=$1, report_id=$2 WHERE id=$3",
+                    sub_expert_id, report.report_id, _submission_id,
+                )
+        except Exception as _ps_upd_e:
+            logger.debug("prompt_submission update failed (non-fatal): %s", _ps_upd_e)
 
     # Portfolio "internal disclosures" benchmark REMOVED for privacy.
     report.portfolio_benchmark = None
