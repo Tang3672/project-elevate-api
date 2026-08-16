@@ -728,7 +728,7 @@ async def generate_pi_report(
         # Catch "NIH-funded funded", "NIH–funded funded" (en-dash), "NIH funded funded",
         # or any Unicode dash between NIH and funded.
         _rj2 = re.sub(
-            'NIH[‐‑‒–— -]funded\\s+funded',
+            'NIH[\u2010\u2011\u2012\u2013\u2014 -]funded\\s+funded',
             'NIH-funded', _rj, flags=re.IGNORECASE,
         )
         # Broad catch-all: any adjacent "funded funded" regardless of context
