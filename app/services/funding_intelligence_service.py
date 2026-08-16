@@ -79,6 +79,7 @@ async def get_recent_sbir_awards(disease_name: str, months_back: int = 12) -> li
                 code = proj.get("activity_code", "")
                 pi_profiles = proj.get("principal_investigators", [])
                 pi_name = pi_profiles[0].get("profile_id", "") if pi_profiles else ""
+                appl_id = proj.get("appl_id")
                 if company and title:
                     awards.append({
                         "company":       company,
@@ -88,6 +89,7 @@ async def get_recent_sbir_awards(disease_name: str, months_back: int = 12) -> li
                         "grant_type":    code,
                         "pi":            pi_name,
                         "source":        "NIH SBIR/STTR (Reporter API)",
+                        "url":           f"https://reporter.nih.gov/project-details/{appl_id}" if appl_id else "",
                     })
             logger.info("NIH SBIR awards: %d recent awards for '%s'", len(awards), disease_name)
             return awards

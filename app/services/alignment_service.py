@@ -2434,6 +2434,23 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
     # from. A PI/TTO's submitted idea now stays isolated to their own session (and their
     # own opt-in "Save to My Reports").
 
+    # ── Comprehensive bibliography — every retrieved source in one deduplicated list ──
+    # Called last so all structured sections (market sizing, disease data, demand signals,
+    # patents, SBIR awards) are in scope.  Both the web frontend and the PDF export read
+    # report.sources, so building it here gives them identical bibliographies.
+    try:
+        from app.services.source_aggregator import collect_all_citations
+        _pl_for_bib = patent_landscape if not isinstance(patent_landscape, Exception) else None
+        _fi_for_bib = funding_intel if not isinstance(funding_intel, Exception) else None
+        report.sources = collect_all_citations(
+            report.model_dump(mode="json"),
+            patent_landscape=_pl_for_bib,
+            funding_intel=_fi_for_bib,
+        )
+        logger.info("Bibliography: %d sources collected", len(report.sources))
+    except Exception as _bib_e:
+        logger.warning("Bibliography aggregation failed (non-fatal): %s", _bib_e)
+
     return report
 
 

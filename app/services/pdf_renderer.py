@@ -1212,57 +1212,28 @@ def render_report_html(
     # Recommended next steps
     steps_html = _render_recommended_steps(report.get("recommended_next_steps", []))
 
-    # Citations (F-04, F-05) — aggregate same sources as web renderer (G-01 parity)
-    _all_cits: list = list(report.get("sources") or [])
-    _seen_cit_urls: set = {c.get("url") for c in _all_cits if c.get("url")}
+    # Citations — use the pre-built comprehensive list from source_aggregator.
+    # report["sources"] is populated at generation time with every retrieved source
+    # (disease data points, market sizing steps, demand signals, patents, SBIR awards,
+    # literature, buyer segments, strategies, regulatory designations, LLM sources).
+    # For older saved reports that pre-date source_aggregator, fall back to the
+    # collect_all_citations helper so the PDF still gets a full bibliography.
+    _pre_built = report.get("sources") or []
+    if len(_pre_built) >= 5:
+        # Modern report: sources already comprehensive, use them directly
+        _all_cits = [dict(c) for c in _pre_built]
+    else:
+        # Legacy report: build on the fly from structured fields
+        try:
+            from app.services.source_aggregator import collect_all_citations
+            _all_cits = collect_all_citations(report)
+        except Exception as _sa_e:
+            _all_cits = _pre_built
 
-    def _add_cit_by_url(name: str, url: str) -> None:
-        """Add a citation discovered by URL only (strategies, segments). Skips if no URL."""
-        if not url or url in _seen_cit_urls:
-            return
-        _seen_cit_urls.add(url)
-        _all_cits.append({"name": name, "url": url})
-
-    # Literature citations always appear even when they lack a URL (F-05 no-URL marker).
-    # Deduplicate by URL only when a URL is actually present.
-    for _p in report.get("literature_citations") or []:
-        _purl = (
-            _p.get("url")
-            or _p.get("source_url")
-            or (f"https://pubmed.ncbi.nlm.nih.gov/{_p['pmid']}/" if _p.get("pmid") else "")
-        )
-        if _purl and _purl in _seen_cit_urls:
-            continue
-        if _purl:
-            _seen_cit_urls.add(_purl)
-        # Preserve the original dict (keeps name, number, year etc.); patch url if needed
-        _entry = dict(_p)
-        if _purl and not _entry.get("url"):
-            _entry["url"] = _purl
-        elif not _entry.get("name"):
-            _entry["name"] = (
-                f"{_p.get('authors', '')} ({_p.get('year', '')}). {_p.get('title', '')}.".strip()
-            )
-        _all_cits.append(_entry)
-
-    for _s in report.get("strategic_playbook") or []:
-        _add_cit_by_url(
-            f"{_s.get('example', '')} — {_s.get('strategy', '')}",
-            _s.get("source_url", ""),
-        )
-
-    for _b in (report.get("market_access") or {}).get("buyer_segments") or []:
-        _add_cit_by_url(
-            f"{_b.get('source', '')} — {_b.get('segment_name', _b.get('segment', ''))}",
-            _b.get("source_url", ""),
-        )
-
-    _reimb_url = (report.get("market_access") or {}).get("reimbursement_source_url")
-    if _reimb_url:
-        _add_cit_by_url("Reimbursement pathway source", _reimb_url)
-
-    for _ci, _cc in enumerate(_all_cits):
-        _cc["number"] = _ci + 1
+    # Re-number sequentially (generation may have numbered from 1 already, but
+    # re-number here in case the list was sliced or modified above)
+    for _ci, _cc in enumerate(_all_cits, 1):
+        _cc["number"] = _ci
 
     cit_html = _render_citations(_all_cits)
 
