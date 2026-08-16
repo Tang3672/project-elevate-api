@@ -218,6 +218,11 @@ def _filter_evidence_base_sources(evidence_base: dict) -> dict:
     return evidence_base
 
 
+async def _async_empty_dict() -> dict:
+    """Placeholder coroutine for asyncio.gather slots that should be skipped."""
+    return {}
+
+
 async def generate_pi_report(
     idea:           str,
     product_type:   str = "other",
@@ -1307,6 +1312,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
             get_landmark_publications(
                 disease_name=disease_name,
                 sub_expert_id=sub_expert_id,
+                idea=idea,
             ),
             gather_competitive_intelligence(
                 disease_name=disease_name,
@@ -1343,8 +1349,10 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
             get_funding_intelligence(disease_name),
             # Patent landscape: recent US filings + assignees (Google Patents, free).
             get_patent_landscape(disease_name),
-            # Regulatory precedent: FDA-approved drugs for this indication (openFDA, free).
-            get_regulatory_precedent(disease_name),
+            # Regulatory precedent: FDA-approved drugs (openFDA, free).
+            # Skip for non-clinical research tools — openFDA has no records for lab instruments.
+            (get_regulatory_precedent(disease_name) if _resolved_domain != "LIFE_SCIENCES_RESEARCH"
+             else _async_empty_dict()),
             return_exceptions=True,
         )
         try:

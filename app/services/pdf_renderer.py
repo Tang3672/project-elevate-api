@@ -24,6 +24,8 @@ import re
 from datetime import date
 from typing import Optional
 
+from app.utils import fmt_usd
+
 logger = logging.getLogger(__name__)
 
 # ── F-01: product name derivation ────────────────────────────────────────────
@@ -239,9 +241,19 @@ def _render_market_sizing(ms: dict) -> str:
         return ""
     steps = ms.get("steps", [])
     formula = _e(ms.get("formula", ""))
-    tam = _e(ms.get("total_addressable_market_usd", ""))
-    sam = _e(ms.get("serviceable_market_usd", ""))
     note = _e(ms.get("methodology_note", ""))
+
+    # Format headline figures with shared fmt_usd so PDF matches web renderer
+    tam_raw = ms.get("total_addressable_market_usd", "")
+    sam_raw = ms.get("serviceable_market_usd", "")
+    try:
+        tam_fmt = fmt_usd(float(tam_raw)) if tam_raw not in ("", None) else ""
+    except (ValueError, TypeError):
+        tam_fmt = _e(str(tam_raw)) if tam_raw else ""
+    try:
+        sam_fmt = fmt_usd(float(sam_raw)) if sam_raw not in ("", None) else ""
+    except (ValueError, TypeError):
+        sam_fmt = _e(str(sam_raw)) if sam_raw else ""
 
     rows = ""
     for s in steps:
@@ -249,23 +261,19 @@ def _render_market_sizing(ms: dict) -> str:
         src_url, _ = validate_citation_url(s.get("source_url", ""))
         src_text = _e(s.get("source", ""))
         src_display = _link(s.get("source_url", ""), src_text) if s.get("source_url") else _e(src_text)
+        # Format numeric step values with fmt_usd; fall back to raw string if not numeric
+        _v_raw = s.get("value", "")
+        try:
+            _v_disp = fmt_usd(float(_v_raw)) if _v_raw not in ("", None) else ""
+        except (ValueError, TypeError):
+            _v_disp = str(_v_raw)
         rows += f"""<tr>
           <td class="col-label">{_e(label or s.get("label",""))}</td>
-          <td class="num">{_e(s.get("value",""))}</td>
+          <td class="num">{_e(_v_disp)}</td>
           <td>{_e(s.get("unit",""))}</td>
           <td>{src_display}</td>
           <td class="note">{_e(content or s.get("notes",""))}</td>
         </tr>"""
-
-    tam_fmt = f"${float(tam)/1e9:.1f}B" if tam else ""
-    sam_fmt = f"${float(sam)/1e6:.0f}M" if sam else ""
-    try:
-        if tam:
-            tam_fmt = f"${float(tam)/1e9:.1f}B" if float(tam) >= 1e9 else f"${float(tam)/1e6:.0f}M"
-        if sam:
-            sam_fmt = f"${float(sam)/1e6:.0f}M"
-    except (ValueError, TypeError):
-        pass
 
     return f"""
 <div class="section" id="s-market">

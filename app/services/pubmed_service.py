@@ -50,6 +50,53 @@ _NON_PUBMED_ARCHETYPES: frozenset = frozenset({
     "research_tool_agronomy",
 })
 
+# Non-agronomy research tools also benefit from PubMed (neuroscience, biology ARE indexed).
+# These get OpenAlex as primary + PubMed as supplemental.
+_PUBMED_ALSO_ARCHETYPES: frozenset = frozenset({
+    "research_tool_non_clinical",
+    "research_infrastructure_saas",
+})
+
+# Common English function words — filtered when extracting domain terms from idea text
+_SEARCH_STOP: frozenset = frozenset({
+    "with", "that", "this", "from", "into", "over", "under", "than",
+    "they", "them", "their", "have", "been", "which", "while", "also",
+    "both", "each", "such", "more", "some", "used", "uses", "about",
+    "when", "where", "will", "would", "could", "should", "there",
+    "these", "those", "what", "then", "very", "just", "like",
+})
+
+
+def _idea_to_search_terms(idea: str, max_words: int = 8) -> str:
+    """Extract domain vocabulary from idea text for literature search.
+
+    Keeps all-lowercase tokens (>3 chars) and drops CamelCase/TitleCase brand
+    names (e.g. 'Hublink', 'Bluetooth') so OpenAlex/PubMed receives domain
+    terms rather than an unpublished product name.
+
+    Example: "Hublink — wireless data acquisition for behavioral neuroscience"
+             → "wireless data acquisition behavioral neuroscience"
+    """
+    if not idea:
+        return ""
+    tokens = re.findall(r"[a-zA-Z][a-zA-Z\-]*[a-zA-Z]|[a-zA-Z]{4,}", idea)
+    seen: set = set()
+    terms: list = []
+    for t in tokens:
+        if t != t.lower():
+            continue  # CamelCase or TitleCase — brand name / proper noun, skip
+        tl = t.lower()
+        if len(tl) < 4:
+            continue
+        if tl in _SEARCH_STOP:
+            continue
+        if tl not in seen:
+            seen.add(tl)
+            terms.append(tl)
+        if len(terms) >= max_words:
+            break
+    return " ".join(terms).strip()
+
 
 def _invert_index_to_text(inverted_index: dict) -> str:
     """Reconstruct abstract text from OpenAlex's inverted-index format.
@@ -71,16 +118,21 @@ def _invert_index_to_text(inverted_index: dict) -> str:
         return ""
 
 
-async def _get_openalex_publications(topic: str, sub_expert_id: str, max_results: int = 8) -> list:
+async def _get_openalex_publications(topic: str, sub_expert_id: str, max_results: int = 8, idea: str = "") -> list:
     """B-02: Primary publication retrieval via OpenAlex for non-biomedical archetypes.
 
     PubMed doesn't index agronomy, soil science, or materials engineering journals.
     OpenAlex covers all disciplines, including foundational sensor papers (Topp 1980,
     Vellidis 2008) that PubMed will never return.
+
+    idea: full product idea text — domain vocabulary is extracted from it so the
+    search targets the scientific domain rather than the brand/product name.
     """
     try:
-        # Build a topic search phrase that avoids clinical/disease framing
-        search_phrase = topic[:80]
+        # Use domain terms from idea text so "Hublink" → "wireless behavioral neuroscience"
+        search_phrase = _idea_to_search_terms(idea) or topic[:80]
+        if not search_phrase:
+            search_phrase = topic[:80]
 
         params = {
             "search":   search_phrase,
@@ -135,6 +187,7 @@ async def get_landmark_publications(
     disease_name: str,
     sub_expert_id: str,
     max_papers: int = 8,
+    idea: str = "",
 ) -> Dict:
     """
     Pull top landmark publications for a disease + expert domain.
@@ -143,6 +196,10 @@ async def get_landmark_publications(
     through OpenAlex, which indexes all disciplines. PubMed does not index
     Canadian Journal of Soil Science, Computers and Electronics in Agriculture,
     or MDPI Sensors — the core literature for those products.
+
+    idea: full product idea text — used to extract domain search terms so the
+    query targets the scientific area ("wireless behavioral neuroscience") rather
+    than the brand name ("Hublink") which returns zero results.
     """
     results = {
         "disease": disease_name,
@@ -155,9 +212,30 @@ async def get_landmark_publications(
 
     # B-02: non-biomedical products → OpenAlex primary retrieval
     if sub_expert_id in _NON_PUBMED_ARCHETYPES:
-        papers = await _get_openalex_publications(disease_name, sub_expert_id, max_papers)
-        results["publications"] = papers
-        results["total_found"] = len(papers)
+        papers = await _get_openalex_publications(disease_name, sub_expert_id, max_papers, idea=idea)
+
+        # Non-agronomy tools: also query PubMed — neuroscience/biology ARE indexed there.
+        # Use domain terms from idea text, not the product name.
+        if sub_expert_id in _PUBMED_ALSO_ARCHETYPES and idea:
+            terms_words = _idea_to_search_terms(idea).split()[:4]
+            if terms_words:
+                pubmed_query = " AND ".join(f'"{t}"[Title/Abstract]' for t in terms_words)
+                await asyncio.sleep(RATE_LIMIT_DELAY)
+                pmids = await _search_pubmed(pubmed_query, max_results=5)
+                if pmids:
+                    pm_papers = await _fetch_paper_summaries(pmids)
+                    existing_titles = {p.get("title", "").lower() for p in papers}
+                    for pp in pm_papers:
+                        if pp.get("title", "").lower() not in existing_titles:
+                            papers.append(pp)
+                            existing_titles.add(pp.get("title", "").lower())
+                logger.info(
+                    "PubMed supplemental for %s: query=%r → %d papers added",
+                    sub_expert_id, pubmed_query[:80], len(pmids) if pmids else 0,
+                )
+
+        results["publications"] = papers[:max_papers]
+        results["total_found"] = len(results["publications"])
         return results
 
     # Biomedical products → PubMed (unchanged path)
