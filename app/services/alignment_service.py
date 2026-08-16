@@ -322,11 +322,15 @@ async def generate_pi_report(
         "vaccine_prophylactic", "vaccine_cancer_immuno",
         "other_crispr", "other_microbiome", "other_delivery",
     })
-    if domain:
-        _resolved_domain = domain.upper()
-    elif (router_result.sub_expert_id or "") in _RESEARCH_SUB_EXPERTS:
+    # MoE router's sub_expert_id is the most reliable signal — trust it for research
+    # archetypes even when the intake classifier returned LIFE_SCIENCES_CLINICAL (which
+    # happens when soil/agronomy patterns are absent from the idea text at classify time).
+    _sub = (router_result.sub_expert_id or "")
+    if _sub in _RESEARCH_SUB_EXPERTS or _sub.startswith(("research_tool", "research_infrastructure")):
         _resolved_domain = "LIFE_SCIENCES_RESEARCH"
-    elif (router_result.sub_expert_id or "") in _CLINICAL_SUB_EXPERTS:
+    elif domain:
+        _resolved_domain = domain.upper()
+    elif _sub in _CLINICAL_SUB_EXPERTS:
         _resolved_domain = "LIFE_SCIENCES_CLINICAL"
     else:
         _resolved_domain = "LIFE_SCIENCES_CLINICAL"   # safe fallback

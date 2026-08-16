@@ -439,7 +439,7 @@ def _render_market_access(ma: dict) -> str:
 </div>"""
 
 
-def _render_competitive_landscape(ci: dict) -> str:
+def _render_competitive_landscape(ci: dict, domain: str = "") -> str:
     if not ci:
         return ""
     from app.services.competitor_schema import normalize_landscape
@@ -450,9 +450,13 @@ def _render_competitive_landscape(ci: dict) -> str:
     trials = (ci.get("competitor_trials") or {}).get("trials", [])
     honest_empty = _e(ci.get("honest_empty_state", ""))
 
-    # Detect corpus: research-tool landscape has no stage/company fields
-    is_research_tool = ci.get("corpus", "").startswith("research_tool") or (
-        competitors and not competitors[0].get("company")
+    # Detect corpus: prefer explicit domain parameter over heuristics so research
+    # tools never fall into the clinical rendering path (which shows empty company/
+    # stage/route columns instead of the overlap/win/lose analysis).
+    is_research_tool = (
+        (domain or "").upper() == "LIFE_SCIENCES_RESEARCH"
+        or ci.get("corpus", "").startswith("research_tool")
+        or (competitors and not competitors[0].get("company"))
     )
 
     comp_rows = ""
@@ -1199,8 +1203,8 @@ def render_report_html(
     else:
         ma_html = _render_market_access(report.get("market_access") or {})
 
-    # Competitive landscape
-    ci_html = _render_competitive_landscape(report.get("competitive_landscape") or {})
+    # Competitive landscape — pass domain so research tools always use the right renderer
+    ci_html = _render_competitive_landscape(report.get("competitive_landscape") or {}, domain=_domain)
 
     # P1 strategic sections (S-02 through S-09)
     p1_html = _render_p1_sections(report)
