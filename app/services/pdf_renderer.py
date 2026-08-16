@@ -261,12 +261,23 @@ def _render_market_sizing(ms: dict) -> str:
         src_url, _ = validate_citation_url(s.get("source_url", ""))
         src_text = _e(s.get("source", ""))
         src_display = _link(s.get("source_url", ""), src_text) if s.get("source_url") else _e(src_text)
-        # Format numeric step values with fmt_usd; fall back to raw string if not numeric
+        # Format numeric step values with fmt_usd.
+        # LLM sometimes writes pre-formatted strings like "$4688K" or "4.7M" —
+        # parse and re-normalise those so all step values use the same formatter.
         _v_raw = s.get("value", "")
         try:
-            _v_disp = fmt_usd(float(_v_raw)) if _v_raw not in ("", None) else ""
+            _v_clean = str(_v_raw).strip().replace(",", "").replace("$", "")
+            if _v_clean.upper().endswith("B"):
+                _v_num = float(_v_clean[:-1]) * 1_000_000_000
+            elif _v_clean.upper().endswith("M"):
+                _v_num = float(_v_clean[:-1]) * 1_000_000
+            elif _v_clean.upper().endswith("K"):
+                _v_num = float(_v_clean[:-1]) * 1_000
+            else:
+                _v_num = float(_v_clean) if _v_clean else None
+            _v_disp = fmt_usd(_v_num) if _v_num is not None else ""
         except (ValueError, TypeError):
-            _v_disp = str(_v_raw)
+            _v_disp = str(_v_raw) if _v_raw else ""
         rows += f"""<tr>
           <td class="col-label">{_e(label or s.get("label",""))}</td>
           <td class="num">{_e(_v_disp)}</td>

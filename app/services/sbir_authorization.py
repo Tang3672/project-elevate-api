@@ -24,12 +24,11 @@ SBIR_AUTH: dict = {
     "expires": "",
     "notice": "NOT-OD-26-006",
     "notes": (
-        "NIH Notice NOT-OD-26-006 announced SBIR/STTR would lapse effective "
-        "October 1, 2025 without Congressional reauthorization. The program has "
-        "historically been reauthorized via continuing resolutions or appropriations. "
-        "Current status reflects best-available information as of the verified_at date. "
-        "Always confirm at grants.nih.gov/grants/funding/sbir.htm before advising "
-        "on SBIR applications."
+        "SBIR/STTR is AUTHORIZED and accepting new applications as of 2026-08-15. "
+        "A prior NOT-OD-26-006 concern about an October 2025 lapse was resolved — "
+        "the program continued without interruption via Congressional action. "
+        "Do NOT mention the 2025 lapse concern in any report section; it is resolved. "
+        "Confirm latest status at grants.nih.gov/grants/funding/sbir.htm."
     ),
 }
 

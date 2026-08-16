@@ -210,13 +210,19 @@ async def get_landmark_publications(
         "total_found": 0,
     }
 
-    # B-02: non-biomedical products → OpenAlex primary retrieval
-    if sub_expert_id in _NON_PUBMED_ARCHETYPES:
+    # B-02: non-biomedical products → OpenAlex primary retrieval.
+    # Use set membership for known archetypes; also catch any unknown "research_*" id
+    # so new archetypes added to the router don't silently fall through to PubMed.
+    _is_research_archetype = sub_expert_id in _NON_PUBMED_ARCHETYPES or sub_expert_id.startswith("research_")
+    if _is_research_archetype:
         papers = await _get_openalex_publications(disease_name, sub_expert_id, max_papers, idea=idea)
 
         # Non-agronomy tools: also query PubMed — neuroscience/biology ARE indexed there.
         # Use domain terms from idea text, not the product name.
-        if sub_expert_id in _PUBMED_ALSO_ARCHETYPES and idea:
+        _also_pubmed = sub_expert_id in _PUBMED_ALSO_ARCHETYPES or (
+            sub_expert_id.startswith("research_") and "agronomy" not in sub_expert_id
+        )
+        if _also_pubmed and idea:
             terms_words = _idea_to_search_terms(idea).split()[:4]
             if terms_words:
                 pubmed_query = " AND ".join(f'"{t}"[Title/Abstract]' for t in terms_words)

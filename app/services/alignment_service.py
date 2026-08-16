@@ -1231,9 +1231,15 @@ async def _generate_expert_report(idea, product_type, expert, demand_results, ho
     _is_negation = any(p in disease_name.lower() for p in _NEGATION_PHRASES)
     if _resolved_domain == "LIFE_SCIENCES_RESEARCH" or _is_negation:
         _pn = (product_name or idea.split("—")[0].split("-")[0].strip()[:50] or "research tool").strip()
-        disease_name = _pn
+        # Display label only (§1 condition field, report headings)
         disease_info["disease_name"] = _pn
-        logger.info("B-05: research domain — replaced disease_name with product scope term: %r", _pn)
+        # Live search term: extract domain vocabulary from idea text so PubMed/OpenAlex
+        # queries use "wireless data acquisition behavioral neuroscience" instead of
+        # the product brand ("Hublink") which has zero indexed literature.
+        from app.services.pubmed_service import _idea_to_search_terms as _dts
+        _search_vocab = _dts(idea, max_words=6)
+        disease_name = _search_vocab if _search_vocab else _pn
+        logger.info("B-05: research domain — label=%r search_terms=%r", _pn, disease_name)
 
     # Layer 2: Knowledge Retriever → 5-6 parallel live searches
     # Uses sub_expert_id from router (v2) or domain_id (v1 fallback)
