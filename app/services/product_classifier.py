@@ -63,6 +63,7 @@ class IntakeQuestion:
 _RESEARCH_SUB_IDS = frozenset({
     "research_tool_non_clinical",
     "research_infrastructure_saas",
+    "research_tool_agronomy",
 })
 
 _RESEARCH_IDEA_PATTERNS = [
@@ -84,29 +85,54 @@ _RESEARCH_IDEA_PATTERNS = [
     r"\bneurotech\b",
     r"\bdata\s+acquisition\b",
     r"\bresearchers?\s+across\b",
+    # Agronomy / agricultural research tool patterns
+    r"\bsoil\s+(moisture|sensor|probe|monitoring|sampling)\b",
+    r"\bsoil\s+(water|content|permittivity|dielectric)\b",
+    r"\b(precision\s+agriculture|agronomy|agronomic)\b",
+    r"\b(TDR|FDR|capacitance)\s+(sensor|probe|method)\b",
+    r"\birrigation\s+(scheduling|management|control)\b",
+    r"\b(field|farm|crop)\s+(sensor|monitoring|data)\b",
+    r"\bNSF\s+(grant|award|funded)\b",
+    r"\bUSDA\s+(grant|NIFA|funded)\b",
 ]
 
 
-def _resolve_domain_and_archetype(idea: str) -> tuple[str, str]:
+def _resolve_domain_and_archetype(idea: str, tier1_hint: str = "") -> tuple[str, str]:
     """
     Deterministic domain + archetype resolution — no LLM.
     Returns (domain_str, archetype_str).
+
+    tier1_hint: the user's explicit tier1_category selection from the frontend
+    product picker. When the user picks a research archetype this is the
+    strongest possible signal — override routing and text patterns entirely.
     """
     from app.services.soft_router import soft_route
     from app.services.product_archetype import resolve_archetype
 
+    # User's explicit picker selection is authoritative when it names a research type.
+    # Use startswith to catch all current and future research_tool/research_infrastructure
+    # archetypes (e.g. research_tool_agronomy) without maintaining an exhaustive list.
+    _hint = (tier1_hint or "").lower()
+    if _hint in _RESEARCH_SUB_IDS or _hint.startswith(("research_tool", "research_infrastructure")):
+        return "LIFE_SCIENCES_RESEARCH", _hint or "research_infrastructure_saas"
+
     routing = soft_route(idea)
     primary_sub = routing.primary or ""
 
-    # Research domain: check both routing signal and idea text patterns
-    is_research_sub = primary_sub in _RESEARCH_SUB_IDS
+    # Research domain: check routing signal, explicit sub-id set, and idea text patterns
+    is_research_sub = (
+        primary_sub in _RESEARCH_SUB_IDS
+        or primary_sub.startswith(("research_tool", "research_infrastructure"))
+    )
     is_research_text = any(re.search(p, idea, re.I) for p in _RESEARCH_IDEA_PATTERNS)
 
     if is_research_sub or is_research_text:
         domain = "LIFE_SCIENCES_RESEARCH"
-        # Prefer routing sub-id if it's a research type; otherwise default
-        if primary_sub in _RESEARCH_SUB_IDS:
+        # Use the router's archetype if it's a research type; otherwise infer from text
+        if primary_sub.startswith(("research_tool", "research_infrastructure")):
             archetype_str = primary_sub
+        elif is_research_text and re.search(r"\bsoil\b|\bagron\b|\bagricultur\b|\birrigat\b|\bNSF\b|\bUSDA\b", idea, re.I):
+            archetype_str = "research_tool_agronomy"
         else:
             archetype_str = "research_infrastructure_saas"
     else:
@@ -181,13 +207,18 @@ def _extract_product_name_heuristic(idea: str) -> str:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-def classify_product(idea: str) -> Classification:
+def classify_product(idea: str, tier1_hint: str = "") -> Classification:
     """
     Classify a product idea into a Classification object.
     Domain + archetype are derived deterministically; LLM is used only for
     display fields (product_name, one_line, trl, ambiguities).
+
+    tier1_hint: optional tier1_category from the user's product picker — when
+    it names a research archetype it overrides the routing signal entirely so a
+    soil-moisture sensor picked under 'Lab Infrastructure SaaS' is never
+    misclassified as an oncology drug.
     """
-    domain, archetype_str = _resolve_domain_and_archetype(idea)
+    domain, archetype_str = _resolve_domain_and_archetype(idea, tier1_hint=tier1_hint)
 
     # Compute routing confidence for Classification.confidence
     try:

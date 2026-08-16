@@ -24,6 +24,8 @@ import re
 from datetime import date
 from typing import Optional
 
+from app.utils import fmt_usd
+
 logger = logging.getLogger(__name__)
 
 # ── F-01: product name derivation ────────────────────────────────────────────
@@ -239,9 +241,19 @@ def _render_market_sizing(ms: dict) -> str:
         return ""
     steps = ms.get("steps", [])
     formula = _e(ms.get("formula", ""))
-    tam = _e(ms.get("total_addressable_market_usd", ""))
-    sam = _e(ms.get("serviceable_market_usd", ""))
     note = _e(ms.get("methodology_note", ""))
+
+    # Format headline figures with shared fmt_usd so PDF matches web renderer
+    tam_raw = ms.get("total_addressable_market_usd", "")
+    sam_raw = ms.get("serviceable_market_usd", "")
+    try:
+        tam_fmt = fmt_usd(float(tam_raw)) if tam_raw not in ("", None) else ""
+    except (ValueError, TypeError):
+        tam_fmt = _e(str(tam_raw)) if tam_raw else ""
+    try:
+        sam_fmt = fmt_usd(float(sam_raw)) if sam_raw not in ("", None) else ""
+    except (ValueError, TypeError):
+        sam_fmt = _e(str(sam_raw)) if sam_raw else ""
 
     rows = ""
     for s in steps:
@@ -249,23 +261,19 @@ def _render_market_sizing(ms: dict) -> str:
         src_url, _ = validate_citation_url(s.get("source_url", ""))
         src_text = _e(s.get("source", ""))
         src_display = _link(s.get("source_url", ""), src_text) if s.get("source_url") else _e(src_text)
+        # Format numeric step values with fmt_usd; fall back to raw string if not numeric
+        _v_raw = s.get("value", "")
+        try:
+            _v_disp = fmt_usd(float(_v_raw)) if _v_raw not in ("", None) else ""
+        except (ValueError, TypeError):
+            _v_disp = str(_v_raw)
         rows += f"""<tr>
           <td class="col-label">{_e(label or s.get("label",""))}</td>
-          <td class="num">{_e(s.get("value",""))}</td>
+          <td class="num">{_e(_v_disp)}</td>
           <td>{_e(s.get("unit",""))}</td>
           <td>{src_display}</td>
           <td class="note">{_e(content or s.get("notes",""))}</td>
         </tr>"""
-
-    tam_fmt = f"${float(tam)/1e9:.1f}B" if tam else ""
-    sam_fmt = f"${float(sam)/1e6:.0f}M" if sam else ""
-    try:
-        if tam:
-            tam_fmt = f"${float(tam)/1e9:.1f}B" if float(tam) >= 1e9 else f"${float(tam)/1e6:.0f}M"
-        if sam:
-            sam_fmt = f"${float(sam)/1e6:.0f}M"
-    except (ValueError, TypeError):
-        pass
 
     return f"""
 <div class="section" id="s-market">
@@ -335,7 +343,7 @@ def _render_axis_decisions(axis_decisions: dict) -> str:
 </table>""" if rej_rows else ""
 
     return f"""
-<div class="section" id="s-axis-decisions">
+<div class="section-aux" id="s-axis-decisions">
   <h2>Segmentation Methodology</h2>
   <p class="methodology">The following axes were evaluated for this product's buyer model.
   Axes are selected based on the buyer type, product domain, and available data sources.</p>
@@ -431,7 +439,7 @@ def _render_market_access(ma: dict) -> str:
 </div>"""
 
 
-def _render_competitive_landscape(ci: dict) -> str:
+def _render_competitive_landscape(ci: dict, domain: str = "") -> str:
     if not ci:
         return ""
     from app.services.competitor_schema import normalize_landscape
@@ -442,9 +450,13 @@ def _render_competitive_landscape(ci: dict) -> str:
     trials = (ci.get("competitor_trials") or {}).get("trials", [])
     honest_empty = _e(ci.get("honest_empty_state", ""))
 
-    # Detect corpus: research-tool landscape has no stage/company fields
-    is_research_tool = ci.get("corpus", "").startswith("research_tool") or (
-        competitors and not competitors[0].get("company")
+    # Detect corpus: prefer explicit domain parameter over heuristics so research
+    # tools never fall into the clinical rendering path (which shows empty company/
+    # stage/route columns instead of the overlap/win/lose analysis).
+    is_research_tool = (
+        (domain or "").upper() == "LIFE_SCIENCES_RESEARCH"
+        or ci.get("corpus", "").startswith("research_tool")
+        or (competitors and not competitors[0].get("company"))
     )
 
     comp_rows = ""
@@ -817,6 +829,12 @@ def _build_css(product_name: str) -> str:
       page-break-inside: avoid;
       counter-increment: section;
     }}
+    /* Supplemental sections (e.g. axis decisions) use same spacing but do NOT
+       consume a counter slot so numbered sections stay sequential. */
+    .section-aux {{
+      margin-bottom: 2.4rem;
+      page-break-inside: avoid;
+    }}
     h2 {{
       font-family: system-ui, -apple-system, sans-serif;
       font-size: var(--t-md);
@@ -1065,20 +1083,41 @@ def render_report_html(
   <p>{exec_summary}</p>
 </div>""" if exec_summary else ""
 
-    # Limitations / evidence base (S-01)
+    # Limitations / evidence base (S-01) — use actual schema field names from alignment_service
     lim = report.get("limitations") or ""
     eb = report.get("evidence_base") or {}
     evid_html = ""
     if eb or lim:
-        ev_quality = _e(eb.get("quality_summary", eb.get("summary", lim)))
-        ev_gaps = _e(eb.get("key_gaps", ""))
-        ev_method = _e(eb.get("methodology", ""))
+        # Sources list
+        _sources = eb.get("source_types_used") or []
+        _src_items = "".join(f"<li>{_e(s)}</li>" for s in _sources if s)
+        sources_block = f"<p><strong>Data sources:</strong></p><ul>{_src_items}</ul>" if _src_items else ""
+
+        # Sample composition and decision authority
+        _sample = _e(eb.get("sample_composition", ""))
+        _authority = _e(eb.get("decision_authority_profile", ""))
+
+        # Limitations list
+        _lim_items_raw = eb.get("limitations") or []
+        if isinstance(_lim_items_raw, str):
+            _lim_items_raw = [_lim_items_raw] if _lim_items_raw else []
+        _lim_items = "".join(f"<li>{_e(l)}</li>" for l in _lim_items_raw if l)
+        # Fall back to top-level limitations string
+        if not _lim_items and lim:
+            _lim_items = f"<li>{_e(lim)}</li>"
+        limitations_block = f"<p><strong>Data limitations:</strong></p><ul>{_lim_items}</ul>" if _lim_items else ""
+
+        # Evidence gap recommendation
+        _gap = _e(eb.get("evidence_gap_block", eb.get("key_gaps", "")))
+
         evid_html = f"""
 <div class="section" id="s-evidence">
   <h2><span class="sec-num"></span> Evidence Base &amp; Limitations</h2>
-  {f'<p>{ev_quality}</p>' if ev_quality else ""}
-  {f'<p><strong>Key gaps:</strong> {ev_gaps}</p>' if ev_gaps else ""}
-  {f'<p><strong>Methodology:</strong> {ev_method}</p>' if ev_method else ""}
+  {sources_block}
+  {f'<p><strong>Sample:</strong> {_sample}</p>' if _sample else ""}
+  {f'<p><strong>Purchase authority:</strong> {_authority}</p>' if _authority else ""}
+  {limitations_block}
+  {f'<p class="gap-note">{_gap}</p>' if _gap else ""}
 </div>"""
 
     # Market sizing (F-08 tables)
@@ -1164,8 +1203,8 @@ def render_report_html(
     else:
         ma_html = _render_market_access(report.get("market_access") or {})
 
-    # Competitive landscape
-    ci_html = _render_competitive_landscape(report.get("competitive_landscape") or {})
+    # Competitive landscape — pass domain so research tools always use the right renderer
+    ci_html = _render_competitive_landscape(report.get("competitive_landscape") or {}, domain=_domain)
 
     # P1 strategic sections (S-02 through S-09)
     p1_html = _render_p1_sections(report)

@@ -301,6 +301,7 @@ async def _haiku_call(system: str, user: str) -> dict:
             json={
                 "model": HAIKU_MODEL,
                 "max_tokens": 512,
+                "temperature": 0,
                 "system": system,
                 "messages": [{"role": "user", "content": user}],
             },

@@ -1672,6 +1672,37 @@ _SAM_LO, _SAM_MID, _SAM_HI = 0.15, 0.30, 0.45   # early-adopter fraction
 _SOM_LO, _SOM_MID, _SOM_HI = 0.08, 0.15, 0.25   # 5-yr SAM penetration
 
 
+def _query_nih_reporter_total(search_text: str, timeout: float = 3.0) -> "Optional[int]":
+    """Fetch active R-series grant count from NIH RePORTER for search_text.
+    No API key required. Returns project count or None on any error."""
+    try:
+        import requests as _req
+        resp = _req.post(
+            "https://api.reporter.nih.gov/v2/projects/search",
+            json={
+                "criteria": {
+                    "advanced_text_search": {
+                        "operator": "and",
+                        "search_field": "projecttitle,abstract",
+                        "search_text": search_text,
+                    },
+                    "fiscal_years": [2023, 2024, 2025],
+                    "is_active": True,
+                    "activity_codes": ["R01", "R21", "R15", "R41", "R43"],
+                },
+                "offset": 0,
+                "limit": 1,
+                "include_fields": ["ProjectNum"],
+            },
+            timeout=timeout,
+        )
+        resp.raise_for_status()
+        return int(resp.json().get("meta", {}).get("total") or 0) or None
+    except Exception as _e:
+        logger.debug("NIH RePORTER query failed (non-fatal): %s", _e)
+        return None
+
+
 def _parse_numeric_range(text: str) -> "tuple[float, float] | None":
     """Extract (lo, hi) from option text like '1,000–5,000 labs' or '$2,000–$8,000/yr'.
     Returns None if no parseable range found."""
@@ -1948,6 +1979,29 @@ def _derive_research_tool_formula(
         if _user_overrides.get("som"):
             _som_lo, _som_hi = _user_overrides["som"]
 
+    # Live NIH RePORTER query — replaces the PI's market-size guess with a count
+    # grounded in actual grant data. Skipped when population was derived from
+    # instrument requirements (more specific than a grant search).
+    _skip_reporter = (_user_overrides.get("pop", "")).startswith("instrument requirement")
+    if not _skip_reporter:
+        _nih_kw = " ".join(
+            [therapeutic_area]
+            + [w for w in (idea or "").lower().split()[:15] if len(w) > 4]
+        )[:150].strip()
+        _nih_total = _query_nih_reporter_total(_nih_kw)
+        if _nih_total and _nih_total > 200:
+            # RePORTER total = grant count; unique PIs ≈ total × 0.65
+            # (many PIs hold multiple concurrent awards)
+            _nih_lo = max(int(_nih_total * 0.65), 100)
+            _nih_hi = _nih_total
+            pop_lo, pop_hi = _nih_lo, _nih_hi
+            pop_src = (
+                f"NIH RePORTER (live, FY2023–25): {_nih_total:,} active R-series grants "
+                f"matching '{_nih_kw[:60]}'; estimated {_nih_lo:,}–{_nih_hi:,} unique PIs"
+            )
+            logger.info("NIH RePORTER: %d grants → pop %d–%d for '%s'",
+                        _nih_total, _nih_lo, _nih_hi, _nih_kw[:60])
+
     # Recompute midpoints after any overrides
     sam_mid = (_sam_lo + _sam_hi) / 2
     som_mid = (_som_lo + _som_hi) / 2
@@ -1969,7 +2023,7 @@ def _derive_research_tool_formula(
         DerivationStep(
             step_num=1,
             title=f"Step 1 — Eligible buyer population ({domain_label})",
-            formula=f"{domain_label}: {pop_lo:,}–{pop_hi:,}",
+            formula=f"{domain_label}: {int(pop_lo):,}–{int(pop_hi):,}",
             value=float((pop_lo + pop_hi) / 2),
             unit="labs",
             source_paper=pop_src,
@@ -1977,7 +2031,7 @@ def _derive_research_tool_formula(
             explanation=(
                 f"Buyer is an academic PI, not a hospital enterprise. "
                 f"Population = {domain_label}. "
-                f"Range: {pop_lo:,} (conservative) to {pop_hi:,} (optimistic). "
+                f"Range: {int(pop_lo):,} (conservative) to {int(pop_hi):,} (optimistic). "
                 f"Source: {pop_src}."
             ),
             data_source=pop_src,
@@ -1999,8 +2053,7 @@ def _derive_research_tool_formula(
                 f"Observed spend: ${sp_lo*3:,.0f}–${sp_hi*3:,.0f} per cycle from primary PI interviews. "
                 f"Annualised: divide by 3 → ${sp_lo:,.0f}–${sp_hi:,.0f}/yr. "
                 f"Source: {sp_src}. "
-                f"NOTE: if the product's asking price exceeds the observed spend ceiling, "
-                f"flag the gap in a serviceable-buyer reconciliation section before proceeding."
+                f"If the asking price exceeds the observed spend ceiling, this gap should appear in the reconciliation."
             ),
             data_source=sp_src,
             assumptions=[
@@ -2012,9 +2065,9 @@ def _derive_research_tool_formula(
             step_num=3,
             title="Step 3 — Total Addressable Market (TAM — midpoint estimate)",
             formula=(
-                f"Pessimistic: {pop_lo:,} × ${sp_lo:,.0f} = {_fmt(pop_lo * sp_lo)} | "
+                f"Pessimistic: {int(pop_lo):,} × ${sp_lo:,.0f} = {_fmt(pop_lo * sp_lo)} | "
                 f"Midpoint: {int((pop_lo+pop_hi)/2):,} × ${int((sp_lo+sp_hi)/2):,} = {_fmt(tam)} | "
-                f"Optimistic: {pop_hi:,} × ${sp_hi:,.0f} = {_fmt(pop_hi * sp_hi)}"
+                f"Optimistic: {int(pop_hi):,} × ${sp_hi:,.0f} = {_fmt(pop_hi * sp_hi)}"
             ),
             value=float(tam),
             unit="USD",
@@ -2083,7 +2136,8 @@ def _derive_research_tool_formula(
     _mc_note = ""
     if _mc is not None:
         _mc_note = (
-            f" Monte Carlo ({_mc.n_samples:,} samples): "
+            f" Monte Carlo ({_mc.n_samples:,} samples, baseline parameter range — "
+            f"apply user gates to see adjusted values): "
             f"TAM P5–P95 = {_fmt(_mc.tam_p5)}–{_fmt(_mc.tam_p95)}; "
             f"SOM P25–P75 = {_fmt(_mc.som_p25)}–{_fmt(_mc.som_p75)}. "
             f"Dominant uncertainty: {_mc.sensitivity_ranking[0].parameter} "
@@ -2096,7 +2150,7 @@ def _derive_research_tool_formula(
         archetype_label="Research Tool / Non-Clinical Data Infrastructure (Buyer Model)",
         formula_name="Bottom-Up PI Buyer Model",
         formula_overview=(
-            f"TAM = {pop_lo:,}–{pop_hi:,} NIH-funded labs × "
+            f"TAM = {int(pop_lo):,}–{int(pop_hi):,} NIH-funded labs × "
             f"${sp_lo:,.0f}–${sp_hi:,.0f}/yr annualised spend = "
             f"{_fmt(pop_lo * sp_lo)}–{_fmt(pop_hi * sp_hi)} (midpoint {_fmt(tam)})"
         ),
@@ -2107,7 +2161,7 @@ def _derive_research_tool_formula(
         som_fmt=_fmt(som),
         key_assumptions=[
             "Buyer = academic PI on grant cycle (not hospital enterprise)",
-            f"Lab population: {pop_lo:,}–{pop_hi:,} eligible labs ({pop_src})",
+            f"Lab population: {int(pop_lo):,}–{int(pop_hi):,} eligible labs ({pop_src})",
             f"Annualised spend: ${sp_lo:,.0f}–${sp_hi:,.0f}/lab/yr ({sp_src})",
             f"SAM adoption rate: {_sam_lo:.0%}–{_sam_hi:.0%} (midpoint {sam_mid:.0%})" + (" — from workflow type" if _user_overrides.get("sam") else " — assumed"),
             f"SOM 5-yr penetration: {_som_lo:.0%}–{_som_hi:.0%} (midpoint {som_mid:.0%})" + (" — from adoption pathway" if _user_overrides.get("som") else " — assumed"),
@@ -2302,44 +2356,6 @@ def generate_market_sizing_derivation(
         deriv = _derive_samd_formula(idea, dn, therapeutic_area, us_patient_population, signals)
     else:
         deriv = _derive_pharma_formula(idea, dn, therapeutic_area, us_patient_population, archetype, signals)
-
-    # G.14: Apply EDGAR forecast-to-outcome calibration correction.
-    # Bottom-up models systematically overstate; the factor is the median ratio from
-    # cross-referencing S-1 TAM claims against realized 10-K revenue.
-    try:
-        from app.db import edgar_calibration_repository as _edgar
-        _ctam, _csam, _csom, _factor, _note = _edgar.apply_calibration(
-            deriv.us_tam_usd, deriv.us_sam_usd, deriv.us_som_usd, archetype
-        )
-        if _factor != 1.0 and _note:
-            deriv.us_tam_usd             = _ctam
-            deriv.us_sam_usd             = _csam
-            deriv.us_som_usd             = _csom
-            deriv.tam_fmt                = _fmt(_ctam)
-            deriv.sam_fmt                = _fmt(_csam)
-            deriv.som_fmt                = _fmt(_csom)
-            deriv.edgar_calibration_factor = _factor
-            deriv.edgar_calibration_note   = _note
-            deriv.key_assumptions = [_note] + (deriv.key_assumptions or [])
-            # Scale Monte Carlo distribution by the same factor so P50 ≈ corrected TAM
-            if deriv.monte_carlo is not None:
-                mc = deriv.monte_carlo
-                from dataclasses import replace as _dc_replace
-                deriv.monte_carlo = _dc_replace(mc,
-                    tam_p5  = mc.tam_p5  / _factor,
-                    tam_p25 = mc.tam_p25 / _factor,
-                    tam_p50 = mc.tam_p50 / _factor,
-                    tam_p75 = mc.tam_p75 / _factor,
-                    tam_p95 = mc.tam_p95 / _factor,
-                    sam_p25 = mc.sam_p25 / _factor,
-                    sam_p50 = mc.sam_p50 / _factor,
-                    sam_p75 = mc.sam_p75 / _factor,
-                    som_p25 = mc.som_p25 / _factor,
-                    som_p50 = mc.som_p50 / _factor,
-                    som_p75 = mc.som_p75 / _factor,
-                )
-    except Exception as _ec:
-        logger.warning("edgar_calibration: apply failed (non-fatal): %s", _ec)
 
     return deriv
 

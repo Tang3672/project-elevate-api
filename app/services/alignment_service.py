@@ -1,5 +1,7 @@
 import asyncio
 import os
+
+ENGINE_BUILD_SHA: str = os.environ.get("RAILWAY_GIT_COMMIT_SHA", "dev")[:8]
 """
 PI Alignment Service v2
 =======================
@@ -99,6 +101,23 @@ _BANNED_OUTPUT_STRINGS = [
     "specify source",
     "[date removed",
     "nih-funded funded",
+    # P0-1: EDGAR pipeline not yet built — no seed-factor corrections until priors.json ships
+    "edgar calibration",
+    "edgar-corrected",
+    "edgar correction",
+    # P1: developer instructions must never reach user-facing output
+    "note: if",
+    "before proceeding",
+    "flag the gap",
+    "should be validated",
+    "operator should",
+    # Spec/tracking IDs that belong in PRs, not output
+    "(h-07 formula)",
+    "(h-10 rules)",
+    "per h-",
+    "per b-",
+    "per f-",
+    "per s-",
 ]
 
 
@@ -111,6 +130,132 @@ def _has_banned_output(text: str) -> list[str]:
 # ══════════════════════════════════════════════════════════════════════════════
 # PUBLIC ENTRY POINTS
 # ══════════════════════════════════════════════════════════════════════════════
+
+
+def _compute_axis_lift_hints(idea: str, demand_results: list, domain: str) -> dict:
+    """Derive per-axis lift estimates from the idea text and retrieved signals.
+
+    Returns a dict mapping axis_id → float [0, 1] so that identical-domain
+    reports with different ideas produce different axis orderings instead of the
+    same static typical_lift ordering every run.  Only fires for research-tool
+    domains; returns {} for clinical/commercial domains (which have their own
+    domain predicates and are not affected by static ordering the same way).
+    """
+    if domain != "LIFE_SCIENCES_RESEARCH":
+        return {}
+
+    _idea   = (idea or "").lower()
+    _titles = " ".join((s.get("title") or "") for s in demand_results).lower()
+    _srcs   = [(s.get("source") or "").lower() for s in demand_results]
+    _comb   = _idea + " " + _titles
+
+    def _frac(keywords: list) -> float:
+        return sum(1.0 for kw in keywords if kw in _comb) / max(len(keywords), 1)
+
+    # carnegie_tier: higher when idea targets R1/doctoral research context
+    _r1 = _frac(["r1 university", "research university", "doctoral", "phd",
+                 "graduate research", "laboratory", "research lab"])
+    # department: higher when idea names a specific academic discipline
+    _dept = _frac(["neuroscience", "biology", "chemistry", "physics", "immunology",
+                   "oncology", "genomics", "proteomics", "ecology", "materials science"])
+    # funding_agency: higher when NIH/NSF source signals present
+    _n_nih = sum(1 for s in _srcs if "nih" in s or "reporter" in s or "pubmed" in s)
+    _n_nsf = sum(1 for s in _srcs if "nsf" in s)
+    _fund_frac = (_n_nih + _n_nsf) / max(len(_srcs), 1)
+    # award_band: higher when grant-size or mechanism keywords appear
+    _grant = _frac(["r01", "r21", "r15", "r41", "r43", "sbir", "sttr",
+                    "grant award", "funded", "nih award"])
+    # lab_size: inversely related to award-band signal (small labs dominant without big-grant mention)
+    # current_solution: higher when competitor or status-quo mentions found
+    _tool = _frac(["alternative", "competitor", "existing solution", "instead of",
+                   "incumbent", "status quo", "replace", "switch from"])
+    # geography_us_region: higher when geographic concentration in signals
+    _geo = _frac(["california", "massachusetts", "new york", "boston", "cambridge",
+                  "midwest", "northeast", "west coast", "bay area"])
+    # purchase_cadence: higher when grant-cycle language present
+    _cycle = _frac(["grant cycle", "fiscal year", "renewal", "no-cost extension",
+                    "annual subscription", "budget cycle"])
+
+    return {
+        "carnegie_tier":       round(min(0.15 + _r1 * 0.15, 0.30), 2),
+        "department":          round(min(0.12 + _dept * 0.16, 0.28), 2),
+        "funding_agency":      round(min(0.10 + _fund_frac * 0.15, 0.25), 2),
+        "award_band":          round(min(0.08 + _grant * 0.14, 0.22), 2),
+        "lab_size":            round(max(0.10, 0.18 - _grant * 0.08), 2),
+        "current_solution":    round(min(0.14 + _tool * 0.14, 0.28), 2),
+        "geography_us_region": round(min(0.06 + _geo * 0.14, 0.20), 2),
+        "purchase_cadence":    round(min(0.06 + _cycle * 0.12, 0.18), 2),
+    }
+
+
+# ── P1 §1 evidence_base source filter ────────────────────────────────────────
+
+import re as _eb_re
+_BAD_EVIDENCE_SOURCE_RE = _eb_re.compile(
+    r'the transmitter|nih transmitter|>[\d,]+\s+grants?\s+since\s+\d{4}'
+    r'|cumulative.*grant|grant.*since\s+19\d{2}'
+    r'|mordor intelligence|grand view research|marketsandmarkets'
+    r'|allied market research|imarc group|fortune business insights'
+    r'|precedence research|global market insights',
+    _eb_re.IGNORECASE,
+)
+
+# §1 data_point filter — SBIR program statistics say nothing about a product's
+# buyer population or unmet need; the LLM tends to add them when SBIR funding
+# context is injected. Drop any metric that matches these program-level patterns.
+_BAD_DI_DATA_POINT_RE = _eb_re.compile(
+    r'sbir[/\s]*sttr\s+annual\s+set.?aside'      # NIH SBIR/STTR annual set-aside: $1.4B+
+    r'|annual\s+sbir[/\s]*sttr?\s+set.?aside'
+    r'|institutes?\s+and\s+centers?\s+fund'       # Number of NIH Institutes and Centers funding SBIR
+    r'|sbir\s+phase\s+[i1]\s+awards?\s+in\b',    # NIAID SBIR Phase I awards in data science
+    _eb_re.IGNORECASE,
+)
+
+
+def _filter_evidence_base_sources(evidence_base: dict) -> dict:
+    """Remove spurious source_types_used entries (aggregator sites, NIH newsletter,
+    cumulative historical grant counts) from the LLM-generated evidence_base."""
+    if not isinstance(evidence_base, dict):
+        return evidence_base
+    srcs = evidence_base.get("source_types_used")
+    if isinstance(srcs, list):
+        filtered = [s for s in srcs if not _BAD_EVIDENCE_SOURCE_RE.search(str(s))]
+        if len(filtered) != len(srcs):
+            logger.info(
+                "evidence_base: filtered %d spurious source(s) from source_types_used",
+                len(srcs) - len(filtered),
+            )
+            evidence_base = {**evidence_base, "source_types_used": filtered}
+    return evidence_base
+
+
+def _filter_di_data_points(data_points: list) -> list:
+    """Drop SBIR program-level statistics from §1 disease_intelligence.data_points.
+
+    SBIR annual set-aside amounts, IC counts, and phase-award tallies are program
+    statistics — they say nothing about the product's buyer population or unmet need.
+    """
+    if not data_points:
+        return data_points
+    filtered = [
+        dp for dp in data_points
+        if not _BAD_DI_DATA_POINT_RE.search(
+            str(dp.get("metric", "")) + " " + str(dp.get("value", ""))
+        )
+    ]
+    dropped = len(data_points) - len(filtered)
+    if dropped:
+        logger.info(
+            "disease_intelligence: filtered %d SBIR program stat(s) from data_points",
+            dropped,
+        )
+    return filtered
+
+
+async def _async_empty_dict() -> dict:
+    """Placeholder coroutine for asyncio.gather slots that should be skipped."""
+    return {}
+
 
 async def generate_pi_report(
     idea:           str,
@@ -211,11 +356,15 @@ async def generate_pi_report(
         "vaccine_prophylactic", "vaccine_cancer_immuno",
         "other_crispr", "other_microbiome", "other_delivery",
     })
-    if domain:
-        _resolved_domain = domain.upper()
-    elif (router_result.sub_expert_id or "") in _RESEARCH_SUB_EXPERTS:
+    # MoE router's sub_expert_id is the most reliable signal — trust it for research
+    # archetypes even when the intake classifier returned LIFE_SCIENCES_CLINICAL (which
+    # happens when soil/agronomy patterns are absent from the idea text at classify time).
+    _sub = (router_result.sub_expert_id or "")
+    if _sub in _RESEARCH_SUB_EXPERTS or _sub.startswith(("research_tool", "research_infrastructure")):
         _resolved_domain = "LIFE_SCIENCES_RESEARCH"
-    elif (router_result.sub_expert_id or "") in _CLINICAL_SUB_EXPERTS:
+    elif domain:
+        _resolved_domain = domain.upper()
+    elif _sub in _CLINICAL_SUB_EXPERTS:
         _resolved_domain = "LIFE_SCIENCES_CLINICAL"
     else:
         _resolved_domain = "LIFE_SCIENCES_CLINICAL"   # safe fallback
@@ -525,14 +674,28 @@ async def generate_pi_report(
     report.mismatch_warning = router_result.mismatch_warning
     report.run_manifest    = _run_manifest
     report.domain          = _resolved_domain
+    report.engine_version  = ENGINE_BUILD_SHA
 
-    # C.1/C.2: attach axis selection/rejection decisions
+    # C.1/C.2: attach axis selection/rejection decisions with idea-specific lift hints
     try:
         from app.market.axis_library import select_axes, format_axis_decisions
-        _axis_decisions = select_axes(_resolved_domain, report.expert_domain or "")
+        _lift_hints = _compute_axis_lift_hints(idea, demand_results, _resolved_domain)
+        _axis_decisions = select_axes(_resolved_domain, report.expert_domain or "", lift_hints=_lift_hints)
         report.axis_decisions = format_axis_decisions(_axis_decisions)
     except Exception as _axis_e:
         logger.warning("Axis selection failed (non-fatal): %s", _axis_e)
+
+    # §8: fix known LLM duplicate-word artifacts before verification sees the text
+    try:
+        _rj = json.dumps(report.model_dump(mode="json"))
+        # Catch all variants: "NIH-funded funded", "NIH funded funded",
+        # hyphen/space before 'funded', any whitespace between the two words
+        _rj2 = re.sub(r'NIH[ -]funded\s+funded', 'NIH-funded', _rj, flags=re.IGNORECASE)
+        if _rj2 != _rj:
+            report = report.model_validate(json.loads(_rj2))
+            logger.info("Output sanitize: removed NIH-funded duplicate")
+    except Exception as _san_e:
+        logger.debug("Output sanitize (non-fatal): %s", _san_e)
 
     if skip_verification:
         # Verification (validation + trust + self-correction) is run in the
@@ -684,29 +847,33 @@ async def run_report_verification(report) -> None:
                 _corrected = set(_fixed.keys())
                 _remaining = [e for e in _errs
                               if section_for_flag(e.get("field", ""), e.get("issue", "")) not in _corrected]
-                _n_fixed = len(_errs) - len(_remaining)
+                # Count only non-MATH errors — MATH is handled client-side and filtered
+                # from the badge, so claiming a MATH correction in the count misleads.
+                def _is_math(e): return (e.get("category") or "").upper() == "MATH"
+                _n_display_errs = [e for e in _errs if not _is_math(e)]
+                _n_display_remain = [e for e in _remaining if not _is_math(e)]
+                _n_fixed_display = len(_n_display_errs) - len(_n_display_remain)
                 _val = dict(_val)
                 _val["errors"] = _remaining
                 # Never claim "resolved" — only "attempted". True resolution requires
                 # re-verification which we don't run here (would add 30+ s).
-                _val["self_corrected"] = _n_fixed
+                _val["self_corrected"] = _n_fixed_display
                 if _remaining:
                     _val["status"] = "ERROR"
                     _val["summary"] = (
-                        f"Attempted correction on {_n_fixed} issue(s); "
-                        f"{len(_remaining)} flagged issue(s) remain — review required."
+                        f"{len(_n_display_remain)} issue(s) flagged"
+                        + (f" · correction attempted on {_n_fixed_display}" if _n_fixed_display else "")
+                        + " — review required."
                     )
                 else:
-                    # All errors had corrections applied, but we can't confirm they
-                    # worked without re-running the verifier. Mark as FLAG not PASS.
                     _val["status"] = "FLAG"
                     _val["summary"] = (
-                        f"Corrections applied to {_n_fixed} flagged issue(s). "
-                        f"Re-run the report to confirm resolution."
-                    )
+                        f"Correction attempted on {_n_fixed_display} issue(s). "
+                        f"Re-run to verify."
+                    ) if _n_fixed_display else "No flagged issues remaining."
                 report.validation = _val
-                logger.info("Self-correction: applied corrections to %d/%d errors",
-                            _n_fixed, len(_errs))
+                logger.info("Self-correction: attempted on %d/%d display errors",
+                            _n_fixed_display, len(_n_display_errs))
     except Exception as _cor_e:
         logger.warning("Self-correction failed (non-fatal): %s", _cor_e)
 
@@ -1185,6 +1352,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
             get_landmark_publications(
                 disease_name=disease_name,
                 sub_expert_id=sub_expert_id,
+                idea=idea,
             ),
             gather_competitive_intelligence(
                 disease_name=disease_name,
@@ -1221,8 +1389,10 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
             get_funding_intelligence(disease_name),
             # Patent landscape: recent US filings + assignees (Google Patents, free).
             get_patent_landscape(disease_name),
-            # Regulatory precedent: FDA-approved drugs for this indication (openFDA, free).
-            get_regulatory_precedent(disease_name),
+            # Regulatory precedent: FDA-approved drugs (openFDA, free).
+            # Skip for non-clinical research tools — openFDA has no records for lab instruments.
+            (get_regulatory_precedent(disease_name) if _resolved_domain != "LIFE_SCIENCES_RESEARCH"
+             else _async_empty_dict()),
             return_exceptions=True,
         )
         try:
@@ -1495,6 +1665,11 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
     except Exception as _rp_e:
         logger.warning("Regulatory precedent injection failed (non-fatal): %s", _rp_e)
 
+    # SBIR/STTR authorization status — injected as authoritative block to prevent
+    # the LLM from citing stale training data (e.g. NOT-OD-26-006 lapse prose).
+    from app.services.sbir_authorization import get_sbir_context_block
+    sbir_auth_block = get_sbir_context_block()
+
     # KOL network — key opinion leaders by citation influence (Semantic Scholar, free API)
     kol_block = ""
     kols: list = []   # H-06: initialise so it's always in scope for person verifier
@@ -1538,7 +1713,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
 
     # Build final context. Priority order (highest first):
     #   world model → TRL → expert panel → investor match → fund benchmarks →
-    #   funding intel → KOL → literature synthesis → CI → market sizing
+    #   SBIR auth → funding intel → KOL → literature synthesis → CI → market sizing
     context = _build_expert_context(
         idea, expert, demand_results, hospital_matches_raw,
         disease_knowledge=(
@@ -1547,6 +1722,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
             + panel_block + "\n\n"
             + investor_block + "\n\n"
             + fund_bench_block + "\n\n"
+            + sbir_auth_block + "\n\n"
             + funding_block + "\n\n"
             + patent_block + "\n\n"
             + regulatory_precedent_block + "\n\n"
@@ -2375,6 +2551,7 @@ IMPORTANT: Use DIFFERENT guidance URLs for different phases. Phase 1 = IND/clini
 
 If the exact guidance is not listed above, use the general FDA guidance search: https://www.fda.gov/regulatory-information/search-fda-guidance-documents — do NOT fabricate a URL.
 7. For market sizing steps, the source field must name the specific dataset or publication that contains the patient count or pricing data used.
+8. evidence_base.source_types_used: list ONLY the database or corpus types that appear as [source_name] labels in the DEMAND SIGNALS block above, plus any primary research the PI has described. NEVER cite: newsletters (The Transmitter, NIH News in Health), market-aggregator reports (Mordor Intelligence, Grand View Research, MarketsandMarkets, Allied Market Research, IMARC Group, Fortune Business Insights, Precedence Research, Global Market Insights), or cumulative historical grant statistics (">5,700 grants since 1982", "X grants since 19XX"). Those are not sources you retrieved from in this session. If you did not receive a demand signal from a given source, do not list it.
 3. CRITICAL: The MULTI-SOURCE INTELLIGENCE PACKAGE in your context contains papers from CrossRef, Semantic Scholar, NIH Reporter, and news sources. You MUST cite these in your report and include them in the sources array. Do not only cite FDA and CDC - use the full range of sources provided.
 4. For buyer segments: source_url is MANDATORY. Real examples: https://www.aha.org/statistics/fast-facts-us-hospitals, https://www.cancer.gov/research/infrastructure/cancer-centers/find, https://data.cms.gov/, https://www.curesma.org/about-sma/. NEVER leave source_url empty or as empty strings the buyer data.
 
@@ -2420,7 +2597,7 @@ If the exact guidance is not listed above, use the general FDA guidance search: 
 
   "evidence_base": {
     "primary_research_present": false,
-    "source_types_used": ["<e.g. NIH RePORTER grants, Semantic Scholar, ClinicalTrials.gov, primary user interviews>"],
+    "source_types_used": ["<ONLY list source types whose [source_name] label appears in the DEMAND SIGNALS block above — e.g. 'NIH RePORTER (active R-series grants)', 'Semantic Scholar (peer-reviewed papers)', 'ClinicalTrials.gov (active trials)', 'FDA FAERS (adverse event reports)'. Add 'Primary user interviews' only if the PI described them. FORBIDDEN: newsletters (The Transmitter), market-aggregator reports (Mordor Intelligence, Grand View Research, MarketsandMarkets), cumulative historical counts ('>5,700 grants since 1982')>"],
     "sample_composition": "<e.g. '10 academic PIs, 8 at R1 institutions, 2 at teaching hospitals — all with active NIH grants' or 'not applicable — no primary research'>",
     "decision_authority_profile": "<who holds purchase authority — e.g. 'PI (90%), department chair (10%)' or 'unknown — not assessed'>",
     "limitations": ["<specific limitation of this analysis, e.g. 'No primary user research — findings are hypotheses'>"],
@@ -2470,7 +2647,7 @@ def _parse_expert_response(data, idea, product_type, expert, demand_results, hos
     di_data = data.get("disease_intelligence", {})
     disease_intel = DiseaseIntelligence(
         condition          = di_data.get("condition", ""),
-        data_points        = [DiseaseDataPoint(**dp) for dp in di_data.get("data_points", [])],
+        data_points        = [DiseaseDataPoint(**dp) for dp in _filter_di_data_points(di_data.get("data_points", []))],
         resistance_profile = di_data.get("resistance_profile"),
         pipeline_status    = di_data.get("pipeline_status"),
         unmet_need_summary = di_data.get("unmet_need_summary", ""),
@@ -2517,8 +2694,8 @@ def _parse_expert_response(data, idea, product_type, expert, demand_results, hos
 
     # ── S-01…S-09: parse and validate new strategic sections ──────────────────
 
-    # S-01 Evidence Base
-    evidence_base = data.get("evidence_base") or {}
+    # S-01 Evidence Base — filter spurious source entries before storage
+    evidence_base = _filter_evidence_base_sources(data.get("evidence_base") or {})
 
     # S-02 Value Driver Ranking
     vdr = [r for r in data.get("value_driver_ranking", []) if isinstance(r, dict)]
@@ -2625,7 +2802,7 @@ async def _generate_antibiotic_report(
     disease_intel = DiseaseIntelligence(
         condition=di_data.get("condition", ""),
         data_points=[
-            DiseaseDataPoint(**dp) for dp in di_data.get("data_points", [])
+            DiseaseDataPoint(**dp) for dp in _filter_di_data_points(di_data.get("data_points", []))
         ],
         resistance_profile=di_data.get("resistance_profile"),
         pipeline_status=di_data.get("pipeline_status"),
@@ -2792,7 +2969,7 @@ async def _generate_generic_pi_report(
     di_data = data.get("disease_intelligence", {})
     disease_intel = DiseaseIntelligence(
         condition=di_data.get("condition", ""),
-        data_points=[DiseaseDataPoint(**dp) for dp in di_data.get("data_points", [])],
+        data_points=[DiseaseDataPoint(**dp) for dp in _filter_di_data_points(di_data.get("data_points", []))],
         unmet_need_summary=di_data.get("unmet_need_summary", ""),
     ) if di_data else None
 

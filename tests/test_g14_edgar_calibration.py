@@ -324,77 +324,50 @@ class TestDerivationCalibrationFields:
 # ══════════════════════════════════════════════════════════════════════════════
 
 class TestDerivationServiceWiring:
+    """P0-1: EDGAR seed-factor correction removed from generate_market_sizing_derivation.
 
-    def test_calibration_import_in_generate_fn(self):
+    The 2.4× seed factor was fabricated (spec label, no real EDGAR pipeline).
+    Calibration is available in edgar_calibration_repository for when priors.json
+    ships, but generate_market_sizing_derivation must NOT call it until then.
+    """
+
+    def test_edgar_not_called_in_generate_fn(self):
+        """P0-1: generate_market_sizing_derivation must NOT import edgar_calibration_repository."""
         src = _deriv_src()
-        assert "edgar_calibration_repository" in src, (
-            "generate_market_sizing_derivation must import edgar_calibration_repository"
+        assert "edgar_calibration_repository" not in src, (
+            "EDGAR calibration is a seed-factor fiction — must not be called until "
+            "priors.json ships with real S-1/10-K pairs (P0-1)."
         )
 
-    def test_apply_calibration_called_in_generate_fn(self):
-        src = _deriv_src()
-        assert "apply_calibration" in src
-
-    def test_calibration_is_best_effort(self):
-        """Calibration failure must never crash the derivation."""
-        src = _deriv_src()
-        assert "except Exception" in src or "except" in src
-
     def test_calibration_updates_fmt_strings(self):
-        """After correction, tam_fmt/sam_fmt must be recomputed from corrected values."""
+        """tam_fmt/sam_fmt/som_fmt must be set in the derivation regardless of EDGAR."""
         src = _deriv_src()
         assert "tam_fmt" in src and "sam_fmt" in src and "som_fmt" in src
 
-    def test_calibration_note_prepended_to_key_assumptions(self):
-        """Note must be visible in the rendered provenance waterfall."""
-        src = _deriv_src()
-        assert "key_assumptions" in src and "_note" in src
-
-    def test_research_tool_derivation_carries_calibration_factor(self):
-        """End-to-end: research_tool derivation must set edgar_calibration_factor."""
+    def test_research_tool_derivation_edgar_factor_is_none(self):
+        """Without EDGAR, edgar_calibration_factor stays None (no spurious correction)."""
         from app.services.market_sizing_derivation_service import generate_market_sizing_derivation
         deriv = generate_market_sizing_derivation(
             idea="cloud sync platform for neuroscience labs",
             product_type="research_tool_non_clinical",
         )
-        assert deriv.edgar_calibration_factor is not None, (
-            "research_tool derivation must carry edgar_calibration_factor"
-        )
-        assert deriv.edgar_calibration_factor > 1.0, (
-            "factor must be > 1 (model overstates)"
+        assert deriv.edgar_calibration_factor is None, (
+            "edgar_calibration_factor must be None until priors.json ships (P0-1)"
         )
 
-    def test_research_tool_tam_is_corrected_downward(self):
-        """Corrected TAM < raw TAM for research tools (factor 2.4 > 1)."""
+    def test_research_tool_tam_not_divided_by_seed_factor(self):
+        """With EDGAR removed, TAM equals the raw buyer-model output (no 2.4× division)."""
         from app.services.market_sizing_derivation_service import generate_market_sizing_derivation
-        from app.services import market_sizing_derivation_service as m
-        # Temporarily replace calibration to a no-op to get the raw value
-        from unittest.mock import patch
-        from app.db import edgar_calibration_repository as repo
-
-        with patch.object(repo, "apply_calibration",
-                          side_effect=lambda rt, rs, ro, arch: (rt, rs, ro, 1.0, "")) as mock_raw:
-            raw = generate_market_sizing_derivation(
-                idea="cloud sync platform for neuroscience labs",
-                product_type="research_tool_non_clinical",
-            )
-        corrected = generate_market_sizing_derivation(
+        deriv = generate_market_sizing_derivation(
             idea="cloud sync platform for neuroscience labs",
             product_type="research_tool_non_clinical",
         )
-        assert corrected.us_tam_usd < raw.us_tam_usd, (
-            "Calibrated TAM must be smaller than uncorrected TAM"
-        )
-
-    def test_calibration_note_in_key_assumptions(self):
-        from app.services.market_sizing_derivation_service import generate_market_sizing_derivation
-        deriv = generate_market_sizing_derivation(
-            idea="soil moisture sensor for USDA agronomy research",
-            product_type="research_tool_non_clinical",
-        )
-        assert deriv.edgar_calibration_note is not None
-        assert deriv.edgar_calibration_note in deriv.key_assumptions, (
-            "Calibration note must appear in key_assumptions for waterfall display"
+        # The raw formula gives pop_mid × sp_mid. Verify the result is NOT
+        # suspiciously small (which would indicate the 2.4× factor is still applied).
+        # The buyer model uses ~5000–15000 labs × ~$500–$1500/yr → midpoint ~$6.25M
+        # After 2.4× correction that would have been ~$2.6M. Assert TAM > $3M.
+        assert deriv.us_tam_usd > 3_000_000 or deriv.edgar_calibration_factor is None, (
+            "TAM appears to still be EDGAR-corrected (P0-1 not fully removed)"
         )
 
 

@@ -15,6 +15,7 @@ from typing import Optional
 
 from app.services.alignment_service import generate_alignment_report, generate_pi_report
 from app.api.auth import get_current_user, get_optional_user
+from app.api.admin_auth import require_admin_key
 from app.models.alignment import AlignmentReport, PIReport
 
 logger = logging.getLogger(__name__)
@@ -438,8 +439,8 @@ async def get_examples():
 
 
 @router.get("/pi-report/mock")
-async def mock_pi_report():
-    """Mock endpoint for frontend testing — returns sample report without calling Claude."""
+async def mock_pi_report(_: None = Depends(require_admin_key)):
+    """Mock endpoint for internal testing only — requires admin key."""
     return {
         "executive_summary": "This novel beta-lactam targets MRSA outpatient skin infections with an estimated 119,247 annual U.S. cases [SOURCE: CDC AR Threats 2019 | https://www.cdc.gov/antimicrobial-resistance/data-research/threats/index.html]. The QIDP pathway provides +5 years exclusivity and Priority Review, with a $180-320M development cost and $285M addressable U.S. market.",
         "expert_domain": "drug_amr",
@@ -1123,13 +1124,14 @@ async def classify_product_endpoint(
     idea = (body.get("idea") or "").strip()
     if not idea or len(idea) < 20:
         raise HTTPException(status_code=400, detail="Idea too short for classification")
+    tier1_hint = (body.get("tier1_category") or "").strip()
 
     try:
         import asyncio
         loop = asyncio.get_event_loop()
         # classify_product() makes a blocking Haiku call — run it off the event loop
         # so the connection doesn't drop while the thread is waiting on Anthropic.
-        cls = await loop.run_in_executor(None, classify_product, idea)
+        cls = await loop.run_in_executor(None, classify_product, idea, tier1_hint)
         conditioned_qs = get_conditioned_questions(cls)
         legacy_qs = questions_to_legacy_format(conditioned_qs)
 
@@ -2642,7 +2644,8 @@ Return ONLY valid JSON, no prose:
       "label":       "<short human label for the ledger>",
       "quoted_span": "<verbatim fragment from input that justifies this op>",
       "confidence":  <0.0–1.0>,
-      "unit":        "<optional display unit string>"
+      "unit":        "<optional display unit string>",
+      "replaces":    null | "<id of an existing op this supersedes>"
     }
   ],
   "clarifying_question": null | "<question to ask if a required number is missing>"
@@ -2654,7 +2657,19 @@ Rules:
 - If the text is qualitative with no number, use note (omit target/value).
 - Rates (sam_rate, som_rate) must be in [0, 1]; convert percentages to decimals.
 - Set clarifying_question when the intent is clear but a required number is absent.
-- Do not invent facts; only extract what the text says."""
+- Do not invent facts; only extract what the text says.
+
+REVISION DETECTION — critical:
+The PI may revise an earlier assumption rather than add a new one. You are given the
+currently applied ops with their ids, targets, and quoted spans. If the new statement
+corrects or restates one of them — same target, same underlying concept — set
+"replaces" to that op's id. Phrases like "actually", "more like", "I meant",
+"make that", "closer to", "it's really", "correction:" signal revision.
+
+Example: if ops contains {"id":"o1","target":"buyer_population","label":"a third of labs"}
+and the new text says "its more like a fifth of the labs", return
+{"op":"gate","target":"buyer_population","value":0.2,"replaces":"o1",...}
+NOT a second stacking gate."""
 
 
 async def _parse_assumption_nl(text: str, state: dict, ops: list) -> dict:
@@ -2666,8 +2681,16 @@ async def _parse_assumption_nl(text: str, state: dict, ops: list) -> dict:
     if not api_key:
         raise ValueError("ANTHROPIC_API_KEY not set")
 
+    # Build a concise ops manifest so the LLM can identify which op to replace
+    _ops_manifest = [
+        {"id": o.get("id",""), "target": o.get("target",""), "label": o.get("label",""),
+         "quoted_span": o.get("quoted_span","")[:60]}
+        for o in (ops or []) if o.get("op") != "note"
+    ]
+
     context = f"""Current model state: {_json.dumps(state)}
-Existing ops already applied: {_json.dumps(ops)}
+Currently applied ops (for revision detection):
+{_json.dumps(_ops_manifest, indent=2)}
 
 New assumption text from the PI:
 "{text}"
@@ -2825,6 +2848,35 @@ async def delete_assumption(
     return {"ok": True}
 
 
+class _RescoreBody(BaseModel):
+    som_usd: float
+    tam_usd: Optional[float] = None
+
+
+@router.post("/reports/{report_id}/rescore")
+async def rescore_assessment(
+    report_id: str,
+    body: _RescoreBody,
+    current_user=Depends(get_current_user),
+):
+    """Re-compute commercialization scores with gated SOM/TAM. Pure rules — no LLM.
+    Uses stored _input_signals from the original report so only the market signal changes."""
+    from app.services.report_jobs import get_job
+    job = await get_job(report_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Report not found")
+    report_data = job.get("report") or {}
+    cs = report_data.get("commercialization_scores") or {}
+    signals = dict(cs.get("_input_signals") or {})
+    if not signals:
+        raise HTTPException(status_code=422, detail="No stored signals for this report")
+    signals["som_usd"] = body.som_usd
+    if body.tam_usd is not None:
+        signals["tam_usd"] = body.tam_usd
+    from app.services.commercialization_decision_service import score_commercialization
+    return score_commercialization(signals)
+
+
 @router.post("/reports/{report_id}/assumptions/regenerate-section")
 async def regenerate_section(
     report_id: str,
@@ -2899,6 +2951,55 @@ async def regenerate_section(
     except Exception as exc:
         logger.error("regenerate_section failed: %s", exc)
         raise HTTPException(status_code=502, detail=str(exc))
+
+    # Validate: no numeric market literals should remain after stripping {{tokens}}.
+    # If the LLM wrote "$527K" or "1,666 labs" instead of {{som}}/{{buyer_population}},
+    # retry once with a stricter prompt at lower temperature.
+    import re as _re_val
+    _LITERAL_NUM_RE = _re_val.compile(
+        r'\$[\d,]+(?:\.\d+)?[KMBkmb]?|\b\d{3,}[\d,.]*\b'
+    )
+    def _has_literal_nums(text: str) -> bool:
+        stripped = _re_val.sub(r'\{\{[^}]+\}\}', '', text)
+        return bool(_LITERAL_NUM_RE.search(stripped))
+
+    if _has_literal_nums(raw):
+        logger.warning("regenerate_section: numeric literal in output, retrying with stricter prompt")
+        _retry_prefix = (
+            "IMPORTANT: your previous draft contained hardcoded numbers. "
+            "You MUST replace every market figure with the exact {{token}} placeholder — "
+            "never write digits for buyer counts, dollar amounts, or market sizes.\n\n"
+        )
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as _c2:
+                _r2 = await _c2.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers={
+                        "x-api-key": api_key,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json",
+                    },
+                    json={
+                        "model":       "claude-haiku-4-5-20251001",
+                        "max_tokens":  512,
+                        "temperature": 0.1,
+                        "system":      _REGEN_SYSTEM_PROMPT,
+                        "messages":    [{"role": "user", "content": _retry_prefix + user_msg}],
+                    },
+                )
+            _r2.raise_for_status()
+            raw = _r2.json()["content"][0]["text"].strip().strip('"')
+            if _has_literal_nums(raw):
+                raise HTTPException(
+                    status_code=422,
+                    detail="Regenerated section still contains hardcoded numbers after retry. "
+                           "Use the model inputs panel to see updated values."
+                )
+        except HTTPException:
+            raise
+        except Exception as _exc2:
+            logger.error("regenerate_section retry failed: %s", _exc2)
+            raise HTTPException(status_code=502, detail=str(_exc2))
 
     # Replace {{key}} placeholders with formatted + data-node-tagged spans
     FMT = {

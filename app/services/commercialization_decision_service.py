@@ -145,14 +145,25 @@ def score_commercialization(signals: dict) -> dict:
     if severe_barrier:
         reimbursement -= 0.12
 
+    # Gate sbir_fit on current authorization status from the lookup table.
+    # When the program is lapsed, cap at 0.05 so it doesn't contradict the LLM prose.
+    try:
+        from app.services.sbir_authorization import is_sbir_authorized
+        _sbir_authorized = is_sbir_authorized()
+    except Exception:
+        _sbir_authorized = True  # safe default: don't suppress score on import error
+
+    _sbir_fit_raw = _clamp(0.40 * sbir_ready + 0.25 * trl_sbir_fit
+                           + 0.20 * sbir_activity + 0.15 * priors["sbir"])
+    _sbir_fit_score = _sbir_fit_raw if _sbir_authorized else min(_sbir_fit_raw, 0.05)
+
     scores = {
         "patentability":           _clamp(0.50 * priors["patent"] + 0.30 * whitespace + 0.20 * trl_n),
         "licensing_likelihood":    _clamp(0.30 * moat + 0.25 * approval + 0.20 * market
                                           + 0.15 * trl_n + 0.10 * priors["license"]),
         "spinout_likelihood":      _clamp(0.30 * market + 0.25 * moat + 0.20 * trl_n
                                           + 0.15 * whitespace + 0.10 * priors["spinout"]),
-        "sbir_fit":                _clamp(0.40 * sbir_ready + 0.25 * trl_sbir_fit
-                                          + 0.20 * sbir_activity + 0.15 * priors["sbir"]),
+        "sbir_fit":                _sbir_fit_score,
         "investor_attractiveness": _clamp(0.35 * market + 0.25 * approval + 0.20 * moat + 0.20 * trl_n),
         "regulatory_feasibility":  _clamp(0.80 * approval + 0.20 * desig_factor),
         "reimbursement_feasibility": _clamp(reimbursement),
@@ -386,8 +397,15 @@ def _recommendation(s: dict) -> str:
     overall = s["overall_priority"]
 
     if overall < 0.40:
-        return ("Deprioritize relative to the portfolio unless the key risks "
-                "(regulatory odds, IP whitespace, or market size) can be materially de-risked.")
+        # regulatory_feasibility is None for non-regulated products (research tools, software)
+        _is_regulated = s.get("regulatory_feasibility") is not None
+        _risk_list = (
+            "regulatory odds, IP whitespace, or market size"
+            if _is_regulated else
+            "IP whitespace, competitive differentiation, or market size"
+        )
+        return (f"Deprioritize relative to the portfolio unless the key risks "
+                f"({_risk_list}) can be materially de-risked.")
 
     # Primary action
     if sbir >= 0.65 and inv < 0.60:
