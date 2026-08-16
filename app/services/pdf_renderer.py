@@ -343,7 +343,7 @@ def _render_axis_decisions(axis_decisions: dict) -> str:
 </table>""" if rej_rows else ""
 
     return f"""
-<div class="section" id="s-axis-decisions">
+<div class="section-aux" id="s-axis-decisions">
   <h2>Segmentation Methodology</h2>
   <p class="methodology">The following axes were evaluated for this product's buyer model.
   Axes are selected based on the buyer type, product domain, and available data sources.</p>
@@ -825,6 +825,12 @@ def _build_css(product_name: str) -> str:
       page-break-inside: avoid;
       counter-increment: section;
     }}
+    /* Supplemental sections (e.g. axis decisions) use same spacing but do NOT
+       consume a counter slot so numbered sections stay sequential. */
+    .section-aux {{
+      margin-bottom: 2.4rem;
+      page-break-inside: avoid;
+    }}
     h2 {{
       font-family: system-ui, -apple-system, sans-serif;
       font-size: var(--t-md);
@@ -1073,20 +1079,41 @@ def render_report_html(
   <p>{exec_summary}</p>
 </div>""" if exec_summary else ""
 
-    # Limitations / evidence base (S-01)
+    # Limitations / evidence base (S-01) — use actual schema field names from alignment_service
     lim = report.get("limitations") or ""
     eb = report.get("evidence_base") or {}
     evid_html = ""
     if eb or lim:
-        ev_quality = _e(eb.get("quality_summary", eb.get("summary", lim)))
-        ev_gaps = _e(eb.get("key_gaps", ""))
-        ev_method = _e(eb.get("methodology", ""))
+        # Sources list
+        _sources = eb.get("source_types_used") or []
+        _src_items = "".join(f"<li>{_e(s)}</li>" for s in _sources if s)
+        sources_block = f"<p><strong>Data sources:</strong></p><ul>{_src_items}</ul>" if _src_items else ""
+
+        # Sample composition and decision authority
+        _sample = _e(eb.get("sample_composition", ""))
+        _authority = _e(eb.get("decision_authority_profile", ""))
+
+        # Limitations list
+        _lim_items_raw = eb.get("limitations") or []
+        if isinstance(_lim_items_raw, str):
+            _lim_items_raw = [_lim_items_raw] if _lim_items_raw else []
+        _lim_items = "".join(f"<li>{_e(l)}</li>" for l in _lim_items_raw if l)
+        # Fall back to top-level limitations string
+        if not _lim_items and lim:
+            _lim_items = f"<li>{_e(lim)}</li>"
+        limitations_block = f"<p><strong>Data limitations:</strong></p><ul>{_lim_items}</ul>" if _lim_items else ""
+
+        # Evidence gap recommendation
+        _gap = _e(eb.get("evidence_gap_block", eb.get("key_gaps", "")))
+
         evid_html = f"""
 <div class="section" id="s-evidence">
   <h2><span class="sec-num"></span> Evidence Base &amp; Limitations</h2>
-  {f'<p>{ev_quality}</p>' if ev_quality else ""}
-  {f'<p><strong>Key gaps:</strong> {ev_gaps}</p>' if ev_gaps else ""}
-  {f'<p><strong>Methodology:</strong> {ev_method}</p>' if ev_method else ""}
+  {sources_block}
+  {f'<p><strong>Sample:</strong> {_sample}</p>' if _sample else ""}
+  {f'<p><strong>Purchase authority:</strong> {_authority}</p>' if _authority else ""}
+  {limitations_block}
+  {f'<p class="gap-note">{_gap}</p>' if _gap else ""}
 </div>"""
 
     # Market sizing (F-08 tables)
