@@ -1625,6 +1625,11 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
     except Exception as _rp_e:
         logger.warning("Regulatory precedent injection failed (non-fatal): %s", _rp_e)
 
+    # SBIR/STTR authorization status — injected as authoritative block to prevent
+    # the LLM from citing stale training data (e.g. NOT-OD-26-006 lapse prose).
+    from app.services.sbir_authorization import get_sbir_context_block
+    sbir_auth_block = get_sbir_context_block()
+
     # KOL network — key opinion leaders by citation influence (Semantic Scholar, free API)
     kol_block = ""
     kols: list = []   # H-06: initialise so it's always in scope for person verifier
@@ -1668,7 +1673,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
 
     # Build final context. Priority order (highest first):
     #   world model → TRL → expert panel → investor match → fund benchmarks →
-    #   funding intel → KOL → literature synthesis → CI → market sizing
+    #   SBIR auth → funding intel → KOL → literature synthesis → CI → market sizing
     context = _build_expert_context(
         idea, expert, demand_results, hospital_matches_raw,
         disease_knowledge=(
@@ -1677,6 +1682,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
             + panel_block + "\n\n"
             + investor_block + "\n\n"
             + fund_bench_block + "\n\n"
+            + sbir_auth_block + "\n\n"
             + funding_block + "\n\n"
             + patent_block + "\n\n"
             + regulatory_precedent_block + "\n\n"
