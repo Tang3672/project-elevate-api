@@ -1094,34 +1094,41 @@ def render_report_html(
   <p>{exec_summary}</p>
 </div>""" if exec_summary else ""
 
-    # Limitations / evidence base (S-01) — use actual schema field names from alignment_service
+    # Limitations / evidence base (S-01) — always render in the PDF.
+    # The PDF is the artifact that reaches investors and TTOs. Stripping the honesty
+    # section because evidence_base is null produces a misleading document.
     lim = report.get("limitations") or ""
     eb = report.get("evidence_base") or {}
-    evid_html = ""
-    if eb or lim:
-        # Sources list
-        _sources = eb.get("source_types_used") or []
-        _src_items = "".join(f"<li>{_e(s)}</li>" for s in _sources if s)
-        sources_block = f"<p><strong>Data sources:</strong></p><ul>{_src_items}</ul>" if _src_items else ""
 
-        # Sample composition and decision authority
-        _sample = _e(eb.get("sample_composition", ""))
-        _authority = _e(eb.get("decision_authority_profile", ""))
+    # Sources list
+    _sources = eb.get("source_types_used") or []
+    _src_items = "".join(f"<li>{_e(s)}</li>" for s in _sources if s)
+    sources_block = f"<p><strong>Data sources:</strong></p><ul>{_src_items}</ul>" if _src_items else ""
 
-        # Limitations list
-        _lim_items_raw = eb.get("limitations") or []
-        if isinstance(_lim_items_raw, str):
-            _lim_items_raw = [_lim_items_raw] if _lim_items_raw else []
-        _lim_items = "".join(f"<li>{_e(l)}</li>" for l in _lim_items_raw if l)
-        # Fall back to top-level limitations string
-        if not _lim_items and lim:
-            _lim_items = f"<li>{_e(lim)}</li>"
-        limitations_block = f"<p><strong>Data limitations:</strong></p><ul>{_lim_items}</ul>" if _lim_items else ""
+    # Sample composition and decision authority
+    _sample = _e(eb.get("sample_composition", ""))
+    _authority = _e(eb.get("decision_authority_profile", ""))
 
-        # Evidence gap recommendation
-        _gap = _e(eb.get("evidence_gap_block", eb.get("key_gaps", "")))
+    # Limitations list — prefer structured list from evidence_base, then top-level string,
+    # then a standing minimum caveat so the section is never empty.
+    _lim_items_raw = eb.get("limitations") or []
+    if isinstance(_lim_items_raw, str):
+        _lim_items_raw = [_lim_items_raw] if _lim_items_raw else []
+    _lim_items = "".join(f"<li>{_e(l)}</li>" for l in _lim_items_raw if l)
+    if not _lim_items and lim:
+        _lim_items = f"<li>{_e(lim)}</li>"
+    if not _lim_items:
+        _lim_items = (
+            "<li>No primary user research was conducted; all findings derive from public data.</li>"
+            "<li>Market size estimates are directional hypotheses — consult domain specialists "
+            "before material business or investment decisions.</li>"
+        )
+    limitations_block = f"<p><strong>Data limitations:</strong></p><ul>{_lim_items}</ul>"
 
-        evid_html = f"""
+    # Evidence gap recommendation
+    _gap = _e(eb.get("evidence_gap_block", eb.get("key_gaps", "")))
+
+    evid_html = f"""
 <div class="section" id="s-evidence">
   <h2><span class="sec-num"></span> Evidence Base &amp; Limitations</h2>
   {sources_block}

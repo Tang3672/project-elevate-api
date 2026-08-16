@@ -765,20 +765,25 @@ async def attach_competitive_landscape(report) -> None:
         )
         from app.services.competitor_schema import normalize_landscape
         _sub_id = getattr(report, "expert_domain", "") or ""
-        if _sub_id in _RESEARCH_TOOL_ARCHETYPES:
+        _is_research = _sub_id in _RESEARCH_TOOL_ARCHETYPES or _sub_id.startswith("research_")
+        if _is_research:
             # B-04: use comparators already extracted by the main LLM call (competitive_alternatives)
             # rather than a separate Haiku call that may return different or empty results.
             _seed_alts = getattr(report, "competitive_alternatives", None) or []
             if _seed_alts:
-                _comparators = [
-                    {
-                        "name": c.get("name", ""),
-                        "category": c.get("category", ""),
-                        "description": c.get("key_differentiator", ""),
-                        "source": "main_report",
-                    }
-                    for c in _seed_alts if c.get("name")
-                ]
+                # Preserve ALL fields the LLM generated (overlap, where_you_win, where_you_lose,
+                # switching_cost, etc.) — previous code only kept name+category+key_differentiator,
+                # losing the analysis text that the PDF renderer needs to show differentiation.
+                _comparators = []
+                for c in _seed_alts:
+                    if not c.get("name"):
+                        continue
+                    comp = dict(c)
+                    # Ensure 'description' is populated as fallback for key_differentiator
+                    if not comp.get("description"):
+                        comp["description"] = comp.get("key_differentiator", "")
+                    comp["source"] = "main_report"
+                    _comparators.append(comp)
                 logger.info("B-04: seeding §7 from %d main-report competitive_alternatives", len(_comparators))
             else:
                 _idea = getattr(report, "idea_submitted", "") or ""
