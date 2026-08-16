@@ -1124,13 +1124,14 @@ async def classify_product_endpoint(
     idea = (body.get("idea") or "").strip()
     if not idea or len(idea) < 20:
         raise HTTPException(status_code=400, detail="Idea too short for classification")
+    tier1_hint = (body.get("tier1_category") or "").strip()
 
     try:
         import asyncio
         loop = asyncio.get_event_loop()
         # classify_product() makes a blocking Haiku call — run it off the event loop
         # so the connection doesn't drop while the thread is waiting on Anthropic.
-        cls = await loop.run_in_executor(None, classify_product, idea)
+        cls = await loop.run_in_executor(None, classify_product, idea, tier1_hint)
         conditioned_qs = get_conditioned_questions(cls)
         legacy_qs = questions_to_legacy_format(conditioned_qs)
 

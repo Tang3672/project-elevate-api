@@ -87,13 +87,21 @@ _RESEARCH_IDEA_PATTERNS = [
 ]
 
 
-def _resolve_domain_and_archetype(idea: str) -> tuple[str, str]:
+def _resolve_domain_and_archetype(idea: str, tier1_hint: str = "") -> tuple[str, str]:
     """
     Deterministic domain + archetype resolution — no LLM.
     Returns (domain_str, archetype_str).
+
+    tier1_hint: the user's explicit tier1_category selection from the frontend
+    product picker. When the user picks a research archetype this is the
+    strongest possible signal — override routing and text patterns entirely.
     """
     from app.services.soft_router import soft_route
     from app.services.product_archetype import resolve_archetype
+
+    # User's explicit picker selection is authoritative when it names a research type
+    if tier1_hint in _RESEARCH_SUB_IDS:
+        return "LIFE_SCIENCES_RESEARCH", tier1_hint
 
     routing = soft_route(idea)
     primary_sub = routing.primary or ""
@@ -181,13 +189,18 @@ def _extract_product_name_heuristic(idea: str) -> str:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-def classify_product(idea: str) -> Classification:
+def classify_product(idea: str, tier1_hint: str = "") -> Classification:
     """
     Classify a product idea into a Classification object.
     Domain + archetype are derived deterministically; LLM is used only for
     display fields (product_name, one_line, trl, ambiguities).
+
+    tier1_hint: optional tier1_category from the user's product picker — when
+    it names a research archetype it overrides the routing signal entirely so a
+    soil-moisture sensor picked under 'Lab Infrastructure SaaS' is never
+    misclassified as an oncology drug.
     """
-    domain, archetype_str = _resolve_domain_and_archetype(idea)
+    domain, archetype_str = _resolve_domain_and_archetype(idea, tier1_hint=tier1_hint)
 
     # Compute routing confidence for Classification.confidence
     try:
