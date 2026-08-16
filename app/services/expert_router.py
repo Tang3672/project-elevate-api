@@ -116,6 +116,7 @@ PLATFORMS:
 
 RESEARCH TOOLS & NON-CLINICAL INFRASTRUCTURE:
 - research_tool_non_clinical: data logging hardware/software, sync platforms, experimental recording systems, lab wearables, or hardware sold ONLY to academic PIs/labs for research — NOT clinical care. No clinical indication. Buyers are PIs, core facilities, TTOs. Examples: Hublink, Open Ephys, ActiGraph (research tier), Movisens, LabArchives. If the buyer is an academic PI and there is no clinical claim, classify here even if it involves sensors or remote data collection.
+- research_tool_agronomy: soil sensors, moisture meters, precision agriculture instruments, crop monitoring hardware, field weather stations, dielectric permittivity probes, nutrient sensors, irrigation control hardware, agronomy data loggers — any sensor or instrument used in agricultural research, precision farming, or soil science. Buyers are agricultural researchers, agronomy departments, extension services, or farmers optimizing crop yield. No clinical indication, no human patient.
 - research_infrastructure_saas: LIMS, ELN, scheduling software, data management platforms, TTOmanagement tools sold to academic institutions or research departments. No clinical indication.
 
 CRITICAL DISAMBIGUATION — digital_rpm vs research_tool_non_clinical:
@@ -230,6 +231,15 @@ _ROUTER_KEYWORD_MAP: dict[str, list[str]] = {
         "lab software","research wearable","ecophysiology","animal research sensor",
         "research tool","not clinical","non-clinical","lab management software",
     ],
+    "research_tool_agronomy": [
+        "soil moisture","soil sensor","dielectric permittivity","soil water content",
+        "precision agriculture","agronomy sensor","crop monitoring","field sensor",
+        "irrigation sensor","soil probe","volumetric water content","soil temperature",
+        "agricultural sensor","farm sensor","nutrient sensor","soil salinity",
+        "tdr probe","tdr soil","capacitance sensor soil","weather station farm",
+        "precision farming","soil science instrument","agronomy data logger",
+        "soil moisture meter","crop yield sensor","field weather","soil monitoring",
+    ],
     "research_infrastructure_saas": [
         "lims","laboratory information management","eln","electronic lab notebook",
         "research scheduling","tto software","tech transfer software","lab notebook",
@@ -283,6 +293,7 @@ _ROUTER_TO_EXPERT: dict[str, str] = {
     "other_microbiome":            "other_microbiome",
     "other_delivery":              "other_delivery",
     "research_tool_non_clinical":  "research_tool_non_clinical",
+    "research_tool_agronomy":      "research_tool_agronomy",
     "research_infrastructure_saas": "research_infrastructure_saas",
 }
 

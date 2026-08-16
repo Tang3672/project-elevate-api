@@ -462,6 +462,10 @@ _TA_TO_NSF_DIRECTORATE: dict[str, list[str]] = {
     "rare_disease":     ["BIO"],
     "ibd":              ["BIO"],
     "nash_mash":        ["BIO"],
+    # Agricultural / environmental research tools → ENG (instrumentation) + BIO
+    "agronomy":         ["ENG", "BIO"],
+    "ecology":          ["BIO"],
+    "environmental":    ["ENG", "BIO"],
     # Research tools without a specific TA: search all NSF
 }
 

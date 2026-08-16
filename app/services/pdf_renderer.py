@@ -261,12 +261,23 @@ def _render_market_sizing(ms: dict) -> str:
         src_url, _ = validate_citation_url(s.get("source_url", ""))
         src_text = _e(s.get("source", ""))
         src_display = _link(s.get("source_url", ""), src_text) if s.get("source_url") else _e(src_text)
-        # Format numeric step values with fmt_usd; fall back to raw string if not numeric
+        # Format numeric step values with fmt_usd.
+        # LLM sometimes writes pre-formatted strings like "$4688K" or "4.7M" —
+        # parse and re-normalise those so all step values use the same formatter.
         _v_raw = s.get("value", "")
         try:
-            _v_disp = fmt_usd(float(_v_raw)) if _v_raw not in ("", None) else ""
+            _v_clean = str(_v_raw).strip().replace(",", "").replace("$", "")
+            if _v_clean.upper().endswith("B"):
+                _v_num = float(_v_clean[:-1]) * 1_000_000_000
+            elif _v_clean.upper().endswith("M"):
+                _v_num = float(_v_clean[:-1]) * 1_000_000
+            elif _v_clean.upper().endswith("K"):
+                _v_num = float(_v_clean[:-1]) * 1_000
+            else:
+                _v_num = float(_v_clean) if _v_clean else None
+            _v_disp = fmt_usd(_v_num) if _v_num is not None else ""
         except (ValueError, TypeError):
-            _v_disp = str(_v_raw)
+            _v_disp = str(_v_raw) if _v_raw else ""
         rows += f"""<tr>
           <td class="col-label">{_e(label or s.get("label",""))}</td>
           <td class="num">{_e(_v_disp)}</td>
@@ -1083,34 +1094,48 @@ def render_report_html(
   <p>{exec_summary}</p>
 </div>""" if exec_summary else ""
 
-    # Limitations / evidence base (S-01) — use actual schema field names from alignment_service
+    # Limitations / evidence base (S-01) — always render in the PDF.
+    # The PDF is the artifact that reaches investors and TTOs. Stripping the honesty
+    # section because evidence_base is null produces a misleading document.
     lim = report.get("limitations") or ""
     eb = report.get("evidence_base") or {}
-    evid_html = ""
-    if eb or lim:
-        # Sources list
-        _sources = eb.get("source_types_used") or []
-        _src_items = "".join(f"<li>{_e(s)}</li>" for s in _sources if s)
-        sources_block = f"<p><strong>Data sources:</strong></p><ul>{_src_items}</ul>" if _src_items else ""
 
-        # Sample composition and decision authority
-        _sample = _e(eb.get("sample_composition", ""))
-        _authority = _e(eb.get("decision_authority_profile", ""))
+    # Sources list
+    _sources = eb.get("source_types_used") or []
+    _src_items = "".join(f"<li>{_e(s)}</li>" for s in _sources if s)
+    sources_block = f"<p><strong>Data sources:</strong></p><ul>{_src_items}</ul>" if _src_items else ""
 
-        # Limitations list
-        _lim_items_raw = eb.get("limitations") or []
-        if isinstance(_lim_items_raw, str):
-            _lim_items_raw = [_lim_items_raw] if _lim_items_raw else []
-        _lim_items = "".join(f"<li>{_e(l)}</li>" for l in _lim_items_raw if l)
-        # Fall back to top-level limitations string
-        if not _lim_items and lim:
-            _lim_items = f"<li>{_e(lim)}</li>"
-        limitations_block = f"<p><strong>Data limitations:</strong></p><ul>{_lim_items}</ul>" if _lim_items else ""
+    # Sample composition and decision authority
+    _sample = _e(eb.get("sample_composition", ""))
+    _authority = _e(eb.get("decision_authority_profile", ""))
 
-        # Evidence gap recommendation
-        _gap = _e(eb.get("evidence_gap_block", eb.get("key_gaps", "")))
+    # Limitations list — prefer structured list from evidence_base, then top-level string,
+    # then a standing minimum caveat so the section is never empty.
+    _lim_items_raw = eb.get("limitations") or []
+    if isinstance(_lim_items_raw, str):
+        _lim_items_raw = [_lim_items_raw] if _lim_items_raw else []
+    _lim_items = "".join(f"<li>{_e(l)}</li>" for l in _lim_items_raw if l)
+    if not _lim_items and lim:
+        _lim_items = f"<li>{_e(lim)}</li>"
+    if not _lim_items:
+        _lim_items = (
+            "<li>No primary user research was conducted; all findings derive from public data.</li>"
+            "<li>Market size estimates are directional hypotheses — consult domain specialists "
+            "before material business or investment decisions.</li>"
+        )
+    limitations_block = f"<p><strong>Data limitations:</strong></p><ul>{_lim_items}</ul>"
 
-        evid_html = f"""
+    # Evidence gap / primary-research recommendation
+    _gap = _e(eb.get("evidence_gap_block", eb.get("key_gaps", "")))
+    if not _gap:
+        _buyer = _e((eb.get("decision_authority_profile") or "target buyers").split(".")[0])
+        _gap = (
+            f"Recommendation: No primary market research was conducted. "
+            f"Conduct 8–12 structured interviews with {_buyer} to validate "
+            f"the pricing, switching cost, and lab count estimates before material investment decisions."
+        )
+
+    evid_html = f"""
 <div class="section" id="s-evidence">
   <h2><span class="sec-num"></span> Evidence Base &amp; Limitations</h2>
   {sources_block}
@@ -1212,57 +1237,28 @@ def render_report_html(
     # Recommended next steps
     steps_html = _render_recommended_steps(report.get("recommended_next_steps", []))
 
-    # Citations (F-04, F-05) — aggregate same sources as web renderer (G-01 parity)
-    _all_cits: list = list(report.get("sources") or [])
-    _seen_cit_urls: set = {c.get("url") for c in _all_cits if c.get("url")}
+    # Citations — use the pre-built comprehensive list from source_aggregator.
+    # report["sources"] is populated at generation time with every retrieved source
+    # (disease data points, market sizing steps, demand signals, patents, SBIR awards,
+    # literature, buyer segments, strategies, regulatory designations, LLM sources).
+    # For older saved reports that pre-date source_aggregator, fall back to the
+    # collect_all_citations helper so the PDF still gets a full bibliography.
+    _pre_built = report.get("sources") or []
+    if len(_pre_built) >= 5:
+        # Modern report: sources already comprehensive, use them directly
+        _all_cits = [dict(c) for c in _pre_built]
+    else:
+        # Legacy report: build on the fly from structured fields
+        try:
+            from app.services.source_aggregator import collect_all_citations
+            _all_cits = collect_all_citations(report)
+        except Exception as _sa_e:
+            _all_cits = _pre_built
 
-    def _add_cit_by_url(name: str, url: str) -> None:
-        """Add a citation discovered by URL only (strategies, segments). Skips if no URL."""
-        if not url or url in _seen_cit_urls:
-            return
-        _seen_cit_urls.add(url)
-        _all_cits.append({"name": name, "url": url})
-
-    # Literature citations always appear even when they lack a URL (F-05 no-URL marker).
-    # Deduplicate by URL only when a URL is actually present.
-    for _p in report.get("literature_citations") or []:
-        _purl = (
-            _p.get("url")
-            or _p.get("source_url")
-            or (f"https://pubmed.ncbi.nlm.nih.gov/{_p['pmid']}/" if _p.get("pmid") else "")
-        )
-        if _purl and _purl in _seen_cit_urls:
-            continue
-        if _purl:
-            _seen_cit_urls.add(_purl)
-        # Preserve the original dict (keeps name, number, year etc.); patch url if needed
-        _entry = dict(_p)
-        if _purl and not _entry.get("url"):
-            _entry["url"] = _purl
-        elif not _entry.get("name"):
-            _entry["name"] = (
-                f"{_p.get('authors', '')} ({_p.get('year', '')}). {_p.get('title', '')}.".strip()
-            )
-        _all_cits.append(_entry)
-
-    for _s in report.get("strategic_playbook") or []:
-        _add_cit_by_url(
-            f"{_s.get('example', '')} — {_s.get('strategy', '')}",
-            _s.get("source_url", ""),
-        )
-
-    for _b in (report.get("market_access") or {}).get("buyer_segments") or []:
-        _add_cit_by_url(
-            f"{_b.get('source', '')} — {_b.get('segment_name', _b.get('segment', ''))}",
-            _b.get("source_url", ""),
-        )
-
-    _reimb_url = (report.get("market_access") or {}).get("reimbursement_source_url")
-    if _reimb_url:
-        _add_cit_by_url("Reimbursement pathway source", _reimb_url)
-
-    for _ci, _cc in enumerate(_all_cits):
-        _cc["number"] = _ci + 1
+    # Re-number sequentially (generation may have numbered from 1 already, but
+    # re-number here in case the list was sliced or modified above)
+    for _ci, _cc in enumerate(_all_cits, 1):
+        _cc["number"] = _ci
 
     cit_html = _render_citations(_all_cits)
 

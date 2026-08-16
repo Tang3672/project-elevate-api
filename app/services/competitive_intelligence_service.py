@@ -31,6 +31,7 @@ _MIN_COMPARATORS     = 3   # fewer than this and we emit the honest empty-state
 
 _RESEARCH_TOOL_ARCHETYPES: frozenset[str] = frozenset({
     "research_tool_non_clinical",
+    "research_tool_agronomy",
     "research_infrastructure_saas",
 })
 

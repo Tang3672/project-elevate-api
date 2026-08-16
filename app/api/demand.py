@@ -27,6 +27,16 @@ admin_router = APIRouter(dependencies=[Depends(require_admin_key)])
 demand_router = APIRouter()
 
 
+# ── Public: signal count for header badge (no auth needed) ────────────────────
+
+@demand_router.get("/signal-count")
+async def signal_count():
+    """Return total indexed signal count for the header badge. No auth required."""
+    counts = await get_signal_counts_by_source()
+    total = sum(r["count"] for r in counts)
+    return {"total_signals": total}
+
+
 # ── Admin: ingestion monitoring ───────────────────────────────────────────────
 
 @admin_router.get("/ingestion/status")

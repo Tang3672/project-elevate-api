@@ -108,8 +108,10 @@ def _market_score(som_usd: Optional[float]) -> float:
 
 
 def _whitespace_from_signal(signal: Optional[str]) -> float:
-    return {"open": 0.85, "active": 0.55, "crowded": 0.25}.get(
-        (signal or "").strip().lower(), NEUTRAL)
+    # activity_signal is a full sentence ("OPEN — limited patent activity…");
+    # extract just the first word so the lookup works regardless of the suffix.
+    first = (signal or "").strip().lower().split()[0].rstrip("—-") if signal else ""
+    return {"open": 0.85, "active": 0.55, "crowded": 0.25}.get(first, NEUTRAL)
 
 
 # ── Core scorer (pure) ─────────────────────────────────────────────────────────
@@ -228,8 +230,21 @@ _SRC = {
     "patents":  "Recent US patent filings (Google Patents)",
     "trl":      "Technology Readiness Level assessment (NIH/BARDA framework)",
     "sbir":     "Recent NIH SBIR/STTR awards in this space (NIH Reporter)",
-    "modality": "Modality base rates (AUTM licensing surveys + FDA approval data)",
     "payer":    "Payer/reimbursement assessment (expert panel + CMS coverage data)",
+}
+
+# Per-modality source for prior-based rationales — FDA approval data has no bearing
+# on research tools, diagnostics, or software (use AUTM deal comps only).
+_MODALITY_PRIOR_SRC = {
+    "small_molecule": "Modality base rates (AUTM licensing surveys + FDA approval data)",
+    "biologic":       "Modality base rates (AUTM licensing surveys + FDA approval data)",
+    "gene_cell":      "Modality base rates (AUTM licensing surveys + FDA approval data)",
+    "vaccine":        "Modality base rates (AUTM licensing surveys + FDA approval data)",
+    "device":         "Modality base rates (AUTM licensing surveys + FDA 510(k)/PMA clearance data)",
+    "diagnostic":     "Modality base rates (AUTM licensing surveys + FDA 510(k) clearance data)",
+    "digital":        "Modality base rates (AUTM licensing surveys + SaMD market comps)",
+    "research_tool":  "Modality base rates (AUTM licensing surveys + NIH SBIR award comps)",
+    "other":          "Modality base rates (AUTM licensing surveys)",
 }
 
 
@@ -270,10 +285,13 @@ def build_rationales(signals: dict, scores: dict, market: float, whitespace: flo
     payer = signals.get("payer_barrier")
 
     _market_src = _market_evidence_source(_mkey)
+    _modality_src = _MODALITY_PRIOR_SRC.get(_mkey, _MODALITY_PRIOR_SRC["other"])
 
     def d(fact, src):
         if src == "market":
             return {"fact": fact, "source": _market_src}
+        if src == "modality":
+            return {"fact": fact, "source": _modality_src}
         return {"fact": fact, "source": _SRC.get(src, src)}
 
     def dim(key, drivers):

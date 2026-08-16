@@ -200,16 +200,25 @@ _BAD_EVIDENCE_SOURCE_RE = _eb_re.compile(
     _eb_re.IGNORECASE,
 )
 
+# SBIR program-level facts that must never appear in §1 bibliography or data_points.
+# These describe the SBIR *program* (set-asides, IC counts, award caps, success rates)
+# and say nothing about a product's buyer population or unmet need.
+_BAD_SBIR_PROGRAM_RE = _eb_re.compile(
+    r'sbir[/\s]*sttr\s+annual\s+set.?aside'          # NIH SBIR/STTR annual set-aside: $1.4B+
+    r'|annual\s+sbir[/\s]*sttr?\s+set.?aside'
+    r'|institutes?\s+and\s+centers?\s+fund'            # Number of NIH Institutes and Centers funding SBIR
+    r'|sbir\s+phase\s+[i1]\s+awards?\s+in\b'          # NIAID SBIR Phase I awards in data science
+    r'|sbir[/\s]*sttr\s+(success\s+rate|funding\s+rate|acceptance\s+rate)'  # SBIR success rate
+    r'|sbir\s+phase\s+ii?\s+(maximum|award\s+ceiling|budget\s+cap|award\s+cap)'  # phase award caps
+    r'|nih\s+seed\s+(office|statistics|report|program\s+stat)'  # NIH SEED program stats page
+    r'|small\s+business\s+education\s+and\s+entrepreneurial\s+development',  # NIH SEED full name
+    _eb_re.IGNORECASE,
+)
+
 # §1 data_point filter — SBIR program statistics say nothing about a product's
 # buyer population or unmet need; the LLM tends to add them when SBIR funding
 # context is injected. Drop any metric that matches these program-level patterns.
-_BAD_DI_DATA_POINT_RE = _eb_re.compile(
-    r'sbir[/\s]*sttr\s+annual\s+set.?aside'      # NIH SBIR/STTR annual set-aside: $1.4B+
-    r'|annual\s+sbir[/\s]*sttr?\s+set.?aside'
-    r'|institutes?\s+and\s+centers?\s+fund'       # Number of NIH Institutes and Centers funding SBIR
-    r'|sbir\s+phase\s+[i1]\s+awards?\s+in\b',    # NIAID SBIR Phase I awards in data science
-    _eb_re.IGNORECASE,
-)
+_BAD_DI_DATA_POINT_RE = _BAD_SBIR_PROGRAM_RE
 
 
 def _filter_evidence_base_sources(evidence_base: dict) -> dict:
@@ -250,6 +259,40 @@ def _filter_di_data_points(data_points: list) -> list:
             dropped,
         )
     return filtered
+
+
+# Generic-search URL patterns: a search results page is not a citable source.
+_GENERIC_SEARCH_URL_RE = _eb_re.compile(
+    r'reporter\.nih\.gov/search'             # NIH Reporter search form (not a specific grant)
+    r'|pubmed\.ncbi\.nlm\.nih\.gov/search'   # PubMed search results (use /PMID/ instead)
+    r'|clinicaltrials\.gov/search'           # ClinTrials search (not a specific trial)
+    r'|www\.ncbi\.nlm\.nih\.gov/pmc/search', # PMC search (not a specific article)
+    _eb_re.IGNORECASE,
+)
+
+
+def _clean_di_source_urls(data_points: list) -> list:
+    """Null out source_url values that are generic search pages, not specific records.
+
+    Reporter cites like 'reporter.nih.gov/search?term=WashU' are not citable
+    data records — they just run a search query. Strip the URL so the entry
+    stays but doesn't link to a misleading source.
+    """
+    if not data_points:
+        return data_points
+    cleaned = []
+    nulled = 0
+    for dp in data_points:
+        url = dp.get("source_url", "") or ""
+        if url and _GENERIC_SEARCH_URL_RE.search(url):
+            dp = {**dp, "source_url": ""}
+            nulled += 1
+        cleaned.append(dp)
+    if nulled:
+        logger.info(
+            "disease_intelligence: nulled %d generic search URL(s) from source_url", nulled
+        )
+    return cleaned
 
 
 async def _async_empty_dict() -> dict:
@@ -497,10 +540,19 @@ async def generate_pi_report(
         from app.services.source_formatter import build_sources_from_report
         report_dict = report.model_dump(mode="json")
         report_dict = build_sources_from_report(report_dict)
-        report.sources = report_dict.get("sources", [])
+        _raw_sources = report_dict.get("sources", [])
+        # Filter SBIR program-level facts from the LLM-generated bibliography (§1 path)
+        _before = len(_raw_sources)
+        _raw_sources = [
+            s for s in _raw_sources
+            if not _BAD_SBIR_PROGRAM_RE.search(str(s.get("name", "")))
+        ]
+        if len(_raw_sources) < _before:
+            logger.info("sources: filtered %d SBIR program stat(s) from bibliography",
+                        _before - len(_raw_sources))
+        report.sources = _raw_sources
 
         # (aggregated sources injected later after aggregator runs)
-
 
     except Exception as e:
         logger.warning(f"Source building failed: {e}")
@@ -687,10 +739,18 @@ async def generate_pi_report(
 
     # §8: fix known LLM duplicate-word artifacts before verification sees the text
     try:
-        _rj = json.dumps(report.model_dump(mode="json"))
-        # Catch all variants: "NIH-funded funded", "NIH funded funded",
-        # hyphen/space before 'funded', any whitespace between the two words
-        _rj2 = re.sub(r'NIH[ -]funded\s+funded', 'NIH-funded', _rj, flags=re.IGNORECASE)
+        # ensure_ascii=False keeps Unicode dashes (U+2013 en-dash, U+2014 em-dash) as
+        # real characters so the regex can match them. With the default ensure_ascii=True
+        # they become \\u2013 which the raw-string character class [ -] never matches.
+        _rj = json.dumps(report.model_dump(mode="json"), ensure_ascii=False)
+        # Catch "NIH-funded funded", "NIH–funded funded" (en-dash), "NIH funded funded",
+        # or any Unicode dash between NIH and funded.
+        _rj2 = re.sub(
+            'NIH[\u2010\u2011\u2012\u2013\u2014 -]funded\\s+funded',
+            'NIH-funded', _rj, flags=re.IGNORECASE,
+        )
+        # Broad catch-all: any adjacent "funded funded" regardless of context
+        _rj2 = re.sub(r'\bfunded\s+funded\b', 'funded', _rj2, flags=re.IGNORECASE)
         if _rj2 != _rj:
             report = report.model_validate(json.loads(_rj2))
             logger.info("Output sanitize: removed NIH-funded duplicate")
@@ -731,20 +791,25 @@ async def attach_competitive_landscape(report) -> None:
         )
         from app.services.competitor_schema import normalize_landscape
         _sub_id = getattr(report, "expert_domain", "") or ""
-        if _sub_id in _RESEARCH_TOOL_ARCHETYPES:
+        _is_research = _sub_id in _RESEARCH_TOOL_ARCHETYPES or _sub_id.startswith("research_")
+        if _is_research:
             # B-04: use comparators already extracted by the main LLM call (competitive_alternatives)
             # rather than a separate Haiku call that may return different or empty results.
             _seed_alts = getattr(report, "competitive_alternatives", None) or []
             if _seed_alts:
-                _comparators = [
-                    {
-                        "name": c.get("name", ""),
-                        "category": c.get("category", ""),
-                        "description": c.get("key_differentiator", ""),
-                        "source": "main_report",
-                    }
-                    for c in _seed_alts if c.get("name")
-                ]
+                # Preserve ALL fields the LLM generated (overlap, where_you_win, where_you_lose,
+                # switching_cost, etc.) — previous code only kept name+category+key_differentiator,
+                # losing the analysis text that the PDF renderer needs to show differentiation.
+                _comparators = []
+                for c in _seed_alts:
+                    if not c.get("name"):
+                        continue
+                    comp = dict(c)
+                    # Ensure 'description' is populated as fallback for key_differentiator
+                    if not comp.get("description"):
+                        comp["description"] = comp.get("key_differentiator", "")
+                    comp["source"] = "main_report"
+                    _comparators.append(comp)
                 logger.info("B-04: seeding §7 from %d main-report competitive_alternatives", len(_comparators))
             else:
                 _idea = getattr(report, "idea_submitted", "") or ""
@@ -1197,9 +1262,15 @@ async def _generate_expert_report(idea, product_type, expert, demand_results, ho
     _is_negation = any(p in disease_name.lower() for p in _NEGATION_PHRASES)
     if _resolved_domain == "LIFE_SCIENCES_RESEARCH" or _is_negation:
         _pn = (product_name or idea.split("—")[0].split("-")[0].strip()[:50] or "research tool").strip()
-        disease_name = _pn
+        # Display label only (§1 condition field, report headings)
         disease_info["disease_name"] = _pn
-        logger.info("B-05: research domain — replaced disease_name with product scope term: %r", _pn)
+        # Live search term: extract domain vocabulary from idea text so PubMed/OpenAlex
+        # queries use "wireless data acquisition behavioral neuroscience" instead of
+        # the product brand ("Hublink") which has zero indexed literature.
+        from app.services.pubmed_service import _idea_to_search_terms as _dts
+        _search_vocab = _dts(idea, max_words=6)
+        disease_name = _search_vocab if _search_vocab else _pn
+        logger.info("B-05: research domain — label=%r search_terms=%r", _pn, disease_name)
 
     # Layer 2: Knowledge Retriever → 5-6 parallel live searches
     # Uses sub_expert_id from router (v2) or domain_id (v1 fallback)
@@ -1567,6 +1638,10 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
                     "diagnostic_molecular": "diagnostic",
                     "digital_cds": "device", "digital_therapeutic": "device",
                     "vaccine_prophylactic": "vaccine",
+                    # Research-tool sub-experts → domain TA for buyer model + NIH keyword
+                    "research_tool_agronomy": "agronomy",
+                    "research_tool_non_clinical": "neuroscience",
+                    "research_infrastructure_saas": "neuroscience",
                 }
                 expert_domain = getattr(expert, "domain_id", getattr(expert, "sub_expert_id", "other"))
                 ta_for_deriv = _EXPERT_TA_MAP.get(expert_domain, "other")
@@ -2434,6 +2509,23 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
     # from. A PI/TTO's submitted idea now stays isolated to their own session (and their
     # own opt-in "Save to My Reports").
 
+    # ── Comprehensive bibliography — every retrieved source in one deduplicated list ──
+    # Called last so all structured sections (market sizing, disease data, demand signals,
+    # patents, SBIR awards) are in scope.  Both the web frontend and the PDF export read
+    # report.sources, so building it here gives them identical bibliographies.
+    try:
+        from app.services.source_aggregator import collect_all_citations
+        _pl_for_bib = patent_landscape if not isinstance(patent_landscape, Exception) else None
+        _fi_for_bib = funding_intel if not isinstance(funding_intel, Exception) else None
+        report.sources = collect_all_citations(
+            report.model_dump(mode="json"),
+            patent_landscape=_pl_for_bib,
+            funding_intel=_fi_for_bib,
+        )
+        logger.info("Bibliography: %d sources collected", len(report.sources))
+    except Exception as _bib_e:
+        logger.warning("Bibliography aggregation failed (non-fatal): %s", _bib_e)
+
     return report
 
 
@@ -2647,7 +2739,7 @@ def _parse_expert_response(data, idea, product_type, expert, demand_results, hos
     di_data = data.get("disease_intelligence", {})
     disease_intel = DiseaseIntelligence(
         condition          = di_data.get("condition", ""),
-        data_points        = [DiseaseDataPoint(**dp) for dp in _filter_di_data_points(di_data.get("data_points", []))],
+        data_points        = [DiseaseDataPoint(**dp) for dp in _clean_di_source_urls(_filter_di_data_points(di_data.get("data_points", [])))],
         resistance_profile = di_data.get("resistance_profile"),
         pipeline_status    = di_data.get("pipeline_status"),
         unmet_need_summary = di_data.get("unmet_need_summary", ""),
@@ -2802,7 +2894,7 @@ async def _generate_antibiotic_report(
     disease_intel = DiseaseIntelligence(
         condition=di_data.get("condition", ""),
         data_points=[
-            DiseaseDataPoint(**dp) for dp in _filter_di_data_points(di_data.get("data_points", []))
+            DiseaseDataPoint(**dp) for dp in _clean_di_source_urls(_filter_di_data_points(di_data.get("data_points", [])))
         ],
         resistance_profile=di_data.get("resistance_profile"),
         pipeline_status=di_data.get("pipeline_status"),
@@ -2969,7 +3061,7 @@ async def _generate_generic_pi_report(
     di_data = data.get("disease_intelligence", {})
     disease_intel = DiseaseIntelligence(
         condition=di_data.get("condition", ""),
-        data_points=[DiseaseDataPoint(**dp) for dp in _filter_di_data_points(di_data.get("data_points", []))],
+        data_points=[DiseaseDataPoint(**dp) for dp in _clean_di_source_urls(_filter_di_data_points(di_data.get("data_points", [])))],
         unmet_need_summary=di_data.get("unmet_need_summary", ""),
     ) if di_data else None
 
