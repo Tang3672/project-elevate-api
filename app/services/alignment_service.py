@@ -200,16 +200,25 @@ _BAD_EVIDENCE_SOURCE_RE = _eb_re.compile(
     _eb_re.IGNORECASE,
 )
 
+# SBIR program-level facts that must never appear in §1 bibliography or data_points.
+# These describe the SBIR *program* (set-asides, IC counts, award caps, success rates)
+# and say nothing about a product's buyer population or unmet need.
+_BAD_SBIR_PROGRAM_RE = _eb_re.compile(
+    r'sbir[/\s]*sttr\s+annual\s+set.?aside'          # NIH SBIR/STTR annual set-aside: $1.4B+
+    r'|annual\s+sbir[/\s]*sttr?\s+set.?aside'
+    r'|institutes?\s+and\s+centers?\s+fund'            # Number of NIH Institutes and Centers funding SBIR
+    r'|sbir\s+phase\s+[i1]\s+awards?\s+in\b'          # NIAID SBIR Phase I awards in data science
+    r'|sbir[/\s]*sttr\s+(success\s+rate|funding\s+rate|acceptance\s+rate)'  # SBIR success rate
+    r'|sbir\s+phase\s+ii?\s+(maximum|award\s+ceiling|budget\s+cap|award\s+cap)'  # phase award caps
+    r'|nih\s+seed\s+(office|statistics|report|program\s+stat)'  # NIH SEED program stats page
+    r'|small\s+business\s+education\s+and\s+entrepreneurial\s+development',  # NIH SEED full name
+    _eb_re.IGNORECASE,
+)
+
 # §1 data_point filter — SBIR program statistics say nothing about a product's
 # buyer population or unmet need; the LLM tends to add them when SBIR funding
 # context is injected. Drop any metric that matches these program-level patterns.
-_BAD_DI_DATA_POINT_RE = _eb_re.compile(
-    r'sbir[/\s]*sttr\s+annual\s+set.?aside'      # NIH SBIR/STTR annual set-aside: $1.4B+
-    r'|annual\s+sbir[/\s]*sttr?\s+set.?aside'
-    r'|institutes?\s+and\s+centers?\s+fund'       # Number of NIH Institutes and Centers funding SBIR
-    r'|sbir\s+phase\s+[i1]\s+awards?\s+in\b',    # NIAID SBIR Phase I awards in data science
-    _eb_re.IGNORECASE,
-)
+_BAD_DI_DATA_POINT_RE = _BAD_SBIR_PROGRAM_RE
 
 
 def _filter_evidence_base_sources(evidence_base: dict) -> dict:
@@ -531,10 +540,19 @@ async def generate_pi_report(
         from app.services.source_formatter import build_sources_from_report
         report_dict = report.model_dump(mode="json")
         report_dict = build_sources_from_report(report_dict)
-        report.sources = report_dict.get("sources", [])
+        _raw_sources = report_dict.get("sources", [])
+        # Filter SBIR program-level facts from the LLM-generated bibliography (§1 path)
+        _before = len(_raw_sources)
+        _raw_sources = [
+            s for s in _raw_sources
+            if not _BAD_SBIR_PROGRAM_RE.search(str(s.get("name", "")))
+        ]
+        if len(_raw_sources) < _before:
+            logger.info("sources: filtered %d SBIR program stat(s) from bibliography",
+                        _before - len(_raw_sources))
+        report.sources = _raw_sources
 
         # (aggregated sources injected later after aggregator runs)
-
 
     except Exception as e:
         logger.warning(f"Source building failed: {e}")
@@ -1620,6 +1638,10 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
                     "diagnostic_molecular": "diagnostic",
                     "digital_cds": "device", "digital_therapeutic": "device",
                     "vaccine_prophylactic": "vaccine",
+                    # Research-tool sub-experts → domain TA for buyer model + NIH keyword
+                    "research_tool_agronomy": "agronomy",
+                    "research_tool_non_clinical": "neuroscience",
+                    "research_infrastructure_saas": "neuroscience",
                 }
                 expert_domain = getattr(expert, "domain_id", getattr(expert, "sub_expert_id", "other"))
                 ta_for_deriv = _EXPERT_TA_MAP.get(expert_domain, "other")
