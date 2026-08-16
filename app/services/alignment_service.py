@@ -252,6 +252,40 @@ def _filter_di_data_points(data_points: list) -> list:
     return filtered
 
 
+# Generic-search URL patterns: a search results page is not a citable source.
+_GENERIC_SEARCH_URL_RE = _eb_re.compile(
+    r'reporter\.nih\.gov/search'             # NIH Reporter search form (not a specific grant)
+    r'|pubmed\.ncbi\.nlm\.nih\.gov/search'   # PubMed search results (use /PMID/ instead)
+    r'|clinicaltrials\.gov/search'           # ClinTrials search (not a specific trial)
+    r'|www\.ncbi\.nlm\.nih\.gov/pmc/search', # PMC search (not a specific article)
+    _eb_re.IGNORECASE,
+)
+
+
+def _clean_di_source_urls(data_points: list) -> list:
+    """Null out source_url values that are generic search pages, not specific records.
+
+    Reporter cites like 'reporter.nih.gov/search?term=WashU' are not citable
+    data records — they just run a search query. Strip the URL so the entry
+    stays but doesn't link to a misleading source.
+    """
+    if not data_points:
+        return data_points
+    cleaned = []
+    nulled = 0
+    for dp in data_points:
+        url = dp.get("source_url", "") or ""
+        if url and _GENERIC_SEARCH_URL_RE.search(url):
+            dp = {**dp, "source_url": ""}
+            nulled += 1
+        cleaned.append(dp)
+    if nulled:
+        logger.info(
+            "disease_intelligence: nulled %d generic search URL(s) from source_url", nulled
+        )
+    return cleaned
+
+
 async def _async_empty_dict() -> dict:
     """Placeholder coroutine for asyncio.gather slots that should be skipped."""
     return {}
@@ -2664,7 +2698,7 @@ def _parse_expert_response(data, idea, product_type, expert, demand_results, hos
     di_data = data.get("disease_intelligence", {})
     disease_intel = DiseaseIntelligence(
         condition          = di_data.get("condition", ""),
-        data_points        = [DiseaseDataPoint(**dp) for dp in _filter_di_data_points(di_data.get("data_points", []))],
+        data_points        = [DiseaseDataPoint(**dp) for dp in _clean_di_source_urls(_filter_di_data_points(di_data.get("data_points", [])))],
         resistance_profile = di_data.get("resistance_profile"),
         pipeline_status    = di_data.get("pipeline_status"),
         unmet_need_summary = di_data.get("unmet_need_summary", ""),
@@ -2819,7 +2853,7 @@ async def _generate_antibiotic_report(
     disease_intel = DiseaseIntelligence(
         condition=di_data.get("condition", ""),
         data_points=[
-            DiseaseDataPoint(**dp) for dp in _filter_di_data_points(di_data.get("data_points", []))
+            DiseaseDataPoint(**dp) for dp in _clean_di_source_urls(_filter_di_data_points(di_data.get("data_points", [])))
         ],
         resistance_profile=di_data.get("resistance_profile"),
         pipeline_status=di_data.get("pipeline_status"),
@@ -2986,7 +3020,7 @@ async def _generate_generic_pi_report(
     di_data = data.get("disease_intelligence", {})
     disease_intel = DiseaseIntelligence(
         condition=di_data.get("condition", ""),
-        data_points=[DiseaseDataPoint(**dp) for dp in _filter_di_data_points(di_data.get("data_points", []))],
+        data_points=[DiseaseDataPoint(**dp) for dp in _clean_di_source_urls(_filter_di_data_points(di_data.get("data_points", [])))],
         unmet_need_summary=di_data.get("unmet_need_summary", ""),
     ) if di_data else None
 
