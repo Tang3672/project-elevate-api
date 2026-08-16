@@ -1770,12 +1770,32 @@ async def override_assumption(
             detail=f"Assumption key '{assumption_key}' not found in ledger",
         )
 
+    # Find original value before updating
+    _orig_assumption = next(
+        (a for a in ledger.assumptions if a.key == assumption_key), None
+    )
+    _orig_value = _orig_assumption.value if _orig_assumption else None
+
     report_data["assumption_ledger"] = updated_ledger.model_dump()
     await update_report(job_id, report_data)
     logger.info(
         "Part E: assumption '%s' overridden to %.4g for job %s by user %s",
         assumption_key, body.value, job_id, getattr(current_user, "id", "?"),
     )
+
+    # Record the interpret/refinement event (best-effort)
+    try:
+        from app.db.prompt_sessions_repository import record_interpret_session
+        await record_interpret_session(
+            report_id=job_id,
+            user_id=getattr(current_user, "id", None),
+            assumption_key=assumption_key,
+            original_value=_orig_value,
+            modified_value=body.value,
+        )
+    except Exception as _ris_e:
+        logger.debug("record_interpret_session failed (non-fatal): %s", _ris_e)
+
     return {
         "key": assumption_key,
         "new_value": body.value,
@@ -3014,3 +3034,30 @@ async def regenerate_section(
             html = html.replace(placeholder, span)
 
     return {"html": html}
+
+
+# ── Prompt & Interpret session history ───────────────────────────────────────
+
+@router.get("/me/prompt-history")
+async def get_prompt_history(
+    limit: int = 50,
+    current_user=Depends(get_current_user),
+):
+    """Return the authenticated user's recent prompt submissions (newest first)."""
+    from app.db.prompt_sessions_repository import get_user_prompt_history
+    user_id = getattr(current_user, "id", None)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    rows = await get_user_prompt_history(user_id, limit=min(limit, 200))
+    return {"submissions": rows, "count": len(rows)}
+
+
+@router.get("/reports/{report_id}/interpret-history")
+async def get_interpret_history(
+    report_id: str,
+    current_user=Depends(get_current_user),
+):
+    """Return all assumption-refinement events for a given report."""
+    from app.db.prompt_sessions_repository import get_report_interpret_history
+    rows = await get_report_interpret_history(report_id)
+    return {"report_id": report_id, "interpretations": rows, "count": len(rows)}
