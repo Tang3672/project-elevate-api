@@ -2497,6 +2497,7 @@ IMPORTANT: Use DIFFERENT guidance URLs for different phases. Phase 1 = IND/clini
 
 If the exact guidance is not listed above, use the general FDA guidance search: https://www.fda.gov/regulatory-information/search-fda-guidance-documents — do NOT fabricate a URL.
 7. For market sizing steps, the source field must name the specific dataset or publication that contains the patient count or pricing data used.
+8. evidence_base.source_types_used: list ONLY the database or corpus types that appear as [source_name] labels in the DEMAND SIGNALS block above, plus any primary research the PI has described. NEVER cite: newsletters (The Transmitter, NIH News in Health), market-aggregator reports (Mordor Intelligence, Grand View Research, MarketsandMarkets, Allied Market Research, IMARC Group, Fortune Business Insights, Precedence Research, Global Market Insights), or cumulative historical grant statistics (">5,700 grants since 1982", "X grants since 19XX"). Those are not sources you retrieved from in this session. If you did not receive a demand signal from a given source, do not list it.
 3. CRITICAL: The MULTI-SOURCE INTELLIGENCE PACKAGE in your context contains papers from CrossRef, Semantic Scholar, NIH Reporter, and news sources. You MUST cite these in your report and include them in the sources array. Do not only cite FDA and CDC - use the full range of sources provided.
 4. For buyer segments: source_url is MANDATORY. Real examples: https://www.aha.org/statistics/fast-facts-us-hospitals, https://www.cancer.gov/research/infrastructure/cancer-centers/find, https://data.cms.gov/, https://www.curesma.org/about-sma/. NEVER leave source_url empty or as empty strings the buyer data.
 
@@ -2542,7 +2543,7 @@ If the exact guidance is not listed above, use the general FDA guidance search: 
 
   "evidence_base": {
     "primary_research_present": false,
-    "source_types_used": ["<e.g. NIH RePORTER grants, Semantic Scholar, ClinicalTrials.gov, primary user interviews>"],
+    "source_types_used": ["<ONLY list source types whose [source_name] label appears in the DEMAND SIGNALS block above — e.g. 'NIH RePORTER (active R-series grants)', 'Semantic Scholar (peer-reviewed papers)', 'ClinicalTrials.gov (active trials)', 'FDA FAERS (adverse event reports)'. Add 'Primary user interviews' only if the PI described them. FORBIDDEN: newsletters (The Transmitter), market-aggregator reports (Mordor Intelligence, Grand View Research, MarketsandMarkets), cumulative historical counts ('>5,700 grants since 1982')>"],
     "sample_composition": "<e.g. '10 academic PIs, 8 at R1 institutions, 2 at teaching hospitals — all with active NIH grants' or 'not applicable — no primary research'>",
     "decision_authority_profile": "<who holds purchase authority — e.g. 'PI (90%), department chair (10%)' or 'unknown — not assessed'>",
     "limitations": ["<specific limitation of this analysis, e.g. 'No primary user research — findings are hypotheses'>"],
