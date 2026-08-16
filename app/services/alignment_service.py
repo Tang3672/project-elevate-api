@@ -721,10 +721,18 @@ async def generate_pi_report(
 
     # §8: fix known LLM duplicate-word artifacts before verification sees the text
     try:
-        _rj = json.dumps(report.model_dump(mode="json"))
-        # Catch all variants: "NIH-funded funded", "NIH funded funded",
-        # hyphen/space before 'funded', any whitespace between the two words
-        _rj2 = re.sub(r'NIH[ -]funded\s+funded', 'NIH-funded', _rj, flags=re.IGNORECASE)
+        # ensure_ascii=False keeps Unicode dashes (U+2013 en-dash, U+2014 em-dash) as
+        # real characters so the regex can match them. With the default ensure_ascii=True
+        # they become \\u2013 which the raw-string character class [ -] never matches.
+        _rj = json.dumps(report.model_dump(mode="json"), ensure_ascii=False)
+        # Catch "NIH-funded funded", "NIH–funded funded" (en-dash), "NIH funded funded",
+        # or any Unicode dash between NIH and funded.
+        _rj2 = re.sub(
+            'NIH[‐‑‒–— -]funded\\s+funded',
+            'NIH-funded', _rj, flags=re.IGNORECASE,
+        )
+        # Broad catch-all: any adjacent "funded funded" regardless of context
+        _rj2 = re.sub(r'\bfunded\s+funded\b', 'funded', _rj2, flags=re.IGNORECASE)
         if _rj2 != _rj:
             report = report.model_validate(json.loads(_rj2))
             logger.info("Output sanitize: removed NIH-funded duplicate")

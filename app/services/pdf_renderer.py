@@ -1125,8 +1125,15 @@ def render_report_html(
         )
     limitations_block = f"<p><strong>Data limitations:</strong></p><ul>{_lim_items}</ul>"
 
-    # Evidence gap recommendation
+    # Evidence gap / primary-research recommendation
     _gap = _e(eb.get("evidence_gap_block", eb.get("key_gaps", "")))
+    if not _gap:
+        _buyer = _e((eb.get("decision_authority_profile") or "target buyers").split(".")[0])
+        _gap = (
+            f"Recommendation: No primary market research was conducted. "
+            f"Conduct 8–12 structured interviews with {_buyer} to validate "
+            f"the pricing, switching cost, and lab count estimates before material investment decisions."
+        )
 
     evid_html = f"""
 <div class="section" id="s-evidence">
