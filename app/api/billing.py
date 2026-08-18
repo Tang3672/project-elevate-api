@@ -38,7 +38,7 @@ async def create_checkout(
     current_user: dict = Depends(get_current_user),
 ):
     """Create a Stripe Checkout session and return the URL."""
-    origin = request.headers.get("origin", "https://preeminent-zuccutto-bd1f9d.netlify.app")
+    origin = request.headers.get("origin", "https://medlevate.com")
     success_url = f"{origin}?stripe=success"
     cancel_url  = f"{origin}?stripe=cancel"
 

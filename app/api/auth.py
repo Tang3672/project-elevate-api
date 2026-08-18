@@ -453,7 +453,7 @@ Thanks for requesting early access to Medlevate!
 We'll set up your {plan.title()} account and reach out within 24 hours.
 
 In the meantime, you can create a free account and start exploring the platform:
-https://medlevate.netlify.app/app.html?register=1
+https://medlevate.com/app.html?register=1
 
 — The Medlevate Team
 ijw91021@gmail.com
