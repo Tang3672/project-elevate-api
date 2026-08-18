@@ -1143,7 +1143,7 @@ def render_report_html(
   {f'<p><strong>Purchase authority:</strong> {_authority}</p>' if _authority else ""}
   {limitations_block}
   {f'<p class="gap-note">{_gap}</p>' if _gap else ""}
-</div>"""
+</div>""" if report else ""
 
     # Market sizing (F-08 tables)
     ms_html = _render_market_sizing(report.get("market_sizing") or {})
