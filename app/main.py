@@ -29,11 +29,11 @@ _extra_origins = [o.strip() for o in _os.environ.get("ALLOWED_ORIGINS", "").spli
 # allow_credentials=False: frontend uses Bearer tokens in headers, not cookies,
 # so CORS credentials mode is not needed — and Chrome rejects Allow-Origin:null
 # combined with Allow-Credentials:true.
-_allow_origins = list({"null"} | set(_extra_origins))
+_allow_origins = list({"null", "https://medlevate.com", "https://www.medlevate.com"} | set(_extra_origins))
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_allow_origins,
-    allow_origin_regex=r"https://([a-z0-9-]+\.)*netlify\.app|http://localhost(:\d+)?|http://127\.0\.0\.1(:\d+)?",
+    allow_origin_regex=r"https://(www\.)?medlevate\.com|https://([a-z0-9-]+\.)*netlify\.app|http://localhost(:\d+)?|http://127\.0\.0\.1(:\d+)?",
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],

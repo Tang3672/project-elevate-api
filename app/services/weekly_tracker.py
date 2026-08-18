@@ -379,7 +379,7 @@ async def send_weekly_digest_email(user: dict, results: List[dict]):
       </table>
 
       <div style="margin-top:24px;text-align:center">
-        <a href="https://preeminent-zuccutto-bd1f9d.netlify.app"
+        <a href="https://medlevate.com"
            style="background:#1A4FD6;color:#fff;padding:12px 28px;text-decoration:none;font-weight:700;display:inline-block">
           View Full Reports →
         </a>

@@ -184,7 +184,7 @@ def build_digest_email(
         <!-- CTA -->
         <tr>
           <td style="padding:0 32px 32px;text-align:center">
-            <a href="https://preeminent-zuccutto-bd1f9d.netlify.app"
+            <a href="https://medlevate.com"
                style="display:inline-block;background:#1A4FD6;color:#fff;font-weight:700;font-size:13px;padding:12px 28px;text-decoration:none;letter-spacing:.02em">
               View Full Dashboard →
             </a>
@@ -241,7 +241,7 @@ async def send_digest_email(
         msg["To"]      = user_email
 
         # Plain text fallback
-        plain = f"Project Elevate Weekly Digest\n\n{len(alerts)} new signals this week.\n\nView your dashboard: https://preeminent-zuccutto-bd1f9d.netlify.app"
+        plain = f"Project Elevate Weekly Digest\n\n{len(alerts)} new signals this week.\n\nView your dashboard: https://medlevate.com"
         msg.attach(MIMEText(plain, "plain"))
         msg.attach(MIMEText(html, "html"))
 
