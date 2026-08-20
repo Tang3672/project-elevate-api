@@ -78,7 +78,7 @@ def _log_fetch(log: FetchLog) -> None:
         collector.append(log)
 
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
-SEARCH_MODEL      = "claude-sonnet-4-6"
+SEARCH_MODEL      = "claude-sonnet-5"
 SEARCH_TIMEOUT    = 30.0
 
 

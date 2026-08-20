@@ -27,7 +27,7 @@ from app.services.expert_profiles import get_expert
 logger = logging.getLogger(__name__)
 
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
-CLAUDE_MODEL      = "claude-sonnet-4-6"   # use Sonnet for grant quality writing
+CLAUDE_MODEL      = "claude-sonnet-5"   # use Sonnet for grant quality writing
 
 
 @dataclass

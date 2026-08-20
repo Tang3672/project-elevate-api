@@ -22,7 +22,7 @@ from app.services.disease_classifier import classify_disease
 logger = logging.getLogger(__name__)
 
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
-SEARCH_MODEL      = "claude-sonnet-4-6"
+SEARCH_MODEL      = "claude-sonnet-5"
 
 # Domain expert static knowledge (used as base layer — see expert_profiles.py)
 # The live search supplements this with disease-specific current data
