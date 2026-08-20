@@ -27,8 +27,8 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 # Real model ids, mapped to the brief's capability tiers.
-FRONTIER_MODEL   = "claude-opus-4-5"            # premium synthesis
-SPECIALIST_MODEL = "claude-sonnet-4-6"          # mid-tier synthesis / domain
+FRONTIER_MODEL   = "claude-opus-5"            # premium synthesis
+SPECIALIST_MODEL = "claude-sonnet-5"          # mid-tier synthesis / domain
 SMALL_MODEL      = "claude-haiku-4-5-20251001"  # router / extraction / verifier
 
 # Escalate synthesis to the frontier model at/above this complexity. Set high so

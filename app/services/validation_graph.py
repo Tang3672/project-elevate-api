@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 VERIFIER_MODEL    = "claude-haiku-4-5-20251001"  # Fast + cheap for verification
-ARBITRATOR_MODEL  = "claude-sonnet-4-6"           # Stronger for final synthesis
+ARBITRATOR_MODEL  = "claude-sonnet-5"           # Stronger for final synthesis
 TIMEOUT           = 60.0
 
 
@@ -743,7 +743,7 @@ def get_validation_graph():
 
 # ── Self-correction: fix verifier-flagged sections, then the caller re-validates ──
 
-CORRECTOR_MODEL = "claude-sonnet-4-6"
+CORRECTOR_MODEL = "claude-sonnet-5"
 
 _SECTION_FIELDS = {  # top-level report sections a flag can target
     "disease_intelligence", "market_sizing", "regulatory_pathway",

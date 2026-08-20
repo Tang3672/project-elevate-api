@@ -46,7 +46,7 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
-CLAUDE_MODEL      = "claude-opus-4-5"
+CLAUDE_MODEL      = "claude-opus-5"
 
 
 # ── B-06 Grant deadline helpers ───────────────────────────────────────────────
