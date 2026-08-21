@@ -442,7 +442,7 @@ async def generate_pi_report(
         idea, pt, expert, demand_results, hospital_matches_raw, total_signals,
         pi_memory_context=pi_memory_context, funding_pathway=funding_pathway, user_id=user_id,
         product_name=product_name, institution=institution, domain=_resolved_domain,
-        clarify_answers=clarify_answers)
+        clarify_answers=clarify_answers, run_manifest=_run_manifest, submission_id=_submission_id)
 
     # H-01: Archetype render-time gate — validate vocabulary before any post-processing.
     # If a generator emits clinical vocabulary (510k, NTAP, CPT) for a research tool,
@@ -1241,7 +1241,7 @@ def _modality_directive(sub_expert_id: str, product_type) -> str:
     )
 
 
-async def _generate_expert_report(idea, product_type, expert, demand_results, hospital_matches_raw, total_signals, pi_memory_context="", funding_pathway="commercial", user_id=None, product_name=None, institution=None, domain: str = "LIFE_SCIENCES_CLINICAL", clarify_answers=None):
+async def _generate_expert_report(idea, product_type, expert, demand_results, hospital_matches_raw, total_signals, pi_memory_context="", funding_pathway="commercial", user_id=None, product_name=None, institution=None, domain: str = "LIFE_SCIENCES_CLINICAL", clarify_answers=None, run_manifest=None, submission_id=None):
     """
     Generates a PI report using the selected Expert's domain knowledge.
     Injects expert system_prompt + knowledge_base into the researcher context.
@@ -2328,7 +2328,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
     if deriv is not None:
         try:
             from app.services.assumption_ledger_service import build_ledger_from_derivation
-            _gen_at = (_run_manifest.get("generated_at") if _run_manifest else None)
+            _gen_at = (run_manifest.get("generated_at") if run_manifest else None)
             report.assumption_ledger = build_ledger_from_derivation(deriv, _gen_at)
             logger.info("Part E: assumption ledger built (%d entries)",
                         len(report.assumption_ledger.assumptions))
@@ -2501,7 +2501,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
         logger.debug("report_id wiring failed (non-fatal): %s", _s7_e)
 
     # Back-fill prompt submission with sub_expert_id and report_id now that both are known
-    if _submission_id:
+    if submission_id:
         try:
             from app.db.prompt_sessions_repository import record_prompt_submission as _rps
             from app.db.database import get_pool as _gp
@@ -2509,7 +2509,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
             async with _pool.acquire() as _conn:
                 await _conn.execute(
                     "UPDATE prompt_submissions SET sub_expert_id=$1, report_id=$2 WHERE id=$3",
-                    sub_expert_id, report.report_id, _submission_id,
+                    sub_expert_id, report.report_id, submission_id,
                 )
         except Exception as _ps_upd_e:
             logger.debug("prompt_submission update failed (non-fatal): %s", _ps_upd_e)
