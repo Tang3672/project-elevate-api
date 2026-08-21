@@ -670,11 +670,13 @@ def format_intelligence_for_expert(intel: Dict, disease_name: str) -> str:
         lines.append("STRATEGIC PLAYBOOK — PROVEN STRATEGIES FROM THIS SPACE:")
         lines.append("Include a 'Strategic Playbook' section in your report covering these strategies.\n")
         for s in strategies[:3]:
-            lines.append(f"  STRATEGY: {s['strategy']}")
-            lines.append(f"  Real example: {s['example_company']} with {s['example_drug']}")
-            lines.append(f"  What they did: {s['what_they_did']}")
-            lines.append(f"  Source: {s['source_url']}")
-            lines.append(f"  Apply to your product: {s['applicability']}\n")
+            lines.append(f"  STRATEGY: {s.get('strategy', '')}")
+            if s.get("example_company"):
+                lines.append(f"  Real example: {s['example_company']} with {s.get('example_drug', '')}")
+            lines.append(f"  What they did: {s.get('what_they_did', '')}")
+            if s.get("source_url"):
+                lines.append(f"  Source: {s['source_url']}")
+            lines.append(f"  Apply to your product: {s.get('applicability', '')}\n")
 
     if trials:
         lines.append("[CRITICAL: Cite specific NCT IDs and FDA application numbers in your report. Use the strategic playbook to generate a Strategic Playbook section with named examples.]")
