@@ -3493,6 +3493,8 @@ async def _call_claude(context: str, system_prompt: str, max_tokens: int = 2000,
                 "messages":    [{"role": "user", "content": context}],
             }
         )
+        if not r.is_success:
+            logger.error("Anthropic API error %d: %s", r.status_code, r.text)
         r.raise_for_status()
         return r.json()["content"][0]["text"]
 
