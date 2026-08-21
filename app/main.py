@@ -232,6 +232,37 @@ def debug_env_check():
     }
 
 
+@app.get("/debug/test-anthropic")
+async def test_anthropic():
+    """Make a minimal real Anthropic API call and return the full response for debugging."""
+    import httpx as _httpx
+    key = settings.ANTHROPIC_API_KEY
+    if not key:
+        return {"error": "ANTHROPIC_API_KEY not set"}
+    try:
+        async with _httpx.AsyncClient(timeout=30.0) as c:
+            r = await c.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json={
+                    "model": "claude-haiku-4-5-20251001",
+                    "max_tokens": 10,
+                    "messages": [{"role": "user", "content": "Say OK"}],
+                },
+            )
+        return {
+            "status": r.status_code,
+            "body": r.json(),
+            "key_prefix": key[:14] + "...",
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
 # ── Weekly Tracker Scheduler ──────────────────────────────────────────────────
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import asyncio
