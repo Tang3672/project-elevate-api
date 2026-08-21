@@ -73,6 +73,7 @@ async def check_report_staleness(saved_report: dict) -> dict:
                     headers={
                         "x-api-key": settings.ANTHROPIC_API_KEY,
                         "anthropic-version": "2023-06-01",
+                        "anthropic-beta": "web-search-2025-03-05",
                         "content-type": "application/json",
                     },
                     json={
@@ -385,6 +386,7 @@ async def track_competitor_milestones(condition: str, product_desc: str) -> List
                     headers={
                         "x-api-key": settings.ANTHROPIC_API_KEY,
                         "anthropic-version": "2023-06-01",
+                        "anthropic-beta": "web-search-2025-03-05",
                         "content-type": "application/json",
                     },
                     json={
@@ -483,6 +485,7 @@ async def compute_signal_delta(watchlist: dict, days_back: int = 30) -> dict:
                     headers={
                         "x-api-key": settings.ANTHROPIC_API_KEY,
                         "anthropic-version": "2023-06-01",
+                        "anthropic-beta": "web-search-2025-03-05",
                         "content-type": "application/json",
                     },
                     json={
