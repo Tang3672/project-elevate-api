@@ -409,6 +409,7 @@ async def _run_single_search(
                 headers={
                     "x-api-key":         settings.ANTHROPIC_API_KEY,
                     "anthropic-version": "2023-06-01",
+                    "anthropic-beta":    "web-search-2025-03-05",
                     "content-type":      "application/json",
                 },
                 json={
