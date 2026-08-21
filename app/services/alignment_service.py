@@ -3495,7 +3495,10 @@ async def _call_claude(context: str, system_prompt: str, max_tokens: int = 2000,
         if not r.is_success:
             logger.error("Anthropic API error %d: %s", r.status_code, r.text)
         r.raise_for_status()
-        return r.json()["content"][0]["text"]
+        for block in r.json().get("content", []):
+            if block.get("type") == "text":
+                return block["text"]
+        raise ValueError(f"No text block in Anthropic response: {r.json().get('content', [])[:1]}")
 
 
 def _clean_json(raw: str) -> dict:

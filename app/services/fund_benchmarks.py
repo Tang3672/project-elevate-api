@@ -32,7 +32,8 @@ class VintageBenchmark:
     top_quartile_irr_pct: float  # %
     median_tvpi:     float       # Total Value / Paid In
     top_quartile_tvpi: float
-    median_dpi:      float       # Distributions / Paid In (realized returns)
+    median_dpi:          float       # Distributions / Paid In (realized returns)
+    top_quartile_dpi:    float       # top-quartile DPI
     years_since_vintage: int
     source:          str
     notes:           str = ""

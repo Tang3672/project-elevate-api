@@ -853,7 +853,7 @@ async def _fetch_paper_summaries(pmids: List[str]) -> List[Dict]:
                 pub_date = paper.get("pubdate", "")
                 journal = paper.get("source", "")
                 title = paper.get("title", "")
-                pub_types = [p.get("value", "") for p in paper.get("pubtype", [])]
+                pub_types = [p.get("value", "") if isinstance(p, dict) else str(p) for p in paper.get("pubtype", [])]
 
                 papers.append({
                     "pmid":     pmid,
