@@ -3486,11 +3486,10 @@ async def _call_claude(context: str, system_prompt: str, max_tokens: int = 2000,
                 "content-type": "application/json",
             },
             json={
-                "model":       model or CLAUDE_MODEL,
-                "max_tokens":  max_tokens,
-                "temperature": 0,
-                "system":      system_prompt,
-                "messages":    [{"role": "user", "content": context}],
+                "model":      model or CLAUDE_MODEL,
+                "max_tokens": max_tokens,
+                "system":     system_prompt,
+                "messages":   [{"role": "user", "content": context}],
             }
         )
         if not r.is_success:
