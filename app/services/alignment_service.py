@@ -3488,6 +3488,7 @@ async def _call_claude(context: str, system_prompt: str, max_tokens: int = 2000,
             json={
                 "model":      model or CLAUDE_MODEL,
                 "max_tokens": max_tokens,
+                "thinking":   {"type": "disabled"},
                 "system":     system_prompt,
                 "messages":   [{"role": "user", "content": context}],
             }
