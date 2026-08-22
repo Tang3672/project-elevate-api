@@ -66,6 +66,43 @@ _SEARCH_STOP: frozenset = frozenset({
     "these", "those", "what", "then", "very", "just", "like",
 })
 
+# Generic SaaS/infrastructure words that appear in product descriptions but are
+# meaningless as PubMed search terms — filtered for research-tool queries.
+_INFRA_STOP: frozenset = frozenset({
+    "platform", "designed", "system", "management", "cloud", "sync", "syncing",
+    "automatically", "specialized", "process", "service", "software", "tool",
+    "solution", "workflow", "infrastructure", "integration", "seamless", "simple",
+    "files", "memory", "device", "local", "directly", "instead", "complex",
+    "minimal", "battery", "disruption", "simplifies", "relies", "relying",
+    "event", "based", "various", "provides", "developed", "researchers",
+    "capture", "store", "transfer", "hassle", "capture", "automatic",
+    "scientific", "specialized", "data", "information",
+})
+
+# Known scientific domain vocabulary that should be PREFERRED in search terms
+# when they appear in the idea text.
+_SCIENCE_DOMAINS: tuple = (
+    "neuroscience", "neurosciences", "neurology", "neurological",
+    "behavioral", "behaviour", "behavior",
+    "neurotech", "electrophysiology", "neuroimaging",
+    "genomics", "proteomics", "transcriptomics", "metabolomics",
+    "bioinformatics", "computational biology",
+    "pharmacology", "pharmacokinetics",
+    "oncology", "immunology", "immunotherapy",
+    "cardiology", "cardiovascular",
+    "microbiome", "microbiota",
+    "imaging", "microscopy", "spectroscopy",
+    "sequencing", "single-cell",
+    "ecology", "environmental",
+    "agriculture", "agronomy",
+    "materials", "biomaterials",
+    "wearable", "biosensor", "sensor",
+    "laboratory", "laboratory information",
+    "biomedical", "biochemistry",
+    "clinical", "translational",
+    "psychology", "cognitive",
+)
+
 
 def _idea_to_search_terms(idea: str, max_words: int = 8) -> str:
     """Extract domain vocabulary from idea text for literature search.
@@ -89,6 +126,54 @@ def _idea_to_search_terms(idea: str, max_words: int = 8) -> str:
         if len(tl) < 4:
             continue
         if tl in _SEARCH_STOP:
+            continue
+        if tl not in seen:
+            seen.add(tl)
+            terms.append(tl)
+        if len(terms) >= max_words:
+            break
+    return " ".join(terms).strip()
+
+
+def _research_idea_to_search_terms(idea: str, max_words: int = 6) -> str:
+    """Extract scientific domain vocabulary from a research-tool idea description.
+
+    Unlike _idea_to_search_terms, this prioritises known scientific domain words
+    (neuroscience, behavioral, electrophysiology…) over generic product description
+    words (platform, designed, management, cloud…). Used for research-tool PubMed
+    queries so we get "behavioral neuroscience laboratory" instead of
+    "specialized scientific data management platform designed".
+    """
+    if not idea:
+        return ""
+    idea_lower = idea.lower()
+
+    # Priority pass: prefer known scientific domain keywords in the order they appear.
+    # Skip a keyword if it's a substring of one already collected (avoids "behavioral"+"behavior").
+    domain_hits: list[str] = []
+    for kw in _SCIENCE_DOMAINS:
+        if kw not in idea_lower:
+            continue
+        if any(kw in h or h in kw for h in domain_hits):
+            continue  # redundant with an already-added term
+        domain_hits.append(kw)
+        if len(domain_hits) >= max_words:
+            break
+
+    if domain_hits:
+        return " ".join(domain_hits[:max_words])
+
+    # Fallback: use _idea_to_search_terms but also filter generic infra/SaaS words
+    tokens = re.findall(r"[a-zA-Z][a-zA-Z\-]*[a-zA-Z]|[a-zA-Z]{4,}", idea)
+    seen: set = set()
+    terms: list = []
+    for t in tokens:
+        if t != t.lower():
+            continue
+        tl = t.lower()
+        if len(tl) < 4:
+            continue
+        if tl in _SEARCH_STOP or tl in _INFRA_STOP:
             continue
         if tl not in seen:
             seen.add(tl)

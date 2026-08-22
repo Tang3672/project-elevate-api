@@ -129,25 +129,40 @@ MATH_VERIFIER_SYSTEM = """You are a financial analyst verifying market sizing ca
 Your ONLY job: re-derive every TAM/SAM calculation from scratch and check the math.
 
 For each market sizing step:
-1. Extract the inputs: patient_count, price, penetration_rate
-2. Calculate TAM = patients x price (100% penetration)
+1. Extract the inputs: patient_count (or lab/buyer count), price, penetration_rate
+2. Calculate TAM = buyers x price (100% penetration)
 3. Calculate SAM = TAM x penetration_rate
 4. Compare to stated values
 
 Also check:
 - Does the formula text match the actual numbers used?
 - Are penetration rates realistic? (Novel drug: 15-40% Year 5 is typical. >60% is suspicious.)
-- Is WAC pricing in the right range for the drug class?
+- Is pricing in the right range for the product class?
   * Oral antibiotics: $200-2,000/course
   * IV antibiotics: $5,000-25,000/course
   * Oncology oral: $8,000-25,000/month
   * Gene therapy one-time: $500,000-3,500,000
   * Medical devices: $1,000-100,000
   * Diagnostics: $50-5,000/test
+  * Research SaaS / lab tools: $2,000-50,000/yr per lab
+
+SEVERITY DEFINITIONS — use exactly one per flag, and use the right one:
+- ERROR: The stated number does NOT match what the formula produces. Arithmetic is wrong.
+  Example: Report says SAM = $5M but TAM × penetration = $8M. That is an ERROR.
+- WARNING: The arithmetic is CORRECT but an assumption has a quality concern — e.g., high
+  variance range (>3× spread), no primary data cited, penetration rate above historical norms,
+  or a spend estimate flagged as 'assumed' with no interview validation.
+  Example: TAM math checks out but spend/unit is assumed from a 6× range with no PI interviews.
+- NOTE: Math is correct, assumptions are reasonable, but a label or descriptor is ambiguous
+  (e.g., "5-yr penetration midpoint" vs "Year 5 capture rate").
+  Example: The number is right; clarify what the percentage represents.
+
+CRITICAL RULE: If you verify the arithmetic and it is CORRECT, you MUST use WARNING or NOTE —
+never ERROR. Only use ERROR when the numbers do not add up.
 
 Respond ONLY with JSON:
 {"flags": [{"severity": "ERROR|WARNING|NOTE", "category": "MATH", "field": "market_sizing.X", "issue": "<specific issue with numbers>", "suggestion": "<what to fix>"}]}
-If math checks out: {"flags": []}"""
+If math checks out with no concerns: {"flags": []}"""
 
 
 async def math_verifier_node(state: PIReportState) -> dict:

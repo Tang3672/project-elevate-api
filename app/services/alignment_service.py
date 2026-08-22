@@ -1282,7 +1282,7 @@ async def _generate_expert_report(idea, product_type, expert, demand_results, ho
         # Live search term: extract domain vocabulary from idea text so PubMed/OpenAlex
         # queries use "wireless data acquisition behavioral neuroscience" instead of
         # the product brand ("Hublink") which has zero indexed literature.
-        from app.services.pubmed_service import _idea_to_search_terms as _dts
+        from app.services.pubmed_service import _research_idea_to_search_terms as _dts
         _search_vocab = _dts(idea, max_words=6)
         disease_name = _search_vocab if _search_vocab else _pn
         logger.info("B-05: research domain — label=%r search_terms=%r", _pn, disease_name)
