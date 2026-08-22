@@ -2766,8 +2766,14 @@ If the exact guidance is not listed above, use the general FDA guidance search: 
 def _parse_expert_response(data, idea, product_type, expert, demand_results, hospital_matches_raw, total_signals, product_name=None, institution=None, sub_expert_id=None):
     """Parse Claude JSON response into PIReport regardless of domain."""
     di_data = data.get("disease_intelligence", {})
+    _di_condition = di_data.get("condition", "")
+    _B02_NEGATION = ("not applicable", "n/a", "non-clinical", "no disease", "no specific disease",
+                     "not disease", "infrastructure tool", "cross-domain", "not applicable")
+    if any(p in _di_condition.lower() for p in _B02_NEGATION):
+        _pn_fallback = (product_name or "").strip()
+        _di_condition = _pn_fallback if _pn_fallback else "research tool"
     disease_intel = DiseaseIntelligence(
-        condition          = di_data.get("condition", ""),
+        condition          = _di_condition,
         data_points        = [DiseaseDataPoint(**dp) for dp in _clean_di_source_urls(_filter_di_data_points(di_data.get("data_points", [])))],
         resistance_profile = di_data.get("resistance_profile"),
         pipeline_status    = di_data.get("pipeline_status"),
