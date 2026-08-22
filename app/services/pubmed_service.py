@@ -736,7 +736,23 @@ def filter_literature_citations(
                 # Hard drop only when a PMID resolves to a DIFFERENT title.
                 logger.debug("Part A gate: PMID %s did not resolve — passing to relevance gate", pmid)
             else:
-                # Title match check
+                # B-05: always overwrite year/authors/journal/url from NCBI —
+                # these fields come from the API and are always authoritative.
+                # The LLM fabricates years (e.g. "2015" for a 2004 paper) and
+                # author strings regardless of what the title check decides.
+                _gen_year = str(c.get("year") or "").strip()
+                _real_year = str(resolved["year"]).strip()
+                c = {**c,
+                     "year":    resolved["year"],
+                     "authors": resolved["authors"],
+                     "journal": resolved["journal"],
+                     "url":     resolved["url"]}
+                if _gen_year and _real_year and _gen_year != _real_year:
+                    logger.warning(
+                        "B-05: PMID %s year corrected %s→%s (LLM hallucinated year)",
+                        pmid, _gen_year, _real_year,
+                    )
+                # Title match check — only replaces title when clearly wrong
                 gen_title = (c.get("title") or "").lower().strip()
                 real_title = resolved["title"].lower().strip()
                 if gen_title and real_title:
