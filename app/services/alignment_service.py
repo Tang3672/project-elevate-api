@@ -2159,6 +2159,74 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
     except Exception as _b06_e:
         logger.warning("B-06 date placeholder resolution failed (non-fatal): %s", _b06_e)
 
+    # B-03: Strip inline academic citations with future publication years.
+    # LLMs hallucinate journal citations with impossible future dates (e.g.,
+    # "Zheng et al. (Science December 2026)"). A publication date in the future
+    # cannot be real, so remove the parenthetical from action-plan prose.
+    # Targeted regex: "Author(s) et al. (anything with a future year)" —
+    # conservative enough to leave milestone/deadline dates untouched.
+    try:
+        import re as _re_b03
+        _now_b03 = datetime.utcnow()
+        # Matches: "Author et al. (Science December 2026)" or "Smith et al. (2027, Nature)"
+        _CITE_RE = _re_b03.compile(
+            r"\b\w[\w\s,\.&\-]+et al\.?\s*\(([^)]*\b(20\d{2})\b[^)]*)\)",
+            _re_b03.IGNORECASE,
+        )
+        _B03_MONTH_RE = _re_b03.compile(
+            r"\b(january|february|march|april|may|june|july|august|september|october|november|december)\b",
+            _re_b03.IGNORECASE,
+        )
+        _B03_MONTH_NUM = {
+            "january":1,"february":2,"march":3,"april":4,"may":5,"june":6,
+            "july":7,"august":8,"september":9,"october":10,"november":11,"december":12,
+        }
+        def _b03_is_future(yr: int, inner: str) -> bool:
+            if yr > _now_b03.year:
+                return True
+            if yr == _now_b03.year:
+                m_match = _B03_MONTH_RE.search(inner)
+                if m_match:
+                    mon = _B03_MONTH_NUM.get(m_match.group(1).lower(), 0)
+                    return mon > _now_b03.month
+            return False
+        _B03_TEXT_FIELDS = (
+            "recommended_next_steps",
+            "executive_summary",
+            "strategic_playbook",
+            "strategic_risks",
+        )
+        _b03_total = 0
+        for _b03_field in _B03_TEXT_FIELDS:
+            _b03_val = data.get(_b03_field)
+            if not _b03_val:
+                continue
+            def _b03_scrub_text(text: str) -> str:
+                def _repl(m: "_re_b03.Match") -> str:
+                    try:
+                        yr = int(m.group(2))
+                    except (ValueError, IndexError):
+                        return m.group(0)
+                    if _b03_is_future(yr, m.group(1)):
+                        return m.group(0).split("(")[0].rstrip()
+                    return m.group(0)
+                return _CITE_RE.sub(_repl, text)
+            if isinstance(_b03_val, list):
+                _b03_new = [_b03_scrub_text(s) if isinstance(s, str) else s for s in _b03_val]
+                _b03_changed = sum(1 for a, b in zip(_b03_val, _b03_new) if a != b)
+            elif isinstance(_b03_val, str):
+                _b03_new = _b03_scrub_text(_b03_val)
+                _b03_changed = 1 if _b03_new != _b03_val else 0
+            else:
+                continue
+            if _b03_changed:
+                data[_b03_field] = _b03_new
+                _b03_total += _b03_changed
+        if _b03_total:
+            logger.warning("B-03: stripped %d future-year inline citation(s) from text fields", _b03_total)
+    except Exception as _b03_e:
+        logger.warning("B-03 future-citation scrub failed (non-fatal): %s", _b03_e)
+
     # Parse into PIReport
     report = _parse_expert_response(data, idea, product_type, expert, demand_results, hospital_matches_raw, total_signals,
                                     product_name=product_name, institution=institution, sub_expert_id=sub_expert_id)
