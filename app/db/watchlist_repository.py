@@ -159,31 +159,6 @@ def _row_to_watchlist(row, alert_count=0, unread_count=0) -> Watchlist:
 
 # ── Alerts ────────────────────────────────────────────────────────────────────
 
-async def create_alert(
-    watchlist_id: int,
-    user_id:      int,
-    alert_type:   str,
-    title:        str,
-    summary:      str,
-    severity:     str = "medium",
-    source:       str = "",
-    source_url:   Optional[str] = None,
-    signal_id:    Optional[int] = None,
-) -> Alert:
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            """
-            INSERT INTO user_alerts
-                (watchlist_id, user_id, signal_id, alert_type, title, summary, severity, source, source_url)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-            RETURNING *
-            """,
-            watchlist_id, user_id, signal_id, alert_type, title, summary, severity, source, source_url
-        )
-        return _row_to_alert(row)
-
-
 async def get_user_alerts(
     user_id:  int,
     limit:    int = 50,
@@ -235,13 +210,14 @@ async def get_unread_count(user_id: int) -> int:
         return int(row['cnt'])
 
 
-async def alert_already_exists(watchlist_id: int, signal_id: int) -> bool:
-    """Prevent duplicate alerts for the same signal."""
+async def alert_already_exists(watchlist_id: int, title: str) -> bool:
+    """Prevent duplicate alerts with the same title for a watchlist (within 7 days)."""
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT id FROM user_alerts WHERE watchlist_id = $1 AND signal_id = $2",
-            watchlist_id, signal_id
+            "SELECT id FROM user_alerts WHERE watchlist_id = $1 AND title = $2 "
+            "AND created_at >= NOW() - INTERVAL '7 days'",
+            watchlist_id, title
         )
         return row is not None
 
@@ -264,18 +240,18 @@ async def get_recent_alerts_for_digest(user_id: int, days: int = 7) -> List[Aler
 
 def _row_to_alert(row) -> Alert:
     return Alert(
-        alert_id     = row['id'],
-        watchlist_id = row['watchlist_id'],
-        user_id      = row['user_id'],
-        signal_id    = row.get('signal_id'),
-        alert_type   = row['alert_type'],
-        title        = row['title'],
-        summary      = row['summary'],
-        severity     = row['severity'],
-        source       = row['source'],
-        source_url   = row.get('source_url'),
-        seen         = row['seen'],
-        created_at   = row['created_at'],
+        alert_id             = row['id'],
+        watchlist_id         = row['watchlist_id'],
+        user_id              = row['user_id'],
+        title                = row['title'],
+        body                 = row.get('body') or "",
+        severity             = row.get('severity') or "medium",
+        source               = row.get('source') or "weekly_tracker",
+        recalculation_needed = bool(row.get('recalculation_needed', False)),
+        significance_score   = int(row.get('significance_score') or 0),
+        source_url           = row.get('source_url'),
+        seen                 = bool(row.get('seen', False)),
+        created_at           = row['created_at'],
     )
 
 

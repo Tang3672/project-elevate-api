@@ -32,18 +32,18 @@ class Watchlist(BaseModel):
 
 
 class Alert(BaseModel):
-    alert_id:     int
-    watchlist_id: int
-    user_id:      int
-    signal_id:    Optional[int]   = None
-    alert_type:   str             # fda_recall | clinical_trial | disease_burden | hrsa_shortage | funding | competitor
-    title:        str
-    summary:      str
-    severity:     str             # high | medium | low
-    source:       str
-    source_url:   Optional[str]   = None
-    seen:         bool            = False
-    created_at:   datetime
+    alert_id:             int
+    watchlist_id:         int
+    user_id:              int
+    title:                str
+    body:                 str    = ""
+    severity:             str    = "medium"   # high | medium | low
+    source:               str    = "weekly_tracker"
+    recalculation_needed: bool   = False
+    significance_score:   int    = 0
+    source_url:           Optional[str]   = None
+    seen:                 bool   = False
+    created_at:           datetime
 
 
 class AlertSummary(BaseModel):

@@ -107,7 +107,7 @@ def build_digest_email(
     rows_html = ""
     for alert in alerts[:20]:   # cap at 20 per email
         color = ALERT_COLORS.get(alert.severity, "#334767")
-        icon  = ALERT_ICONS.get(alert.alert_type, "📌")
+        icon  = "🔔"
         link  = f'<a href="{alert.source_url}" style="color:#1A4FD6">View source →</a>' if alert.source_url else ""
         rows_html += f"""
         <tr>
@@ -116,7 +116,7 @@ def build_digest_email(
               <span style="font-size:18px;flex-shrink:0">{icon}</span>
               <div>
                 <div style="font-weight:600;color:#0f1929;font-size:13px;margin-bottom:4px">{alert.title}</div>
-                <div style="color:#334767;font-size:12px;line-height:1.6;margin-bottom:6px">{alert.summary[:250]}</div>
+                <div style="color:#334767;font-size:12px;line-height:1.6;margin-bottom:6px">{alert.body[:250]}</div>
                 <div style="display:flex;gap:12px;align-items:center">
                   <span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:{color};background:{color}15;padding:2px 8px;border-radius:2px">{alert.severity.upper()}</span>
                   <span style="font-size:10px;color:#7a92b0">{alert.created_at.strftime('%b %d, %Y')}</span>

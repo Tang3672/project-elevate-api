@@ -108,11 +108,6 @@ async def run_weekly_match() -> Dict:
                                 if s.get('source') not in ('cdc_places', 'census_sahie', 'cms_hospital_quality')]
 
         for signal in filtered_signals:
-            # Skip if already alerted for this signal
-            if await alert_already_exists(wid, signal['id']):
-                skipped += 1
-                continue
-
             # Check relevance
             match, reason = _is_relevant(
                 signal, desc, kws, expert_kws, desc_embedding
@@ -128,19 +123,22 @@ async def run_weekly_match() -> Dict:
             if signal.get('signal_type') == 'safety_failure':
                 severity = 'high'
 
-            title   = _build_alert_title(signal, alert_type)
-            summary = _build_alert_summary(signal, reason, watchlist['name'])
+            title = _build_alert_title(signal, alert_type)
+            body  = _build_alert_summary(signal, reason, watchlist['name'])
+
+            # Skip duplicate alerts (same title within 7 days for this watchlist)
+            if await alert_already_exists(wid, title):
+                skipped += 1
+                continue
 
             await create_alert(
                 watchlist_id = wid,
                 user_id      = uid,
-                alert_type   = alert_type,
                 title        = title,
-                summary      = summary,
+                body         = body,
                 severity     = severity,
                 source       = source,
-                source_url   = _get_source_url(source),
-                signal_id    = signal['id'],
+                significance_score = 0,
             )
             total_alerts += 1
 
