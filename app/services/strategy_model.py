@@ -123,7 +123,7 @@ TYPED_STRATEGY_LIBRARY: list[Strategy] = [
             "$250k–$2M capital) serves 50–200 individual PI labs and converts each PI into "
             "a trained user and active recommender to peer institutions."
         ),
-        source_url="https://abrf.org/core-facilities",
+        source_url="https://www.abrf.org/resources",
         how_to_apply=(
             "Map the 5–10 core facilities serving your target modality nationally. Offer the "
             "first a founding-partner price (30–40% discount) in exchange for co-authorship "
@@ -187,7 +187,7 @@ TYPED_STRATEGY_LIBRARY: list[Strategy] = [
             "built ecosystem adoption in 1,000+ labs; proprietary hardware remained the "
             "revenue vehicle."
         ),
-        source_url="https://plexon.com/products/plexon-omniplex-neural-data-acquisition-system/",
+        source_url="https://plexon.com/products/omniplex-neural-data-acquisition-system/",
         how_to_apply=(
             "Release firmware, data format specification, and Python/MATLAB SDK under MIT "
             "or Apache license before launch. File a provisional patent on the hardware "

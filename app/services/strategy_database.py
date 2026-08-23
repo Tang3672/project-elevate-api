@@ -909,7 +909,7 @@ DOMAIN_SPECIFIC_STRATEGIES.update({
             "example_drug": "LSM 880 Airyscan confocal system",
             "what_they_did": "Zeiss targets institutional core facility directors with multi-year service contracts and structured training programs. One core facility sale (typically $250k–$2M capital) serves 50–200 individual PI labs and converts each PI into a trained user and active recommender to peer institutions.",
             "how_to_apply": "Map the 5–10 core facilities serving your target modality nationally. Offer the first facility a founding-partner price (30–40% discount) in exchange for co-authorship on a methods paper, a cohort training commitment, and a reference call. This converts a $15k per-lab license into a $100k–$500k facility contract with 50+ downstream trained users.",
-            "source_url": "https://abrf.org/core-facilities",
+            "source_url": "https://www.abrf.org/resources",
             "applicability": "Research hardware and software tools with multi-user deployment. Most effective when workflow complexity benefits from centralized training and the PI is not also the engineer.",
         },
         {
@@ -929,7 +929,7 @@ DOMAIN_SPECIFIC_STRATEGIES.update({
             "example_drug": "OmniPlex neural data acquisition system",
             "what_they_did": "Plexon open-sourced its offline sorter and OmniPlex SDK while maintaining closed-source hardware drivers and cloud analytics. Open-source components built ecosystem adoption in 1,000+ labs; proprietary hardware remained the revenue vehicle.",
             "how_to_apply": "Release firmware, data format specification, and Python/MATLAB SDK under MIT or Apache license before launch. File a provisional patent on the specific hardware implementation first. Open access generates inbound interest from technically capable PI labs that become organic champions. Retain commercial value in hardware, support contracts, and managed cloud sync services.",
-            "source_url": "https://plexon.com/products/plexon-omniplex-neural-data-acquisition-system/",
+            "source_url": "https://plexon.com/products/omniplex-neural-data-acquisition-system/",
             "applicability": "Research infrastructure with a protocol layer (data format, API) that benefits from ecosystem adoption. Particularly effective when the PI is also the engineer and will evaluate the implementation.",
         },
     ],
