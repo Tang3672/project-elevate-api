@@ -386,12 +386,23 @@ _OFF_DOMAIN_SIGNALS: frozenset = frozenset({
     "apathy", "psychometric",
     # Ophthalmology (B-01: ocular toxicity paper, PMID 35817277)
     "ocular toxicity", "vigabatrin", "infantile spasms",
+    # B-07: clinical disease-cohort papers fetched for non-clinical research tools.
+    # These phrases appear in disease-study titles but never in research-tool contexts.
+    "patients with", "systemic inflammatory", "metabolic syndrome",
+    "inflammatory profile", "disease cohort", "clinical outcome",
+    "hospital admission", "comorbidity", "mortality rate",
+    "disease burden", "patient cohort", "patient population",
 })
 
 
 def _is_non_clinical_product(sub_expert_id: str) -> bool:
     s = (sub_expert_id or "").lower()
-    return "non_clinical" in s or s.startswith("research_tool") or "lab_software" in s
+    return (
+        "non_clinical" in s
+        or s.startswith("research_tool")
+        or s.startswith("research_infrastructure")   # B-07: include saas archetype
+        or "lab_software" in s
+    )
 
 
 # ── G.3 OpenAlex: fallback verifier + primary retrieval for non-biomedical ────
