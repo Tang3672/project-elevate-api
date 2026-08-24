@@ -2852,8 +2852,8 @@ def _parse_expert_response(data, idea, product_type, expert, demand_results, hos
     market_sizing = MarketSizingCalculation(
         steps                        = [MarketSizingStep(**s) for s in ms_data.get("steps", [])],
         formula                      = ms_data.get("formula", ""),
-        total_addressable_market_usd = float(ms_data.get("total_addressable_market_usd", 0)),
-        serviceable_market_usd       = float(ms_data.get("serviceable_market_usd", 0)),
+        total_addressable_market_usd = float(ms_data.get("total_addressable_market_usd") or 0),
+        serviceable_market_usd       = float(ms_data.get("serviceable_market_usd") or 0),
         methodology_note             = ms_data.get("methodology_note", ""),
     ) if ms_data else None
 
@@ -3009,8 +3009,8 @@ async def _generate_antibiotic_report(
     market_sizing = MarketSizingCalculation(
         steps=[MarketSizingStep(**s) for s in ms_data.get("steps", [])],
         formula=ms_data.get("formula", ""),
-        total_addressable_market_usd=float(ms_data.get("total_addressable_market_usd", 0)),
-        serviceable_market_usd=float(ms_data.get("serviceable_market_usd", 0)),
+        total_addressable_market_usd=float(ms_data.get("total_addressable_market_usd") or 0),
+        serviceable_market_usd=float(ms_data.get("serviceable_market_usd") or 0),
         methodology_note=ms_data.get("methodology_note", ""),
     ) if ms_data else None
 
@@ -3172,8 +3172,8 @@ async def _generate_generic_pi_report(
     market_sizing = MarketSizingCalculation(
         steps=[MarketSizingStep(**s) for s in ms_data.get("steps", [])],
         formula=ms_data.get("formula", ""),
-        total_addressable_market_usd=float(ms_data.get("total_addressable_market_usd", 0)),
-        serviceable_market_usd=float(ms_data.get("serviceable_market_usd", 0)),
+        total_addressable_market_usd=float(ms_data.get("total_addressable_market_usd") or 0),
+        serviceable_market_usd=float(ms_data.get("serviceable_market_usd") or 0),
         methodology_note=ms_data.get("methodology_note", ""),
     ) if ms_data else None
 
