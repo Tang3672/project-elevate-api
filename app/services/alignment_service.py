@@ -734,14 +734,17 @@ async def generate_pi_report(
         logger.warning(traceback.format_exc())
 
     # Attach routing metadata
-    report.expert_domain   = getattr(expert, "sub_expert_id", getattr(expert, "domain_id", "unknown"))
-    report.expert_name     = expert.display_name
-    report.expert_icon     = expert.icon
-    report.routing_method  = router_result.routing_method
-    report.mismatch_warning = router_result.mismatch_warning
-    report.run_manifest    = _run_manifest
-    report.domain          = _resolved_domain
-    report.engine_version  = ENGINE_BUILD_SHA
+    try:
+        report.expert_domain   = getattr(expert, "sub_expert_id", getattr(expert, "domain_id", "unknown"))
+        report.expert_name     = getattr(expert, "display_name", "")
+        report.expert_icon     = getattr(expert, "icon", "")
+        report.routing_method  = router_result.routing_method
+        report.mismatch_warning = router_result.mismatch_warning
+        report.run_manifest    = _run_manifest
+        report.domain          = _resolved_domain
+        report.engine_version  = ENGINE_BUILD_SHA
+    except Exception as _meta_e:
+        logger.warning("Routing metadata attach failed (non-fatal): %s", _meta_e)
 
     # C.1/C.2: attach axis selection/rejection decisions with idea-specific lift hints
     try:
@@ -870,7 +873,11 @@ async def run_report_verification(report) -> None:
     the UI; the budget is generous since latency no longer matters there."""
     import asyncio as _averify
     _sub_id = getattr(report, "expert_domain", None) or "drug_amr"
-    _report_dict = report.model_dump(mode="json")
+    try:
+        _report_dict = report.model_dump(mode="json")
+    except Exception as _dump_e:
+        logger.warning("run_report_verification: model_dump failed, skipping verification: %s", _dump_e)
+        return
     _VERIFY_BUDGET_S = 75.0
 
     async def _run_validation():
