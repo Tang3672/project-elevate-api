@@ -2831,10 +2831,21 @@ If the exact guidance is not listed above, use the general FDA guidance search: 
 }"""
 
 
+def _safe_build(cls, d):
+    """Build a Pydantic model from dict d, returning None on any error."""
+    if not isinstance(d, dict):
+        return None
+    try:
+        return cls(**d)
+    except Exception as _sb_e:
+        logger.warning("Skipping invalid %s item: %s", cls.__name__, _sb_e)
+        return None
+
+
 def _parse_expert_response(data, idea, product_type, expert, demand_results, hospital_matches_raw, total_signals, product_name=None, institution=None, sub_expert_id=None):
     """Parse Claude JSON response into PIReport regardless of domain."""
-    di_data = data.get("disease_intelligence", {})
-    _di_condition = di_data.get("condition", "")
+    di_data = data.get("disease_intelligence") or {}
+    _di_condition = di_data.get("condition") or ""
     _B02_NEGATION = ("not applicable", "n/a", "non-clinical", "no disease", "no specific disease",
                      "not disease", "infrastructure tool", "cross-domain", "not applicable")
     if any(p in _di_condition.lower() for p in _B02_NEGATION):
@@ -2842,42 +2853,42 @@ def _parse_expert_response(data, idea, product_type, expert, demand_results, hos
         _di_condition = _pn_fallback if _pn_fallback else "research tool"
     disease_intel = DiseaseIntelligence(
         condition          = _di_condition,
-        data_points        = [DiseaseDataPoint(**dp) for dp in _clean_di_source_urls(_filter_di_data_points(di_data.get("data_points", [])))],
+        data_points        = [x for x in (_safe_build(DiseaseDataPoint, dp) for dp in _clean_di_source_urls(_filter_di_data_points([x for x in (di_data.get("data_points") or []) if isinstance(x, dict)]))) if x is not None],
         resistance_profile = di_data.get("resistance_profile"),
         pipeline_status    = di_data.get("pipeline_status"),
-        unmet_need_summary = di_data.get("unmet_need_summary", ""),
+        unmet_need_summary = di_data.get("unmet_need_summary") or "",
     ) if di_data else None
 
-    ms_data = data.get("market_sizing", {})
+    ms_data = data.get("market_sizing") or {}
     market_sizing = MarketSizingCalculation(
-        steps                        = [MarketSizingStep(**s) for s in ms_data.get("steps", [])],
-        formula                      = ms_data.get("formula", ""),
+        steps                        = [x for x in (_safe_build(MarketSizingStep, s) for s in (ms_data.get("steps") or [])) if x is not None],
+        formula                      = ms_data.get("formula") or "",
         total_addressable_market_usd = float(ms_data.get("total_addressable_market_usd") or 0),
         serviceable_market_usd       = float(ms_data.get("serviceable_market_usd") or 0),
-        methodology_note             = ms_data.get("methodology_note", ""),
+        methodology_note             = ms_data.get("methodology_note") or "",
     ) if ms_data else None
 
-    rp_data = data.get("regulatory_pathway", {})
+    rp_data = data.get("regulatory_pathway") or {}
     reg_pathway = RegulatoryPathway(
-        recommended_pathway         = rp_data.get("recommended_pathway", ""),
-        pathway_rationale           = rp_data.get("pathway_rationale", ""),
-        designations                = [RegulatoryDesignation(**d) for d in rp_data.get("designations", [])],
-        clinical_trial_requirements = [ClinicalTrialRequirements(**t) for t in rp_data.get("clinical_trial_requirements", [])],
-        total_timeline_estimate     = rp_data.get("total_timeline_estimate", ""),
-        total_cost_estimate         = rp_data.get("total_cost_estimate", ""),
-        key_friction_points         = rp_data.get("key_friction_points", []),
-        loopholes_and_strategies    = rp_data.get("loopholes_and_strategies", []),
-        funding_programs            = rp_data.get("funding_programs", []),
+        recommended_pathway         = rp_data.get("recommended_pathway") or "",
+        pathway_rationale           = rp_data.get("pathway_rationale") or "",
+        designations                = [x for x in (_safe_build(RegulatoryDesignation, d) for d in (rp_data.get("designations") or [])) if x is not None],
+        clinical_trial_requirements = [x for x in (_safe_build(ClinicalTrialRequirements, t) for t in (rp_data.get("clinical_trial_requirements") or [])) if x is not None],
+        total_timeline_estimate     = rp_data.get("total_timeline_estimate") or "",
+        total_cost_estimate         = rp_data.get("total_cost_estimate") or "",
+        key_friction_points         = rp_data.get("key_friction_points") or [],
+        loopholes_and_strategies    = rp_data.get("loopholes_and_strategies") or [],
+        funding_programs            = rp_data.get("funding_programs") or [],
     ) if rp_data else None
 
-    ma_data = data.get("market_access", {})
+    ma_data = data.get("market_access") or {}
     market_access = MarketAccessStrategy(
-        primary_channel             = ma_data.get("primary_channel", ""),
-        buyer_segments              = [BuyerSegment(**b) for b in ma_data.get("buyer_segments", [])],
-        key_opinion_leaders         = ma_data.get("key_opinion_leaders", []),
-        reimbursement_pathway       = ma_data.get("reimbursement_pathway", ""),
-        first_commercial_step       = ma_data.get("first_commercial_step", ""),
-        international_opportunities = ma_data.get("international_opportunities", []),
+        primary_channel             = ma_data.get("primary_channel") or "",
+        buyer_segments              = [x for x in (_safe_build(BuyerSegment, b) for b in (ma_data.get("buyer_segments") or [])) if x is not None],
+        key_opinion_leaders         = ma_data.get("key_opinion_leaders") or [],
+        reimbursement_pathway       = ma_data.get("reimbursement_pathway") or "",
+        first_commercial_step       = ma_data.get("first_commercial_step") or "",
+        international_opportunities = ma_data.get("international_opportunities") or [],
     ) if ma_data else None
 
     geo_data = data.get("market_geography", {})
@@ -2893,10 +2904,10 @@ def _parse_expert_response(data, idea, product_type, expert, demand_results, hos
     evidence_base = _filter_evidence_base_sources(data.get("evidence_base") or {})
 
     # S-02 Value Driver Ranking
-    vdr = [r for r in data.get("value_driver_ranking", []) if isinstance(r, dict)]
+    vdr = [r for r in (data.get("value_driver_ranking") or []) if isinstance(r, dict)]
 
     # S-03 Segment Fit Table — enforce ≥1 Explicit non-target
-    sft = [r for r in data.get("segment_fit_table", []) if isinstance(r, dict)]
+    sft = [r for r in (data.get("segment_fit_table") or []) if isinstance(r, dict)]
     if sft and not any(
         "non-target" in (r.get("strategic_stance") or "").lower() for r in sft
     ):
@@ -2909,7 +2920,7 @@ def _parse_expert_response(data, idea, product_type, expert, demand_results, hos
         })
 
     # S-04 Feature Investment Posture — enforce ≥1 Exclude
-    fip = [r for r in data.get("feature_investment_posture", []) if isinstance(r, dict)]
+    fip = [r for r in (data.get("feature_investment_posture") or []) if isinstance(r, dict)]
     if fip and not any(
         (r.get("posture") or "").lower() == "exclude" for r in fip
     ):
@@ -2930,18 +2941,18 @@ def _parse_expert_response(data, idea, product_type, expert, demand_results, hos
         pos_stmt = pos_stmt.rstrip(".") + ". This product is not intended as [specify non-target use]."
 
     # S-08 Strategic Risks (3-5 items)
-    risks = [r for r in data.get("strategic_risks", []) if isinstance(r, str) and r.strip()]
+    risks = [r for r in (data.get("strategic_risks") or []) if isinstance(r, str) and r.strip()]
 
     # S-09 Guiding Question
     guiding_q = data.get("guiding_question") or ""
 
     # B-04: competitive_alternatives from main LLM call — seeds §7 without a separate Haiku call
-    _comp_alts = [c for c in data.get("competitive_alternatives", []) if isinstance(c, dict) and c.get("name")]
+    _comp_alts = [c for c in (data.get("competitive_alternatives") or []) if isinstance(c, dict) and c.get("name")]
 
     return PIReport(
         product_type           = product_type,
         idea_submitted         = idea,
-        executive_summary      = data.get("executive_summary", ""),
+        executive_summary      = data.get("executive_summary") or "",
         disease_intelligence   = disease_intel,
         market_sizing          = market_sizing,
         regulatory_pathway     = reg_pathway,
@@ -2949,9 +2960,9 @@ def _parse_expert_response(data, idea, product_type, expert, demand_results, hos
         supporting_evidence    = _build_evidence_items(demand_results[:10]),
         hospital_need_matches  = _build_hospital_matches(hospital_matches_raw[:5]),
         market_geography       = _geo_obj,
-        recommended_next_steps = data.get("recommended_next_steps", []),
-        strategic_playbook     = data.get("strategic_playbook", []),
-        literature_citations   = _filter_lit(data.get("literature_citations", []), idea, sub_expert_id) or None,
+        recommended_next_steps = data.get("recommended_next_steps") or [],
+        strategic_playbook     = data.get("strategic_playbook") or [],
+        literature_citations   = _filter_lit(data.get("literature_citations") or [], idea, sub_expert_id) or None,
         limitations            = data.get("limitations"),
         signals_searched       = total_signals,
         hospital_needs_searched = len(hospital_matches_raw),
@@ -2993,71 +3004,73 @@ async def _generate_antibiotic_report(
     hospital_needs = _build_hospital_matches(hospital_matches_raw[:5])
 
     # Parse disease intelligence
-    di_data = data.get("disease_intelligence", {})
+    di_data = data.get("disease_intelligence") or {}
     disease_intel = DiseaseIntelligence(
-        condition=di_data.get("condition", ""),
-        data_points=[
-            DiseaseDataPoint(**dp) for dp in _clean_di_source_urls(_filter_di_data_points(di_data.get("data_points", [])))
-        ],
+        condition=di_data.get("condition") or "",
+        data_points=[x for x in (_safe_build(DiseaseDataPoint, dp) for dp in _clean_di_source_urls(_filter_di_data_points([x for x in (di_data.get("data_points") or []) if isinstance(x, dict)]))) if x is not None],
         resistance_profile=di_data.get("resistance_profile"),
         pipeline_status=di_data.get("pipeline_status"),
-        unmet_need_summary=di_data.get("unmet_need_summary", ""),
+        unmet_need_summary=di_data.get("unmet_need_summary") or "",
     ) if di_data else None
 
     # Parse market sizing
-    ms_data = data.get("market_sizing", {})
+    ms_data = data.get("market_sizing") or {}
     market_sizing = MarketSizingCalculation(
-        steps=[MarketSizingStep(**s) for s in ms_data.get("steps", [])],
-        formula=ms_data.get("formula", ""),
+        steps=[x for x in (_safe_build(MarketSizingStep, s) for s in (ms_data.get("steps") or [])) if x is not None],
+        formula=ms_data.get("formula") or "",
         total_addressable_market_usd=float(ms_data.get("total_addressable_market_usd") or 0),
         serviceable_market_usd=float(ms_data.get("serviceable_market_usd") or 0),
-        methodology_note=ms_data.get("methodology_note", ""),
+        methodology_note=ms_data.get("methodology_note") or "",
     ) if ms_data else None
 
     # Parse regulatory pathway
-    rp_data = data.get("regulatory_pathway", {})
+    rp_data = data.get("regulatory_pathway") or {}
     reg_pathway = None
     if rp_data:
-        designations = [RegulatoryDesignation(**d) for d in rp_data.get("designations", [])]
-        trial_reqs   = [ClinicalTrialRequirements(**t) for t in rp_data.get("clinical_trial_requirements", [])]
+        designations = [x for x in (_safe_build(RegulatoryDesignation, d) for d in (rp_data.get("designations") or [])) if x is not None]
+        trial_reqs   = [x for x in (_safe_build(ClinicalTrialRequirements, t) for t in (rp_data.get("clinical_trial_requirements") or [])) if x is not None]
         reg_pathway  = RegulatoryPathway(
-            recommended_pathway=rp_data.get("recommended_pathway", ""),
-            pathway_rationale=rp_data.get("pathway_rationale", ""),
+            recommended_pathway=rp_data.get("recommended_pathway") or "",
+            pathway_rationale=rp_data.get("pathway_rationale") or "",
             designations=designations,
             clinical_trial_requirements=trial_reqs,
-            total_timeline_estimate=rp_data.get("total_timeline_estimate", ""),
-            total_cost_estimate=rp_data.get("total_cost_estimate", ""),
-            key_friction_points=rp_data.get("key_friction_points", []),
-            loopholes_and_strategies=rp_data.get("loopholes_and_strategies", []),
-            funding_programs=rp_data.get("funding_programs", []),
+            total_timeline_estimate=rp_data.get("total_timeline_estimate") or "",
+            total_cost_estimate=rp_data.get("total_cost_estimate") or "",
+            key_friction_points=rp_data.get("key_friction_points") or [],
+            loopholes_and_strategies=rp_data.get("loopholes_and_strategies") or [],
+            funding_programs=rp_data.get("funding_programs") or [],
         )
 
     # Parse market access
-    ma_data = data.get("market_access", {})
+    ma_data = data.get("market_access") or {}
     market_access = None
     if ma_data:
-        buyer_segs   = [BuyerSegment(**b) for b in ma_data.get("buyer_segments", [])]
+        buyer_segs   = [x for x in (_safe_build(BuyerSegment, b) for b in (ma_data.get("buyer_segments") or [])) if x is not None]
         market_access = MarketAccessStrategy(
-            primary_channel=ma_data.get("primary_channel", ""),
+            primary_channel=ma_data.get("primary_channel") or "",
             buyer_segments=buyer_segs,
-            key_opinion_leaders=ma_data.get("key_opinion_leaders", []),
-            reimbursement_pathway=ma_data.get("reimbursement_pathway", ""),
-            first_commercial_step=ma_data.get("first_commercial_step", ""),
-            international_opportunities=ma_data.get("international_opportunities", []),
+            key_opinion_leaders=ma_data.get("key_opinion_leaders") or [],
+            reimbursement_pathway=ma_data.get("reimbursement_pathway") or "",
+            first_commercial_step=ma_data.get("first_commercial_step") or "",
+            international_opportunities=ma_data.get("international_opportunities") or [],
         )
 
     # Parse geography
-    geo_data = data.get("market_geography", {})
-    geography = MarketGeography(
-        description=geo_data.get("description", ""),
-        top_states=geo_data.get("top_states", []),
-        scope=geo_data.get("scope", "national"),
-    ) if geo_data else None
+    geo_data = data.get("market_geography") or {}
+    try:
+        geography = MarketGeography(
+            description=geo_data.get("description") or "",
+            top_states=geo_data.get("top_states") or [],
+            scope=geo_data.get("scope") or "national",
+        ) if geo_data else None
+    except Exception as _geo_e:
+        logger.warning("market_geography parse failed (non-fatal): %s", _geo_e)
+        geography = None
 
     return PIReport(
         product_type=ProductType.ANTIBIOTIC,
         idea_submitted=idea,
-        executive_summary=data.get("executive_summary", ""),
+        executive_summary=data.get("executive_summary") or "",
         disease_intelligence=disease_intel,
         market_sizing=market_sizing,
         regulatory_pathway=reg_pathway,
@@ -3065,9 +3078,9 @@ async def _generate_antibiotic_report(
         supporting_evidence=evidence,
         hospital_need_matches=hospital_needs,
         market_geography=geography,
-        recommended_next_steps=data.get("recommended_next_steps", []),
-        strategic_playbook=data.get("strategic_playbook", []),
-        literature_citations=_filter_lit(data.get("literature_citations", []), idea, "drug_amr") or None,
+        recommended_next_steps=data.get("recommended_next_steps") or [],
+        strategic_playbook=data.get("strategic_playbook") or [],
+        literature_citations=_filter_lit(data.get("literature_citations") or [], idea, "drug_amr") or None,
         limitations=data.get("limitations"),
         signals_searched=total_signals,
         hospital_needs_searched=len(hospital_matches_raw),
@@ -3161,48 +3174,52 @@ async def _generate_generic_pi_report(
     raw  = await _call_claude(context, GENERIC_PI_SYSTEM_PROMPT, max_tokens=3000)
     data = _clean_json(raw)
 
-    di_data = data.get("disease_intelligence", {})
+    di_data = data.get("disease_intelligence") or {}
     disease_intel = DiseaseIntelligence(
-        condition=di_data.get("condition", ""),
-        data_points=[DiseaseDataPoint(**dp) for dp in _clean_di_source_urls(_filter_di_data_points(di_data.get("data_points", [])))],
-        unmet_need_summary=di_data.get("unmet_need_summary", ""),
+        condition=di_data.get("condition") or "",
+        data_points=[x for x in (_safe_build(DiseaseDataPoint, dp) for dp in _clean_di_source_urls(_filter_di_data_points([x for x in (di_data.get("data_points") or []) if isinstance(x, dict)]))) if x is not None],
+        unmet_need_summary=di_data.get("unmet_need_summary") or "",
     ) if di_data else None
 
-    ms_data = data.get("market_sizing", {})
+    ms_data = data.get("market_sizing") or {}
     market_sizing = MarketSizingCalculation(
-        steps=[MarketSizingStep(**s) for s in ms_data.get("steps", [])],
-        formula=ms_data.get("formula", ""),
+        steps=[x for x in (_safe_build(MarketSizingStep, s) for s in (ms_data.get("steps") or [])) if x is not None],
+        formula=ms_data.get("formula") or "",
         total_addressable_market_usd=float(ms_data.get("total_addressable_market_usd") or 0),
         serviceable_market_usd=float(ms_data.get("serviceable_market_usd") or 0),
-        methodology_note=ms_data.get("methodology_note", ""),
+        methodology_note=ms_data.get("methodology_note") or "",
     ) if ms_data else None
 
-    ma_data = data.get("market_access", {})
+    ma_data = data.get("market_access") or {}
     market_access = MarketAccessStrategy(
-        primary_channel=ma_data.get("primary_channel", ""),
-        buyer_segments=[BuyerSegment(**b) for b in ma_data.get("buyer_segments", [])],
-        key_opinion_leaders=ma_data.get("key_opinion_leaders", []),
-        reimbursement_pathway=ma_data.get("reimbursement_pathway", ""),
-        first_commercial_step=ma_data.get("first_commercial_step", ""),
-        international_opportunities=ma_data.get("international_opportunities", []),
+        primary_channel=ma_data.get("primary_channel") or "",
+        buyer_segments=[x for x in (_safe_build(BuyerSegment, b) for b in (ma_data.get("buyer_segments") or [])) if x is not None],
+        key_opinion_leaders=ma_data.get("key_opinion_leaders") or [],
+        reimbursement_pathway=ma_data.get("reimbursement_pathway") or "",
+        first_commercial_step=ma_data.get("first_commercial_step") or "",
+        international_opportunities=ma_data.get("international_opportunities") or [],
     ) if ma_data else None
 
-    geo_data = data.get("market_geography", {})
-    geography = MarketGeography(**geo_data) if geo_data else None
+    geo_data = data.get("market_geography") or {}
+    try:
+        geography = MarketGeography(**geo_data) if geo_data else None
+    except Exception as _geo_e:
+        logger.warning("market_geography parse failed (non-fatal): %s", _geo_e)
+        geography = None
 
     return PIReport(
         product_type=product_type,
         idea_submitted=idea,
-        executive_summary=data.get("executive_summary", ""),
+        executive_summary=data.get("executive_summary") or "",
         disease_intelligence=disease_intel,
         market_sizing=market_sizing,
         market_access=market_access,
         supporting_evidence=_build_evidence_items(demand_results[:10]),
         hospital_need_matches=_build_hospital_matches(hospital_matches_raw[:5]),
         market_geography=geography,
-        recommended_next_steps=data.get("recommended_next_steps", []),
-        strategic_playbook=data.get("strategic_playbook", []),
-        literature_citations=_filter_lit(data.get("literature_citations", []), idea, "") or None,
+        recommended_next_steps=data.get("recommended_next_steps") or [],
+        strategic_playbook=data.get("strategic_playbook") or [],
+        literature_citations=_filter_lit(data.get("literature_citations") or [], idea, "") or None,
         limitations=data.get("limitations"),
         signals_searched=total_signals,
         hospital_needs_searched=len(hospital_matches_raw),
