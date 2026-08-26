@@ -1362,6 +1362,7 @@ SUB_EXPERT_REGISTRY: Dict[str, SubExpertProfile] = {
     # Research Tools & Non-Clinical Infrastructure
     "research_tool_non_clinical":    RESEARCH_TOOL_NON_CLINICAL,
     "research_infrastructure_saas":  RESEARCH_TOOL_NON_CLINICAL,  # same expert, different archetype
+    "research_tool_agronomy":        RESEARCH_TOOL_NON_CLINICAL,  # soil/agronomy sensors — non-clinical research tools
 }
 
 

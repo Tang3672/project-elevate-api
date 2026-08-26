@@ -345,7 +345,9 @@ def _keyword_classify(idea: str) -> str:
         except Exception:
             pass
     if not scores:
-        return "drug_amr"
+        # drug_oncology is the most common modality and produces less-wrong output for
+        # out-of-scope ideas than drug_amr, which tends to inject antibiotic-specific sources.
+        return "drug_oncology"
     return max(scores, key=scores.get)
 
 
