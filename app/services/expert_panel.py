@@ -459,17 +459,24 @@ async def _run_commercial_panel(
         "You are a biotech market access and commercialization analyst.\n"
         + (f"Domain context: {domain_hint}\n" if domain_hint else "")
         + (f"\n{deal_comp_block}\n" if deal_comp_block else "")
-        + "Assess the commercial viability of this biomedical innovation. "
-        "Your pricing and deal structure estimates MUST reference the deal comparables above.\n"
+        + "Assess the commercial viability of this innovation. "
+        "Your pricing and deal structure estimates MUST reference the deal comparables above "
+        "and the domain context — do NOT apply drug WAC pricing or J-code/DRG/CPT reimbursement "
+        "for non-clinical research tools.\n"
         "Return ONLY valid JSON — no prose, no markdown:\n"
         "{\n"
-        '  "annual_price_benchmark_usd": <integer, estimated annual WAC price in USD>,\n'
+        '  "annual_price_benchmark_usd": <integer, annual revenue per customer in USD —'
+        ' for drugs: annual WAC; for research tools: per-lab/per-site annual subscription or license;'
+        ' for devices: ASP or annual service fee>,\n'
         '  "pricing_comparable": "<name of comparable product used as pricing anchor>",\n'
         '  "key_payer_barrier": "<single most important commercial barrier in one specific sentence>",\n'
         '  "competitive_moat_score": <float 0-10, where 10=highly defensible competitive position>,\n'
         '  "moat_basis": "<what specifically creates or undermines the moat in one sentence>",\n'
         '  "yrs_to_peak_revenue": <integer, years post-launch to peak annual revenue>,\n'
-        '  "reimbursement_mechanism": "<primary code/pathway, e.g., J-code, DRG+NTAP, CPT, self-pay>",\n'
+        '  "reimbursement_mechanism": "<payment pathway —'
+        ' drugs: J-code/DRG+NTAP/specialty-pharmacy;'
+        ' research tools: grant direct costs/per-lab subscription/SBIR commercialization;'
+        ' devices: CPT/DRG; DTx/consumer: self-pay>,\n'
         '  "licensing_upfront_range": "<use K for amounts under $1M, e.g. $50K-$150K not $0.05M-$0.15M; for larger deals use $XM-$YM>",\n'
         '  "licensing_royalty_range": "<X%-Y% royalty on net sales (academic) or X%-Y% (corporate)>"\n'
         "}"
@@ -618,11 +625,7 @@ def format_panel_for_prompt(panel: ExpertPanelResult) -> str:
 
     if panel.commercial:
         com = panel.commercial
-        price_fmt = (
-            f"${com.annual_price_benchmark_usd:,.0f}/yr"
-            if com.annual_price_benchmark_usd >= 10_000
-            else f"${com.annual_price_benchmark_usd:,}/course"
-        )
+        price_fmt = f"${com.annual_price_benchmark_usd:,.0f}/yr"
         lines += [
             "── COMMERCIAL VIABILITY EXPERT (anchored on AUTM/BIO deal transaction data) ──",
             f"  Pricing Benchmark: {price_fmt} (based on {com.pricing_comparable})",
