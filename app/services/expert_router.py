@@ -162,11 +162,21 @@ async def classify_with_claude(idea: str) -> tuple[str, str, float, str]:
                 if text.startswith("json"):
                     text = text[4:]
             data = json.loads(text.strip())
-            raw_domain = data.get("domain", _DEFAULT_DOMAIN)
+            raw_domain = data.get("domain", "")
             confidence = float(data.get("confidence", 0.7))
             reasoning  = data.get("reasoning", "")
-            # Granular v2 sub-expert id (drives modality); top-level domain is a
-            # coerced v1 key used only for disease context.
+            # Validate Claude returned a known sub-expert key. If it returned empty,
+            # a top-level registry key (e.g. "antibiotic_amr"), or any hallucinated
+            # string, those are not in _ROUTER_TO_EXPERT and would produce sub_expert_id
+            # values that get_sub_expert() can't resolve — causing a silent fallback to
+            # the v1 AMR expert. Keyword classify only returns known valid IDs.
+            if raw_domain not in _ROUTER_TO_EXPERT:
+                logger.info(
+                    "classify_with_claude: domain '%s' not in router map — "
+                    "falling back to keyword classify", raw_domain,
+                )
+                raw_domain = _keyword_classify(idea)
+                confidence = min(confidence, 0.60)
             sub_expert_id = _ROUTER_TO_EXPERT.get(raw_domain, raw_domain)
             top_level     = _coerce_to_registry(sub_expert_id)
             return sub_expert_id, top_level, confidence, reasoning
