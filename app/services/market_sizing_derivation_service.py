@@ -163,6 +163,14 @@ _ARCHETYPE_KEYWORDS = {
                                    "wearable algorithm", "health platform", "analytics platform"],
     "combination":                ["drug-device", "drug eluting", "combination product",
                                    "drug delivery system", "nanoparticle drug", "inhaler drug"],
+    # Non-clinical research tools — academic PI / lab buyer model.
+    # Included here so keyword scoring routes lab instruments correctly
+    # even before the sub_expert_id check in generate_market_sizing_derivation.
+    "research_tool_non_clinical": ["research tool", "data logger", "lab instrument",
+                                   "environmental sensor", "field sensor", "soil sensor",
+                                   "agronomy", "precision agriculture instrument",
+                                   "laboratory equipment", "research grade sensor",
+                                   "field instrument", "sensor platform", "non-clinical"],
 }
 
 
@@ -245,7 +253,20 @@ def _classify_archetype(idea: str, product_type: str) -> str:
                 scores[archetype] += 1
 
     best = max(scores, key=scores.get)
-    return best if scores[best] > 0 else "pharma_small_molecule"
+    if scores[best] > 0:
+        return best
+    # Zero score across all archetypes — before defaulting to the pharma drug pricing
+    # model (patient population × WAC), check for explicit non-biomedical signals.
+    # Pricing a soil sensor or industrial IoT device as a drug produces junk numbers.
+    _NON_BIO_FALLBACK = (
+        "soil", "crop", "farm", "agricult", "agronomy", "irrigat",
+        "food production", "food safety", "industrial iot", "smart home",
+        "air quality", "environmental monitor", "consumer product",
+        "logistics", "supply chain", "retail",
+    )
+    if any(s in combined for s in _NON_BIO_FALLBACK):
+        return "research_tool_non_clinical"
+    return "pharma_small_molecule"
 
 
 # ══════════════════════════════════════════════════════════════════════════════

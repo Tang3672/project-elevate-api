@@ -301,6 +301,13 @@ _ROUTER_TO_EXPERT: dict[str, str] = {
 # Default top-level expert when nothing else resolves (must be a valid EXPERT_REGISTRY key).
 _DEFAULT_DOMAIN = "antibiotic_amr"
 
+# Set of all medical modality sub-expert IDs (excludes research-tool categories).
+# Used by H-02 to detect when Claude has assigned a clinical expert to a non-clinical product.
+_MEDICAL_MODALITIES: frozenset[str] = frozenset(_ROUTER_TO_EXPERT.keys()) - frozenset((
+    "research_tool_non_clinical", "research_tool_agronomy",
+    "research_infrastructure_saas",
+))
+
 # Coarse keyword → one of the 6 top-level EXPERT_REGISTRY domains. Used to coerce
 # granular router/sub-expert ids (e.g. "drug_amr", "biologic_oncology") — which are
 # NOT registry keys — down to a valid top-level expert, so the registry lookup in
@@ -345,8 +352,21 @@ def _keyword_classify(idea: str) -> str:
         except Exception:
             pass
     if not scores:
-        # drug_oncology is the most common modality and produces less-wrong output for
-        # out-of-scope ideas than drug_amr, which tends to inject antibiotic-specific sources.
+        # Before defaulting to any drug modality, check for explicit non-biomedical signals.
+        # Agricultural, industrial, environmental, and consumer products must never be
+        # routed to a clinical expert just because they had no keyword hits.
+        idea_l = idea.lower()
+        _NON_BIO_KWS = (
+            "soil moisture", "soil sensor", "soil probe", "precision agriculture",
+            "agronomy", "crop monitoring", "crop yield", "irrigation sensor",
+            "farm sensor", "farm management", "field weather station",
+            "food production", "food safety testing", "agricultural sensor",
+            "industrial iot", "smart home", "air quality monitor",
+            "environmental sensor", "consumer product", "retail analytics",
+            "logistics tracking", "supply chain sensor",
+        )
+        if any(kw in idea_l for kw in _NON_BIO_KWS):
+            return "research_tool_agronomy"
         return "drug_oncology"
     return max(scores, key=scores.get)
 
@@ -391,6 +411,46 @@ async def route(
             claude_domain = _coerce_to_registry(sub_expert_id)
             confidence    = min(confidence, 0.75)
             reasoning     = f"Corrected from {sub_expert_id}: non-clinical research-tool signals, no patient/clinical signals."
+
+    # H-02: Broad non-biomedical guard — catches agricultural, industrial, environmental,
+    # and consumer products that Claude classifies into a medical modality simply because
+    # it can't find a better bucket. These products must not generate patient/drug/FDA
+    # framing. Unlike H-01 (which targets digital misclassification only), H-02 applies
+    # to all medical modalities and uses a wider signal set.
+    if sub_expert_id in _MEDICAL_MODALITIES:
+        idea_l = idea.lower()
+        _NON_BIO_H02 = (
+            "soil moisture", "soil sensor", "soil probe", "soil water", "soil science",
+            "precision agriculture", "agronomy", "crop monitoring", "crop yield",
+            "irrigation sensor", "farm management", "farm sensor", "field weather",
+            "agricultural sensor", "agronomy data", "soil salinity", "soil temperature",
+            "food production", "food safety", "industrial iot", "smart home sensor",
+            "air quality monitor", "environmental sensor node", "consumer product launch",
+            "retail analytics", "logistics tracking", "supply chain iot",
+        )
+        _CLINICAL_H02 = (
+            "patient", "clinical trial", "hospital", "physician", "disease treatment",
+            "fda approval", "therapeutic indication", "drug approval", "diagnosis",
+            "payer", "reimbursement", "medicare", "medicaid", "ehr", "emr",
+            "clinical claim", "prescriber",
+        )
+        _has_non_bio = any(s in idea_l for s in _NON_BIO_H02)
+        _has_clinical = any(s in idea_l for s in _CLINICAL_H02)
+        if _has_non_bio and not _has_clinical:
+            _prev = sub_expert_id
+            sub_expert_id = "research_tool_agronomy" if any(
+                s in idea_l for s in ("soil", "agronomy", "crop", "irrigation", "farm", "precision agri")
+            ) else "research_tool_non_clinical"
+            claude_domain = _coerce_to_registry(sub_expert_id)
+            confidence    = min(confidence, 0.65)
+            reasoning     = (
+                f"H-02 override from '{_prev}': non-biomedical product signals "
+                "detected with no clinical indicator — routed to research tool expert."
+            )
+            logger.info(
+                "H-02: '%s' overridden → '%s' (non-biomedical signals, no clinical signals)",
+                _prev, sub_expert_id,
+            )
 
     # Routing logic — reconciles the PI-selected top-level disease domain with Claude.
     if pi_domain == "auto":
