@@ -34,6 +34,7 @@ from app.ingestion.connectors.cdc_surveillance import (
     CDCWastewaterConnector, CDCFluViewConnector
 )
 from app.ingestion.connectors.hrsa_shortage import HRSAShortageConnector
+from app.ingestion.connectors.news_articles import NewsArticleConnector
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -47,6 +48,7 @@ def build_connector_registry() -> List[BaseConnector]:
         # Tier 4 — Real-time / weekly
         CDCWastewaterConnector(),
         CDCFluViewConnector(),
+        NewsArticleConnector(),        # RSS news + journal TOCs — grows daily
 
         # Tier 2 — Disease burden & utilization
         CDCPlacesConnector(app_token=settings.CDC_APP_TOKEN, level="county"),

@@ -46,6 +46,9 @@ class SignalSource(str, Enum):
     HRSA_SHORTAGE         = "hrsa_shortage"
     CDC_SVI               = "cdc_svi"
 
+    # News articles and research preprints
+    RSS_NEWS              = "rss_news"
+
     # Manual hospital submission (Step 1)
     MANUAL                = "manual"
 

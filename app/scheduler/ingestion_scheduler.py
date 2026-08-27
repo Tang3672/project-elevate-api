@@ -119,6 +119,7 @@ async def _run_weekly_realtime():
         "cdc_fluview",
         "clinical_trials",
         "fda_recalls",
+        "rss_news",         # news articles + journal TOCs — grows demand_signals weekly
     ])
 
 
