@@ -337,7 +337,7 @@ DEAL_COMPS: dict[str, DealCompProfile] = {
         milestones_preclinical_m = (0.0, 0.10),
         milestones_phase1_m      = (0.0, 0.25),
         milestones_phase2_m      = (0.0, 0.50),
-        example_deal  = "LabArchives ELN: per-institution site license $15K-$80K/yr; acquired by Agilent 2019. Quartzy: freemium to $5K-$30K/yr institutional; acquired by Zoetis. Benchling: $20K-$200K/yr enterprise; raised at $6.1B valuation. REDCap: open-source — no licensing revenue model, institutional support fees only.",
+        example_deal  = "LabArchives ELN: per-institution site license $15K-$80K/yr; acquired by Agilent 2019. Quartzy: freemium to $5K-$30K/yr institutional; acquired by Zoetis. Benchling: $20K-$200K/yr enterprise; raised at $6.1B valuation. Open-source academic ELN platforms: no licensing revenue, institutional support fees only.",
         source        = "[AUTM24] research software license survey; published LabArchives / Benchling deal analysis",
         notes         = "SaaS revenue is subscription-based — TTOs typically take a small percentage or flat fee rather than a per-revenue royalty. Focus valuation on ARR multiples (5-15×), not milestone schedules. Comparable SaaS acqui-hire/acquisition multiples are 5-10× ARR at early stage.",
     ),
