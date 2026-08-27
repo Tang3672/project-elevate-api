@@ -3491,6 +3491,13 @@ def _enforce_market_consistency(report, deriv) -> None:
     try:
         ms.total_addressable_market_usd = float(tam)
         logger.debug("market consistency: TAM headline → $%s", f"{tam:,.0f}")
+        # Strip any "$0" methodology prose that the LLM wrote when it incorrectly
+        # judged the product as "not applicable" — the derivation is authoritative.
+        if hasattr(ms, "methodology_note") and isinstance(ms.methodology_note, str):
+            _mn = ms.methodology_note
+            if "$0" in _mn or "misrepresent this product" in _mn or "not a biomedical" in _mn.lower():
+                ms.methodology_note = ""
+                logger.info("market consistency: cleared $0/not-biomedical methodology_note (derivation authoritative)")
     except Exception as e:
         logger.warning("market consistency phase-1 (TAM headline) failed: %s", e)
         return
