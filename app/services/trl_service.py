@@ -233,7 +233,7 @@ def _estimate_trl_from_idea(idea: str, development_phase: str = "preclinical") -
 def assess_trl(
     idea: str,
     development_phase: str = "preclinical",
-    sub_expert_id: str = "drug_amr",
+    sub_expert_id: str = "research_tool_non_clinical",
     explicit_trl: Optional[int] = None,
 ) -> TRLResult:
     """

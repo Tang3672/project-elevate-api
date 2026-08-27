@@ -379,7 +379,7 @@ SEARCH_TEMPLATES: Dict[str, List[str]] = {
     # ── Agronomy / USDA-funded research tools ────────────────────────────────
     "research_tool_agronomy": [
         "USDA NIFA SBIR {product} precision agriculture sensor 2024 site:nifa.usda.gov",
-        "soil moisture sensor adoption rate agricultural research 2024",
+        "{product} adoption rate agricultural research land-grant university 2024",
         "USDA NIFA research instrumentation grant funding award 2024 site:nifa.usda.gov",
         "precision agriculture IoT sensor market adoption land-grant university 2024",
         "USDA NIFA SBIR STTR agronomy sensor data acquisition 2024",

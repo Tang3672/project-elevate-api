@@ -633,7 +633,7 @@ async def generate_pi_report(
     # Strategic playbook OUTSIDE source building try block
     try:
         from app.services.strategy_database import format_strategies_for_report
-        _sub_id = getattr(expert, "sub_expert_id", getattr(expert, "domain_id", "drug_amr"))
+        _sub_id = getattr(expert, "sub_expert_id", getattr(expert, "domain_id", "research_tool_non_clinical"))
         # DOMAIN GATE (v3 spec §4 fix): if domain is LIFE_SCIENCES_RESEARCH, the router
         # may have selected a clinical expert (e.g. digital_rpm). Preserve the actual
         # typed research archetype when the router got it right; otherwise force to the
@@ -703,9 +703,10 @@ async def generate_pi_report(
                 # Non-clinical research tools
                 "research_tool_non_clinical":   "research_tool_non_clinical",
                 "research_infrastructure_saas": "research_infrastructure_saas",
+                "research_tool_agronomy":        "research_tool_non_clinical",
                 # Generic fallbacks
-                "drug_small_molecule": "drug_amr",
-                "drug_other": "drug_amr",
+                "drug_small_molecule": "drug_oncology",
+                "drug_other": "drug_oncology",
                 "biologic": "biologic_oncology",
                 "antibody": "biologic_oncology",
                 "adc": "biologic_oncology",
@@ -723,7 +724,7 @@ async def generate_pi_report(
                 "immunology": "drug_immunology",
                 "mental_health": "drug_mental_health",
             }
-            fallback_id = fallback_map.get(_sub_id, "drug_amr")
+            fallback_id = fallback_map.get(_sub_id, "research_tool_non_clinical")
             playbook = format_strategies_for_report(fallback_id, context=_strategy_context)
             logger.info(f"Used fallback sub_expert_id={fallback_id}")
         report.strategic_playbook = playbook
@@ -872,7 +873,7 @@ async def run_report_verification(report) -> None:
     in place. Can run AFTER the report is delivered (background) so it never blocks
     the UI; the budget is generous since latency no longer matters there."""
     import asyncio as _averify
-    _sub_id = getattr(report, "expert_domain", None) or "drug_amr"
+    _sub_id = getattr(report, "expert_domain", None) or "research_tool_non_clinical"
     try:
         _report_dict = report.model_dump(mode="json")
     except Exception as _dump_e:
@@ -1296,7 +1297,7 @@ async def _generate_expert_report(idea, product_type, expert, demand_results, ho
 
     # Layer 2: Knowledge Retriever → 5-6 parallel live searches
     # Uses sub_expert_id from router (v2) or domain_id (v1 fallback)
-    sub_expert_id = getattr(expert, "sub_expert_id", getattr(expert, "domain_id", "drug_amr"))
+    sub_expert_id = getattr(expert, "sub_expert_id", getattr(expert, "domain_id", "research_tool_non_clinical"))
     expert_system_prompt = getattr(expert, "system_prompt", "")
 
     # ── Funding pathway framing injection ─────────────────────────────────────
@@ -1458,13 +1459,13 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
             get_all_chapter_data(
                 disease_name=disease_name,
                 therapeutic_area=ta_for_deriv or "other",
-                subcategory_id=sub_expert_id or "drug_amr",
+                subcategory_id=sub_expert_id or "research_tool_non_clinical",
                 idea=idea,
             ),
             run_retrieval_pipeline(
                 disease_name=disease_name,
                 therapeutic_area=ta_for_deriv or "other",
-                subcategory_id=sub_expert_id or "drug_amr",
+                subcategory_id=sub_expert_id or "research_tool_non_clinical",
                 idea=idea,
                 max_total_sec=12.0,
             ),
@@ -1474,7 +1475,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
             run_expert_panel(
                 disease_name=disease_name,
                 idea=idea,
-                sub_expert_id=sub_expert_id or "drug_amr",
+                sub_expert_id=sub_expert_id or "research_tool_non_clinical",
                 product_type=product_type or "drug",
                 archetype=sub_expert_id or "",
             ),
@@ -1700,7 +1701,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
         trl_result = assess_trl(
             idea=idea,
             development_phase=_dev_phase,
-            sub_expert_id=sub_expert_id or "drug_amr",
+            sub_expert_id=sub_expert_id or "research_tool_non_clinical",
         )
         trl_block = trl_result.formatted
         logger.info("TRL assessment: TRL %d — %s", trl_result.trl_level, trl_result.trl_label)
@@ -1713,7 +1714,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
         from app.services.investor_matcher import format_investors_for_prompt
         _trl_level = trl_result.trl_level if trl_block else 3
         investor_block = format_investors_for_prompt(
-            sub_expert_id=sub_expert_id or "drug_amr",
+            sub_expert_id=sub_expert_id or "research_tool_non_clinical",
             trl_level=_trl_level,
             is_academic_spinout=True,
         )

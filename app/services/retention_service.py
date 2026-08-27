@@ -549,7 +549,7 @@ async def run_retention_checks(watchlist: dict, saved_reports: List[dict]) -> di
     latest_report = saved_reports[0] if saved_reports else {}
     report_data   = latest_report.get("report_data", {}) if latest_report else {}
     condition     = report_data.get("disease_intelligence", {}).get("condition", desc[:50])
-    sub_expert_id = report_data.get("expert_domain", "drug_amr")
+    sub_expert_id = report_data.get("expert_domain", "research_tool_non_clinical")
 
     results = {}
 

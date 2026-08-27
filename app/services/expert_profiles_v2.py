@@ -19,8 +19,11 @@ Each sub-expert has:
   - icon + color:     UI badge styling
 """
 
+import logging
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional
+
+logger = logging.getLogger(__name__)
 
 
 # ── Tier 1 Categories (PI-facing UI) ─────────────────────────────────────────
@@ -1367,7 +1370,21 @@ SUB_EXPERT_REGISTRY: Dict[str, SubExpertProfile] = {
 
 
 def get_sub_expert(sub_expert_id: str) -> Optional[SubExpertProfile]:
-    return SUB_EXPERT_REGISTRY.get(sub_expert_id)
+    if not sub_expert_id:
+        return None
+    result = SUB_EXPERT_REGISTRY.get(sub_expert_id)
+    if result is None:
+        # Unknown sub_expert_id: returning None causes the caller to fall back to
+        # the v1 disease expert (usually AMR), which is wrong for any product that
+        # doesn't fit a specific medical category. Use the neutral research-tool
+        # expert instead — it generates no patient/FDA/drug framing.
+        logger.warning(
+            "get_sub_expert: no entry for '%s' — using research_tool_non_clinical "
+            "as neutral fallback (add to SUB_EXPERT_REGISTRY to assign a specific expert)",
+            sub_expert_id,
+        )
+        return RESEARCH_TOOL_NON_CLINICAL
+    return result
 
 
 def get_sub_experts_for_tier1(tier1_category: str) -> List[SubExpertProfile]:

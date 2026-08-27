@@ -283,6 +283,64 @@ DEAL_COMPS: dict[str, DealCompProfile] = {
         source        = "[BIO25] immunology deal database; published Humira biosimilar analysis",
         notes         = "Humira biosimilar entry (2023) reset immunology deal expectations. Biosimilar risk must be factored into exclusivity period value. IL-family targets (IL-4, IL-13, IL-17, IL-23) well-validated; mechanism de-risking allows premium deals earlier in development.",
     ),
+
+    # ── Research Tool / Lab Infrastructure deal comps ─────────────────────────
+    # These are NOT pharma licensing deals. Scale is 10-100× smaller.
+    # Sources: AUTM FY2024 survey (software/instrument licenses), NSF I-Corps
+    # survey of academic spinout commercialization, published SaaS/hardware
+    # licensing benchmarks for university research instrumentation.
+    # "development_phase" maps to: early (pre-launch) / launched / scaled.
+    "research_tool_non_clinical": DealCompProfile(
+        therapeutic_area    = "Research Tool / Lab Infrastructure (non-clinical)",
+        sub_expert_id       = "research_tool_non_clinical",
+        # Upfront issue fees for research software/hardware IP are 10-100× below pharma
+        upfront_preclinical_m = (0.01, 0.15),   # $10K–$150K (pre-commercial, prototype stage)
+        upfront_phase1_m      = (0.05, 0.25),   # $50K–$250K (early commercial launch)
+        upfront_phase2_m      = (0.10, 0.50),   # $100K–$500K (post-launch, growing install base)
+        upfront_phase3_m      = (0.25, 1.50),   # $250K–$1.5M (proven, >100 lab customers)
+        royalty_academic_pct  = (0.0,  3.0),    # AUTM FY2024: many research tool licenses are
+        royalty_corporate_pct = (2.0,  6.0),    # royalty-free or <3% for non-clinical tools
+        milestones_preclinical_m = (0.0, 0.10), # $0–$100K — milestone structures are rare
+        milestones_phase1_m      = (0.0, 0.25), # for research tools; most are simple royalties
+        milestones_phase2_m      = (0.0, 0.50),
+        example_deal  = "AUTM FY2024: median academic research software license upfront $25K-$75K + 2-3% royalty. Open Ephys: MIT spinout, SBIR-funded commercialization, per-unit royalty to university. LabArchives: site license $15K-$80K/yr per institution. Movisens research sensor: per-device license $8K-$25K.",
+        source        = "[AUTM24] FY2024 non-pharma software/instrument license survey; [NSF-ICORPS] academic spinout deal benchmarks",
+        notes         = "Revenue model is recurring subscriptions or per-lab/per-site licenses — NOT milestone-based biobucks. Milestones are uncommon; royalties are low because buyers (academic PIs) have NIH/NSF grant budget constraints. Do NOT benchmark against pharma upfronts.",
+    ),
+
+    "research_tool_agronomy": DealCompProfile(
+        therapeutic_area    = "Agricultural Research Tool / Agronomy Sensor",
+        sub_expert_id       = "research_tool_agronomy",
+        upfront_preclinical_m = (0.01, 0.10),   # $10K–$100K (prototype)
+        upfront_phase1_m      = (0.025, 0.15),  # $25K–$150K (early commercial)
+        upfront_phase2_m      = (0.05, 0.30),   # $50K–$300K (growing)
+        upfront_phase3_m      = (0.10, 0.75),   # $100K–$750K (proven)
+        royalty_academic_pct  = (0.0,  2.0),
+        royalty_corporate_pct = (2.0,  5.0),
+        milestones_preclinical_m = (0.0, 0.05),
+        milestones_phase1_m      = (0.0, 0.10),
+        milestones_phase2_m      = (0.0, 0.20),
+        example_deal  = "METER Group/Decagon: university sensor IP licensed for $15K-$50K upfront + 2-3% royalty to land-grant university. USDA-NIFA SBIR Phase II: $500K non-dilutive for sensor commercialization. Typical agronomy hardware deal: $5K-$20K per deployment site.",
+        source        = "[AUTM24] agricultural technology license survey; [NIFA24] USDA SBIR award database",
+        notes         = "Primary commercialization path is USDA-NIFA SBIR/STTR + direct sales to agricultural researchers, NOT pharma-style licensing. Revenue is per-device or per-site annual subscription. Buyers are USDA-funded lab researchers and land-grant extension services.",
+    ),
+
+    "research_infrastructure_saas": DealCompProfile(
+        therapeutic_area    = "Research Infrastructure SaaS / LIMS / ELN",
+        sub_expert_id       = "research_infrastructure_saas",
+        upfront_preclinical_m = (0.01, 0.20),   # $10K–$200K
+        upfront_phase1_m      = (0.05, 0.30),
+        upfront_phase2_m      = (0.10, 0.75),
+        upfront_phase3_m      = (0.25, 2.00),
+        royalty_academic_pct  = (0.0,  2.0),    # SaaS typically zero royalty; upfront license fee
+        royalty_corporate_pct = (2.0,  5.0),
+        milestones_preclinical_m = (0.0, 0.10),
+        milestones_phase1_m      = (0.0, 0.25),
+        milestones_phase2_m      = (0.0, 0.50),
+        example_deal  = "LabArchives ELN: per-institution site license $15K-$80K/yr; acquired by Agilent 2019. Quartzy: freemium to $5K-$30K/yr institutional; acquired by Zoetis. Benchling: $20K-$200K/yr enterprise; raised at $6.1B valuation. REDCap: open-source — no licensing revenue model, institutional support fees only.",
+        source        = "[AUTM24] research software license survey; published LabArchives / Benchling deal analysis",
+        notes         = "SaaS revenue is subscription-based — TTOs typically take a small percentage or flat fee rather than a per-revenue royalty. Focus valuation on ARR multiples (5-15×), not milestone schedules. Comparable SaaS acqui-hire/acquisition multiples are 5-10× ARR at early stage.",
+    ),
 }
 
 # Default comps for sub_expert_ids not explicitly mapped
