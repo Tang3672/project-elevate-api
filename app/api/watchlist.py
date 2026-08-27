@@ -14,8 +14,9 @@ POST /api/v1/alerts/mark-all-seen    — mark all as seen
 POST /api/v1/watchlists/from-report  — one-click create from PI report
 POST /api/v1/admin/alerts/run-match  — manually trigger the weekly matcher
 """
+import asyncio
 import logging
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends
 from typing import Optional, List
 from pydantic import BaseModel
 
@@ -35,19 +36,43 @@ admin_router = APIRouter(dependencies=[Depends(require_admin_key)])
 
 # ── Watchlists ────────────────────────────────────────────────────────────────
 
+async def _immediate_scan(watchlist: dict) -> None:
+    """Run an intelligence scan immediately after a watchlist is created."""
+    try:
+        from app.services.weekly_tracker import process_watchlist
+        await process_watchlist(watchlist)
+        logger.info("Immediate scan complete for watchlist %s", watchlist.get("watchlist_id"))
+    except Exception as e:
+        logger.error("Immediate scan failed for watchlist %s: %s",
+                     watchlist.get("watchlist_id"), e)
+
+
 @router.post("", response_model=Watchlist)
 async def create(
-    payload:      CreateWatchlistRequest,
-    current_user: dict = Depends(get_current_user),
+    payload:          CreateWatchlistRequest,
+    background_tasks: BackgroundTasks,
+    current_user:     dict = Depends(get_current_user),
 ):
-    """Create a new demand surveillance watchlist."""
-    return await create_watchlist(
+    """Create a new demand surveillance watchlist and immediately trigger an intelligence scan."""
+    wl = await create_watchlist(
         user_id             = current_user['id'],
         name                = payload.name,
         disease_domain      = payload.disease_domain,
         product_description = payload.product_description,
         keywords            = payload.keywords,
     )
+    # Fire an immediate scan in the background so the user sees results
+    # right away instead of waiting until the Monday 8am UTC weekly job.
+    wl_dict = {
+        "watchlist_id":      wl.id if hasattr(wl, "id") else wl.get("id"),
+        "user_id":           current_user['id'],
+        "name":              payload.name,
+        "disease_domain":    payload.disease_domain,
+        "product_description": payload.product_description,
+        "keywords":          payload.keywords or [],
+    }
+    background_tasks.add_task(_immediate_scan, wl_dict)
+    return wl
 
 
 @router.get("", response_model=List[Watchlist])
@@ -76,17 +101,28 @@ class FromReportRequest(BaseModel):
 
 @router.post("/from-report", response_model=Watchlist)
 async def create_from_report(
-    payload:      FromReportRequest,
-    current_user: dict = Depends(get_current_user),
+    payload:          FromReportRequest,
+    background_tasks: BackgroundTasks,
+    current_user:     dict = Depends(get_current_user),
 ):
     """One-click: create a watchlist from a PI report's expert domain and keywords."""
-    return await create_watchlist(
+    wl = await create_watchlist(
         user_id             = current_user['id'],
         name                = f"Alert: {payload.report_name}",
         disease_domain      = payload.disease_domain,
         product_description = payload.product_description,
         keywords            = payload.keywords,
     )
+    wl_dict = {
+        "watchlist_id":      wl.id if hasattr(wl, "id") else wl.get("id"),
+        "user_id":           current_user['id'],
+        "name":              f"Alert: {payload.report_name}",
+        "disease_domain":    payload.disease_domain,
+        "product_description": payload.product_description,
+        "keywords":          payload.keywords or [],
+    }
+    background_tasks.add_task(_immediate_scan, wl_dict)
+    return wl
 
 
 # ── Alerts ────────────────────────────────────────────────────────────────────

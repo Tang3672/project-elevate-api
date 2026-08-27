@@ -41,19 +41,27 @@ SEARCH_DELAY      = 1.0  # seconds between searches to avoid 429
 # ── Search Templates ──────────────────────────────────────────────────────────
 
 def build_searches(watchlist: dict) -> List[str]:
-    """Build 6 targeted search queries for a watchlist."""
+    """Build targeted search queries for a watchlist."""
     desc     = watchlist.get("product_description", "")[:200]
     keywords = watchlist.get("keywords", [])
     domain   = watchlist.get("disease_domain", "")
     kw_str   = " ".join(keywords[:3]) if keywords else desc[:50]
 
     return [
-        f"{kw_str} new publication research 2026 site:pubmed.ncbi.nlm.nih.gov OR site:biorxiv.org",
+        # Research papers — broad first (no site restriction), then PubMed-specific
+        f"{kw_str} new study findings 2026",
+        f"{kw_str} publication research paper preprint 2025 2026 site:pubmed.ncbi.nlm.nih.gov OR site:biorxiv.org OR site:medrxiv.org",
+        # Regulatory & clinical
         f"{kw_str} FDA approval guidance 2026 site:fda.gov",
         f"{kw_str} clinical trial results Phase 2 3 2026 site:clinicaltrials.gov",
-        f"{kw_str} epidemiology prevalence incidence 2026 site:cdc.gov OR site:who.int",
-        f"{kw_str} competitor pipeline drug device approval 2026",
-        f"{kw_str} funding deal investment acquisition 2026",
+        # Epidemiology
+        f"{kw_str} epidemiology prevalence incidence disease burden 2026 site:cdc.gov OR site:who.int OR site:nih.gov",
+        # Competitor news — general web, no site restriction
+        f"{kw_str} competitor pipeline approval news 2026",
+        # Funding / deals
+        f"{kw_str} funding deal investment acquisition SBIR grant 2026",
+        # Recent news (STAT, BioPharma Dive, Nature News, Science)
+        f"{kw_str} news 2026 site:statnews.com OR site:biopharmadive.com OR site:fiercepharma.com OR site:nature.com OR site:science.org",
     ]
 
 
@@ -73,15 +81,16 @@ async def _run_search(query: str) -> str:
                 },
                 json={
                     "model":      HAIKU_MODEL,
-                    "max_tokens": 600,
+                    "max_tokens": 1500,
                     "tools":      [{"type": "web_search_20250305", "name": "web_search"}],
                     "messages":   [{
                         "role":    "user",
                         "content": (
                             f"Search: {query}\n\n"
-                            "Extract the 3-5 most important recent findings. "
-                            "For each: TITLE | DATE | KEY FINDING | URL\n"
-                            "Only include results from the last 6 months. Be concise."
+                            "Extract the 5-8 most important recent findings. "
+                            "For each result: TITLE | DATE | KEY FINDING (2-3 sentences) | URL\n"
+                            "Prioritize results from the last 12 months. "
+                            "Include both published papers and news articles. Be specific."
                         )
                     }],
                 }
@@ -95,6 +104,106 @@ async def _run_search(query: str) -> str:
     except Exception as e:
         logger.warning(f"Search failed for '{query[:50]}': {e}")
         return f"[{query[:60]}]\n[Search unavailable]\n"
+
+
+# ── Direct PubMed + bioRxiv API pulls ────────────────────────────────────────
+
+PUBMED_ESEARCH = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
+PUBMED_EFETCH  = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
+BIORXIV_API    = "https://api.biorxiv.org/details/biorxiv"
+
+
+async def _fetch_pubmed_papers(query_terms: str, max_results: int = 8) -> str:
+    """
+    Call PubMed E-utilities directly (no API key required for basic use).
+    Returns formatted text block of recent abstracts/titles.
+    """
+    from datetime import date
+    min_date = f"{date.today().year - 1}/01/01"
+    try:
+        async with httpx.AsyncClient(timeout=SEARCH_TIMEOUT) as client:
+            # Step 1: search for PMIDs
+            r = await client.get(PUBMED_ESEARCH, params={
+                "db": "pubmed", "term": query_terms,
+                "retmax": max_results, "retmode": "json",
+                "datetype": "pdat", "mindate": min_date,
+                "sort": "relevance",
+            })
+            r.raise_for_status()
+            ids = r.json().get("esearchresult", {}).get("idlist", [])
+            if not ids:
+                return ""
+
+            # Step 2: fetch titles + abstracts
+            r2 = await client.get(PUBMED_EFETCH, params={
+                "db": "pubmed", "id": ",".join(ids),
+                "rettype": "abstract", "retmode": "xml",
+            })
+            r2.raise_for_status()
+
+            # Parse minimal XML to extract titles
+            import xml.etree.ElementTree as ET
+            root  = ET.fromstring(r2.content)
+            lines = ["[PubMed direct pull]"]
+            for art in root.findall(".//PubmedArticle")[:max_results]:
+                title  = art.findtext(".//ArticleTitle") or ""
+                year   = art.findtext(".//PubDate/Year") or ""
+                pmid   = art.findtext(".//PMID") or ""
+                abst   = (art.findtext(".//AbstractText") or "")[:300]
+                if title:
+                    lines.append(
+                        f"• {title} ({year}) — {abst[:200]}{'…' if len(abst)>200 else ''} "
+                        f"[PMID {pmid}] https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
+                    )
+            return "\n".join(lines) + "\n"
+    except Exception as e:
+        logger.warning("PubMed direct pull failed: %s", e)
+        return ""
+
+
+async def _fetch_biorxiv_preprints(query_terms: str, max_results: int = 5) -> str:
+    """
+    Fetch recent preprints from bioRxiv API (no key required).
+    Returns formatted text block.
+    """
+    from datetime import date, timedelta
+    start = (date.today() - timedelta(days=180)).isoformat()
+    end   = date.today().isoformat()
+    try:
+        async with httpx.AsyncClient(timeout=SEARCH_TIMEOUT) as client:
+            r = await client.get(f"{BIORXIV_API}/{start}/{end}/0/json")
+            r.raise_for_status()
+            papers = r.json().get("collection", [])
+            if not papers:
+                return ""
+
+            # Filter by query terms
+            kw_lower = query_terms.lower().split()
+            matched  = []
+            for p in papers:
+                text = f"{p.get('title','')} {p.get('abstract','')}".lower()
+                if sum(1 for kw in kw_lower if kw in text) >= 2:
+                    matched.append(p)
+                if len(matched) >= max_results:
+                    break
+
+            if not matched:
+                return ""
+
+            lines = ["[bioRxiv preprints]"]
+            for p in matched:
+                doi   = p.get("doi", "")
+                title = p.get("title", "")
+                date_ = p.get("date", "")
+                abst  = (p.get("abstract") or "")[:200]
+                lines.append(
+                    f"• {title} ({date_}) — {abst}{'…' if len(abst)==200 else ''} "
+                    f"https://doi.org/{doi}"
+                )
+            return "\n".join(lines) + "\n"
+    except Exception as e:
+        logger.warning("bioRxiv pull failed: %s", e)
+        return ""
 
 
 # ── Significance Analysis ─────────────────────────────────────────────────────
@@ -176,15 +285,24 @@ async def process_watchlist(watchlist: dict) -> dict:
 
     logger.info(f"Processing watchlist {wl_id}: {wl_name}")
 
-    # Run searches sequentially with delay to avoid rate limiting
-    queries = build_searches(watchlist)
-    results = []
-    for i, query in enumerate(queries):
-        if i > 0:
-            await asyncio.sleep(SEARCH_DELAY)
-        result = await _run_search(query)
-        results.append(result)
+    # Build query terms for direct API pulls
+    keywords = watchlist.get("keywords", [])
+    kw_str   = " ".join(keywords[:4]) if keywords else wl_name
 
+    # Run web searches + direct API pulls in parallel
+    queries       = build_searches(watchlist)
+    search_tasks  = [_run_search(q) for q in queries]
+    pubmed_task   = _fetch_pubmed_papers(kw_str)
+    biorxiv_task  = _fetch_biorxiv_preprints(kw_str)
+
+    all_results = await asyncio.gather(
+        *search_tasks,
+        pubmed_task,
+        biorxiv_task,
+        return_exceptions=True,
+    )
+
+    results = [r for r in all_results if isinstance(r, str) and r.strip()]
     combined = "\n\n".join(results)
 
     # Run retention intelligence checks (staleness, grants, competitors, signals)
