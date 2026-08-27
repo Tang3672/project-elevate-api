@@ -367,16 +367,32 @@ def _keyword_classify(idea: str) -> str:
         # routed to a clinical expert just because they had no keyword hits.
         idea_l = idea.lower()
         _NON_BIO_KWS = (
+            # Agriculture / agronomy
             "soil moisture", "soil sensor", "soil probe", "precision agriculture",
             "agronomy", "crop monitoring", "crop yield", "irrigation sensor",
             "farm sensor", "farm management", "field weather station",
             "food production", "food safety testing", "agricultural sensor",
+            # Energy / physical sciences
+            "solar panel", "photovoltaic", "solar cell", "renewable energy",
+            "wind turbine", "battery storage", "energy storage", "fuel cell",
+            "semiconductor device", "materials testing", "metallurgy",
+            "computational fluid", "finite element",
+            # Industrial / consumer / civil
             "industrial iot", "smart home", "air quality monitor",
             "environmental sensor", "consumer product", "retail analytics",
             "logistics tracking", "supply chain sensor",
+            "water quality sensor", "groundwater", "wastewater",
+            "structural health monitoring", "geotechnical",
         )
         if any(kw in idea_l for kw in _NON_BIO_KWS):
-            return "research_tool_agronomy"
+            # Distinguish agronomy (USDA buyer) from general non-clinical research tool.
+            _AGRONOMY_SIGNALS = (
+                "soil", "agronomy", "crop", "irrigation", "farm",
+                "precision agri", "agricultural",
+            )
+            if any(s in idea_l for s in _AGRONOMY_SIGNALS):
+                return "research_tool_agronomy"
+            return "research_tool_non_clinical"
         return "drug_oncology"
     return max(scores, key=scores.get)
 
@@ -422,21 +438,31 @@ async def route(
             confidence    = min(confidence, 0.75)
             reasoning     = f"Corrected from {sub_expert_id}: non-clinical research-tool signals, no patient/clinical signals."
 
-    # H-02: Broad non-biomedical guard — catches agricultural, industrial, environmental,
-    # and consumer products that Claude classifies into a medical modality simply because
-    # it can't find a better bucket. These products must not generate patient/drug/FDA
-    # framing. Unlike H-01 (which targets digital misclassification only), H-02 applies
-    # to all medical modalities and uses a wider signal set.
+    # H-02: Explicit non-biomedical signal guard — catches products whose idea text
+    # contains clear non-medical domain signals (agriculture, energy, materials,
+    # industrial, consumer) and no clinical signals. The signal list is intentionally
+    # broad; H-03 below handles everything outside this list via a different mechanism.
     if sub_expert_id in _MEDICAL_MODALITIES:
         idea_l = idea.lower()
         _NON_BIO_H02 = (
+            # Agriculture / agronomy
             "soil moisture", "soil sensor", "soil probe", "soil water", "soil science",
             "precision agriculture", "agronomy", "crop monitoring", "crop yield",
             "irrigation sensor", "farm management", "farm sensor", "field weather",
             "agricultural sensor", "agronomy data", "soil salinity", "soil temperature",
-            "food production", "food safety", "industrial iot", "smart home sensor",
-            "air quality monitor", "environmental sensor node", "consumer product launch",
-            "retail analytics", "logistics tracking", "supply chain iot",
+            "food production", "food safety",
+            # Energy / physical sciences
+            "solar panel", "photovoltaic", "solar cell", "renewable energy", "wind turbine",
+            "battery storage", "energy storage", "fuel cell", "thermoelectric",
+            "semiconductor device", "materials testing", "metallurgy", "nanotechnology",
+            "computational fluid", "finite element", "structural analysis",
+            # Industrial / consumer
+            "industrial iot", "smart home", "air quality monitor",
+            "environmental monitoring sensor", "consumer wearable fitness",
+            "retail analytics", "logistics tracking", "supply chain sensor",
+            # Civil / environmental engineering
+            "water quality sensor", "groundwater", "wastewater treatment",
+            "structural health monitoring", "bridge sensor", "geotechnical",
         )
         _CLINICAL_H02 = (
             "patient", "clinical trial", "hospital", "physician", "disease treatment",
@@ -460,6 +486,42 @@ async def route(
             logger.info(
                 "H-02: '%s' overridden → '%s' (non-biomedical signals, no clinical signals)",
                 _prev, sub_expert_id,
+            )
+
+    # H-03: Drug modality + no medical language guard.
+    # H-02 requires the idea to contain explicit non-medical keywords. H-03 takes
+    # the complementary approach: if Claude classified the idea as a DRUG but the
+    # idea text contains ZERO recognizable medical language, it is almost certainly
+    # a misclassification — real drug candidates mention patients, disease, clinical
+    # trials, or drug-mechanism terms. This catches materials science, energy, civil
+    # engineering, and any other non-medical product that slips past H-02's keyword list.
+    # Confidence gate (< 0.60) prevents overriding genuine drug ideas with unusual wording.
+    _DRUG_MODALITIES_H03 = frozenset(k for k in _ROUTER_TO_EXPERT if k.startswith("drug_"))
+    if sub_expert_id in _DRUG_MODALITIES_H03 and confidence < 0.60:
+        idea_l = idea.lower()
+        _MEDICAL_LANGUAGE = (
+            "patient", "clinical", "hospital", "disease", "disorder", "syndrome",
+            "therapeutic", "treatment", "therapy", "indication", "diagnosis",
+            "cancer", "tumor", "infection", "pathogen", "bacteria", "virus",
+            "fda", "nda ", "ind ", "investigational", "clinical trial",
+            "adverse", "efficacy", "safety", "pharmacology", "pharmacokinetic",
+            "receptor", "inhibitor", "kinase", "antibody", "biologic",
+            "antimicrobial", "antibiotic", "antiviral", "drug candidate",
+            "patients with", "disease prevalence", "standard of care",
+        )
+        _has_medical = any(s in idea_l for s in _MEDICAL_LANGUAGE)
+        if not _has_medical:
+            _prev = sub_expert_id
+            sub_expert_id = "research_tool_non_clinical"
+            claude_domain = _coerce_to_registry(sub_expert_id)
+            confidence    = min(confidence, 0.55)
+            reasoning     = (
+                f"H-03 override from '{_prev}': drug modality with low confidence "
+                "and no medical language detected in idea text."
+            )
+            logger.info(
+                "H-03: '%s' overridden → research_tool_non_clinical "
+                "(drug modality, confidence=%.2f, no medical language in idea)", _prev, confidence,
             )
 
     # Routing logic — reconciles the PI-selected top-level disease domain with Claude.
