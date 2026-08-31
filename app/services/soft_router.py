@@ -174,7 +174,7 @@ _SIGNAL_PRIORS: dict[str, dict[str, float]] = {
     "flu_influenza":       {"vaccine_prophylactic": 0.90, "drug_infectious_non_amr": 0.10},
     "covid_vaccine":       {"vaccine_prophylactic": 0.85, "gene_therapy_rna": 0.15},
     "cgm_device":          {"device_metabolic": 0.70, "digital_rpm": 0.20, "diagnostic_poc": 0.10},
-    "retina":              {"biologic_cardiology": 0.40, "biologic_immunology": 0.30, "device_ophthalmology": 0.30},
+    "retina":              {"biologic_oncology": 0.40, "biologic_immunology": 0.30, "device_ophthalmology": 0.30},  # H-05: was biologic_cardiology (PCSK9/PAH framing); biologic_oncology is closest BLA proxy for anti-VEGF
     "sepsis_digital":      {"digital_cds": 0.75, "diagnostic_biomarker": 0.15, "digital_rpm": 0.10},
     "mental_health_dig":   {"digital_therapeutic": 0.70, "drug_mental_health": 0.20, "digital_rpm": 0.10},
     "rpm_cardiac":         {"digital_rpm": 0.65, "device_cardiovascular": 0.25, "digital_cds": 0.10},

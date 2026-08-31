@@ -75,10 +75,11 @@ async def _classify_with_claude(idea: str, tier1: str) -> tuple[str, float, str]
                     "content-type":      "application/json",
                 },
                 json={
-                    "model":      ROUTER_MODEL,
-                    "max_tokens": 150,
-                    "system":     ROUTER_SYSTEM,
-                    "messages":   [{"role": "user", "content": f"Tier1: {tier1}\nIdea: {idea[:800]}"}],
+                    "model":       ROUTER_MODEL,
+                    "max_tokens":  150,
+                    "temperature": 0,          # M-03: deterministic routing — identical ideas must route identically
+                    "system":      ROUTER_SYSTEM,
+                    "messages":    [{"role": "user", "content": f"Tier1: {tier1}\nIdea: {idea[:800]}"}],
                 }
             )
             r.raise_for_status()
@@ -118,7 +119,7 @@ def _keyword_route(idea: str, tier1: str) -> str:
 
     # Default per tier1
     defaults = {
-        "drug_small_molecule": "drug_rare_disease",
+        "drug_small_molecule": "drug_oncology",    # LOW-01: was drug_rare_disease — rare disease framing is wrong for most unknown drugs
         "biologic":            "biologic_oncology",
         "gene_cell_therapy":   "gene_therapy_rare",
         "medical_device":      "device_cardiovascular",
@@ -183,7 +184,7 @@ async def route_v2(
 
 DOMAIN_TO_TIER1 = {
     "antibiotic_amr":     "drug_small_molecule",
-    "oncology":           "biologic",
+    "oncology":           "drug_small_molecule",  # H-04: was "biologic" — most oncology products are small molecules; biologic tier forces BLA/ADC framing for oral targeted therapies
     "cardiology":         "drug_small_molecule",
     "neurology_cns":      "drug_small_molecule",
     "metabolic_diabetes": "drug_small_molecule",
