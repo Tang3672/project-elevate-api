@@ -162,19 +162,19 @@ def compute_market_size(
 
     # Combine with extra segments if requested (sum SAM populations)
     if extra_segments:
+        combined_tam_pop = primary_result.tam_population  # C-08: sum all TAMs
         combined_sam_pop = primary_result.sam_population
         combined_som_pop = primary_result.som_population
         combined_segs = list(primary_result.segments_used)
         for extra in extra_segments:
             er = _walk_funnel(extra, net_price_usd, {})
+            combined_tam_pop += er.tam_population  # C-08: was max(primary_TAM, combined_SAM)
             combined_sam_pop += er.sam_population
             combined_som_pop += er.som_population
             combined_segs.extend(er.segments_used)
+        combined_tam_usd = combined_tam_pop * net_price_usd
         combined_sam_usd = combined_sam_pop * net_price_usd
         combined_som_usd = combined_som_pop * net_price_usd
-        # Recompute TAM as the larger of primary TAM or combined SAM
-        combined_tam_pop = max(primary_result.tam_population, combined_sam_pop)
-        combined_tam_usd = combined_tam_pop * net_price_usd
         _apply_confidence_band(primary_result, combined_segs)
         return MarketSizeResult(
             tam_usd=combined_tam_usd,
@@ -203,8 +203,13 @@ def _walk_funnel(segment: dict, net_price_usd: float, overrides: dict) -> Market
     gates = segment.get("funnel", [])
     som_pct = float(segment.get("som_penetration_pct") or 0.25)
 
+    if not gates:  # H-13: empty funnel silently produces $0 — make it visible
+        logger.warning("[H-13] Empty funnel for segment '%s' — market size will be $0",
+                       segment.get("disease_name", segment.get("name", "unknown")))
+
     funnel_steps: List[FunnelStep] = []
     running = 0
+    rate: Optional[float] = None
     tam_population = 0  # population BEFORE the first access gate
     found_access_gate = False
     weakest: List[str] = []
@@ -222,9 +227,12 @@ def _walk_funnel(segment: dict, net_price_usd: float, overrides: dict) -> Market
         if gate_type == "absolute":
             val = ov.get("value", gate.get("value", 0))
             running = int(val)
+            rate = None  # absolute gates carry no rate
         else:
-            rate = ov.get("rate", gate.get("rate", 1.0))
-            running = int(running * float(rate))
+            # H-10: gate JSONB may store rate:null → float(None) throws TypeError
+            _raw_rate = ov.get("rate") if "rate" in ov else gate.get("rate")
+            rate = float(_raw_rate) if _raw_rate is not None else 1.0
+            running = int(running * rate)
 
         # TAM boundary: everything before the first access gate
         if not found_access_gate and not is_access:
@@ -242,7 +250,7 @@ def _walk_funnel(segment: dict, net_price_usd: float, overrides: dict) -> Market
         step = FunnelStep(
             gate=gate_name,
             label=label,
-            rate=gate.get("rate") if gate_type == "rate" else None,
+            rate=rate,  # H-11: effective rate (after override), not pre-override gate.rate
             running_value=running,
             source=source,
             gate_type=gate_type,
@@ -261,11 +269,11 @@ def _walk_funnel(segment: dict, net_price_usd: float, overrides: dict) -> Market
     sam_usd = float(sam_population) * net_price_usd
     som_usd = float(som_population) * net_price_usd
 
-    # Confidence band: widen proportionally to number of analyst-estimate gates
+    # M-05: symmetric confidence band — was +full/−half, causing upside bias
     analyst_fraction = len(weakest) / max(len(funnel_steps), 1)
     band_width = max(0.25, analyst_fraction * 0.50)  # ±12.5% to ±25%
-    conf_low = som_usd * (1.0 - band_width / 2)
-    conf_high = som_usd * (1.0 + band_width)
+    conf_low  = som_usd * (1.0 - band_width / 2)
+    conf_high = som_usd * (1.0 + band_width / 2)
 
     result = MarketSizeResult(
         tam_usd=tam_usd,

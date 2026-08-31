@@ -615,6 +615,11 @@ def blp_market_share_simulation(
     v_price      = rng.standard_normal(n_simulated)
     v_convenience= rng.standard_normal(n_simulated)
 
+    # C-07: draw all Gumbel noise ONCE — fixed across contraction iterations for stationarity
+    eps_novel = rng.gumbel(size=n_simulated)
+    eps_comps = [rng.gumbel(size=n_simulated) for _ in comp_deltas]
+    eps_out   = rng.gumbel(size=n_simulated)
+
     # Individual utility for novel drug (BLP §3.1):
     # u_i = δ_novel + σ_eff·v_eff·x_eff + σ_safe·v_safe·x_safe + σ_price·v_price·(-x_price) + ε_i
     u_novel = (
@@ -623,19 +628,19 @@ def blp_market_share_simulation(
         + sig["safety"]       * v_safety      * (safety_vs_soc + 0.5)
         - sig["price"]        * v_price       * price_rank
         + sig["convenience"]  * v_convenience * (convenience_vs_soc + 0.5)
-        + rng.gumbel(size=n_simulated)
+        + eps_novel
     )
 
     # Build n_s × n_products utility matrix
     all_utils = [u_novel]
-    for cd in comp_deltas:
+    for cd, eps_c in zip(comp_deltas, eps_comps):
         u_comp = (cd
                   + sig["efficacy"]    * v_efficacy   * 0.5
                   - sig["price"]       * v_price      * 0.4
-                  + rng.gumbel(size=n_simulated))
+                  + eps_c)
         all_utils.append(u_comp)
     # Outside good
-    u_out = u_outside_mean + rng.gumbel(size=n_simulated)
+    u_out = u_outside_mean + eps_out
     all_utils.append(u_out)
 
     # Matrix (n_products × n_simulated) → each patient argmax
@@ -656,16 +661,16 @@ def blp_market_share_simulation(
     max_iter     = 50
     for _ in range(max_iter):
         s_sim = float(np.mean(novel_chosen))
-        if abs(s_sim - target_share) < tolerance or s_sim <= 0:
+        if abs(s_sim - target_share) < tolerance:  # C-07: removed s_sim<=0 early exit — raises delta to attract patients
             break
         delta_h = delta_h + math.log(max(target_share, 1e-6)) - math.log(max(s_sim, 1e-6))
-        # Re-compute utilities with updated δ
+        # Re-compute utilities with updated δ — C-07: reuse fixed Gumbel noise (eps_novel)
         u_novel_new = (delta_h
                        + sig["efficacy"]    * v_efficacy    * efficacy_lift
                        + sig["safety"]      * v_safety      * (safety_vs_soc + 0.5)
                        - sig["price"]       * v_price       * price_rank
                        + sig["convenience"] * v_convenience * (convenience_vs_soc + 0.5)
-                       + rng.gumbel(size=n_simulated))
+                       + eps_novel)
         all_utils[0]  = u_novel_new
         util_matrix   = np.stack(all_utils, axis=0)
         choices       = np.argmax(util_matrix, axis=0)
@@ -814,12 +819,14 @@ def compute_market_size(
     net_price, gtn_pct = gross_to_net_price(wac_annual_usd, ta, has_orphan)
 
     # Revenue per patient (annualised)
-    is_one_time = modality.lower() in ("gene_cell_therapy",) or dot >= 15.0
+    is_one_time  = modality.lower() in ("gene_cell_therapy",) or dot >= 15.0
+    # C-06: diagnostic DoT (~0.02yr) must NOT discount the per-test price — price is per test, not per year
+    _is_diag = modality.lower().startswith("diagnostic")
     if is_one_time:
         annual_cohort      = max(1, eligible / max(1.0, dot))
         annual_per_patient = net_price
         us_tam_usd         = annual_cohort * annual_per_patient
-    elif dot < 1.0:
+    elif dot < 1.0 and not _is_diag:
         annual_per_patient = net_price * dot
         us_tam_usd         = eligible * annual_per_patient
     else:
@@ -1128,6 +1135,8 @@ def apply_model_launch_indication(ive: dict, model_output: dict | None) -> dict:
         return ive
 
     eventual_tam = ive.get("eventual_market", {}).get("tam_usd", 0)
+    if not eventual_tam or eventual_tam <= 0:  # H-12: no valid eventual TAM — skip to avoid $0 override
+        return ive
     prior_fraction = ive.get("initial_market", {}).get("fraction_of_eventual", None)
 
     ive = dict(ive)
