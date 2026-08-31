@@ -3057,7 +3057,8 @@ async def get_interpret_history(
     report_id: str,
     current_user=Depends(get_current_user),
 ):
-    """Return all assumption-refinement events for a given report."""
+    """Return all assumption-refinement events for a given report (requester must own the report)."""
     from app.db.prompt_sessions_repository import get_report_interpret_history
-    rows = await get_report_interpret_history(report_id)
+    user_id = getattr(current_user, "id", None)
+    rows = await get_report_interpret_history(report_id, requesting_user_id=user_id)
     return {"report_id": report_id, "interpretations": rows, "count": len(rows)}
