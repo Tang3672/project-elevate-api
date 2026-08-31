@@ -126,7 +126,7 @@ DEAL_COMPS: dict[str, DealCompProfile] = {
         milestones_preclinical_m = (100.0, 500.0),
         milestones_phase1_m      = (300.0, 1500.0),
         milestones_phase2_m      = (500.0, 3000.0),
-        example_deal  = "Pfizer/Seagen acquisition at $43B (2023). Earlier deal: AZ/Daiichi colfosceril-ADC for $6.9B total deal (2019, pre-Phase 3). For academic: Memorial Sloan Kettering's CAR-T IP licensed to Juno Therapeutics — $50M upfront + milestone + royalty (2014, pre-Phase 1).",
+        example_deal  = "Pfizer/Seagen acquisition at $43B (2023). Earlier deal: AZ/Daiichi Sankyo trastuzumab deruxtecan (T-DXd / Enhertu) ADC for $6.9B total deal (2019, pre-Phase 3). For academic: Memorial Sloan Kettering's CAR-T IP licensed to Juno Therapeutics — $50M upfront + milestone + royalty (2014, pre-Phase 1).",
         source        = "[BIO25] oncology biologic deal database; [AMBROSIA] ADC/MAb benchmarks 2020-2025",
         notes         = "ADC deals are significantly larger than naked antibody deals (2x-3x premium). CAR-T manufacturing rights are often licensed separately from IP. Bispecifics command premium due to complex IP landscape.",
     ),

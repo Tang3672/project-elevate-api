@@ -2334,7 +2334,9 @@ async def market_model_node_edit(
 
 
 @router.get("/market-model/{report_id}/versions")
-async def list_market_model_versions(report_id: str):
+async def list_market_model_versions(
+    report_id: str, current_user=Depends(get_current_user)
+):
     """List all saved versions of a report's buyer model (timeline + rationale)."""
     import app.db.market_model_repository as _mmr
     versions = await _mmr.list_versions(report_id)
@@ -2342,7 +2344,9 @@ async def list_market_model_versions(report_id: str):
 
 
 @router.get("/market-model/{report_id}/diff/{v1}/{v2}")
-async def diff_market_model_versions(report_id: str, v1: int, v2: int):
+async def diff_market_model_versions(
+    report_id: str, v1: int, v2: int, current_user=Depends(get_current_user)
+):
     """Compare two model versions: what changed and by how much."""
     import app.db.market_model_repository as _mmr
     row1 = await _mmr.get_version(report_id, v1)
