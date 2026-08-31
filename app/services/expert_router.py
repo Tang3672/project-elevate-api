@@ -323,13 +323,19 @@ _MEDICAL_MODALITIES: frozenset[str] = frozenset(_ROUTER_TO_EXPERT.keys()) - froz
 # NOT registry keys — down to a valid top-level expert, so the registry lookup in
 # route() can never KeyError.
 _TOPLEVEL_HINTS = [
-    ("antibiotic_amr",    ("amr", "antibiotic", "antimicrobial", "infect", "antiviral", "vaccine", "sepsis")),
-    ("oncology",          ("oncolog", "cancer", "tumor", "carcinom", "leukemia", "lymphoma", "car-t", "car_t")),
+    ("antibiotic_amr",    ("amr", "antibiotic", "antimicrobial", "infect", "antiviral", "vaccine", "sepsis", "microbiome")),
+    ("neurology_cns",     ("cns", "neuro", "brain", "alzheimer", "parkinson", "epilep", "psych_cns", "digital_cds", "digital_therapeutic", "digital_rpm", "digital_samd")),
+    ("oncology",          ("oncolog", "cancer", "tumor", "carcinom", "leukemia", "lymphoma", "car-t", "car_t", "diagnostic", "crispr", "gene_therapy", "other_delivery", "immunol")),
     ("cardiology",        ("cardio", "cardiac", "heart", "vascular", "hematolog", "blood")),
-    ("neurology_cns",     ("cns", "neuro", "brain", "alzheimer", "parkinson", "epilep", "psych_cns")),
     ("metabolic_diabetes",("metabolic", "diabet", "obesity", "glp", "nash", "mash", "lipid", "renal", "device_metabolic")),
     ("mental_health",     ("mental", "depress", "psych", "anxiety", "bipolar", "schizo", "addiction")),
 ]
+
+# Research tool IDs are non-disease categories entirely — the v2 sub_expert handles them
+# directly. Explicitly return neurology_cns (most neutral existing top-level entry) so
+# the v1 expert never defaults to antibiotic_amr framing in logs or any code path
+# that reads domain_id before checking sub_expert_id.
+_RESEARCH_PREFIXES = ("research_tool", "research_infrastructure")
 
 
 def _coerce_to_registry(domain: str) -> str:
@@ -337,6 +343,8 @@ def _coerce_to_registry(domain: str) -> str:
     if domain in EXPERT_REGISTRY:
         return domain
     d = (domain or "").lower()
+    if any(d.startswith(p) for p in _RESEARCH_PREFIXES):
+        return "neurology_cns"
     for top, hints in _TOPLEVEL_HINTS:
         if any(h in d for h in hints):
             return top
