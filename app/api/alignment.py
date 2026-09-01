@@ -2212,7 +2212,7 @@ async def market_model_node_edit(
     if not base:
         raise HTTPException(status_code=404,
             detail="No buyer model found for this report. "
-                   "Only research-tool reports (LIFE_SCIENCES_RESEARCH) have an editable buyer model.")
+                   "Only non-clinical research tool reports have an editable buyer model.")
 
     nodes = dict(base.get("nodes") or {})
 
@@ -2334,7 +2334,9 @@ async def market_model_node_edit(
 
 
 @router.get("/market-model/{report_id}/versions")
-async def list_market_model_versions(report_id: str):
+async def list_market_model_versions(
+    report_id: str, current_user=Depends(get_current_user)
+):
     """List all saved versions of a report's buyer model (timeline + rationale)."""
     import app.db.market_model_repository as _mmr
     versions = await _mmr.list_versions(report_id)
@@ -2342,7 +2344,9 @@ async def list_market_model_versions(report_id: str):
 
 
 @router.get("/market-model/{report_id}/diff/{v1}/{v2}")
-async def diff_market_model_versions(report_id: str, v1: int, v2: int):
+async def diff_market_model_versions(
+    report_id: str, v1: int, v2: int, current_user=Depends(get_current_user)
+):
     """Compare two model versions: what changed and by how much."""
     import app.db.market_model_repository as _mmr
     row1 = await _mmr.get_version(report_id, v1)
@@ -2402,6 +2406,27 @@ class _GateRequest(BaseModel):
     label:          str   = Field(..., description="human-readable name")
     value:          float = Field(..., gt=0, le=1.0, description="ratio in (0, 1]")
     rationale:      str   = Field(..., min_length=1, max_length=500)
+
+
+def _compute_model_verification(values: dict, formatted: dict) -> dict:
+    """Return a live verification object from the new model's resolved values."""
+    issues = []
+    tam = values.get("tam", 0.0)
+    sam = values.get("sam", 0.0)
+    som = values.get("som", 0.0)
+    if tam > 0 and sam / tam > 0.90:
+        issues.append({
+            "type": "FLAG",
+            "field": "sam",
+            "message": f"SAM ({formatted.get('sam', '')}) is {sam/tam:.0%} of TAM — unusually high addressable capture rate",
+        })
+    if sam > 0 and som / sam > 0.40:
+        issues.append({
+            "type": "FLAG",
+            "field": "som",
+            "message": f"SOM ({formatted.get('som', '')}) is {som/sam:.0%} of SAM — near-term penetration above 40% is aggressive",
+        })
+    return {"state": "FLAG" if issues else "PASS", "issues": issues}
 
 
 def _build_override_response(old_m, new_m) -> dict:
@@ -2471,7 +2496,7 @@ def _build_override_response(old_m, new_m) -> dict:
         "diff":                      diff_out,
         "active_gates":              active_gates,
         "recommendations_changed":   recommendations_changed,
-        "verification":              {"state": "PASS", "issues": []},
+        "verification":              _compute_model_verification(new_v, fmt),
         "export_unlocked":           True,
         "stale_narrative_sections":  stale,
     }
@@ -3057,7 +3082,8 @@ async def get_interpret_history(
     report_id: str,
     current_user=Depends(get_current_user),
 ):
-    """Return all assumption-refinement events for a given report."""
+    """Return all assumption-refinement events for a given report (requester must own the report)."""
     from app.db.prompt_sessions_repository import get_report_interpret_history
-    rows = await get_report_interpret_history(report_id)
+    user_id = getattr(current_user, "id", None)
+    rows = await get_report_interpret_history(report_id, requesting_user_id=user_id)
     return {"report_id": report_id, "interpretations": rows, "count": len(rows)}

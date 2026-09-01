@@ -416,7 +416,8 @@ _SUB_EXPERT_TO_ARCHETYPE: Dict[str, ProductArchetype] = {
     "vaccine_prophylactic":    ProductArchetype.VACCINE,
     "vaccine_cancer_immuno":   ProductArchetype.VACCINE,
     # Non-clinical research tools (the Hublink case)
-    "research_tool_non_clinical": ProductArchetype.RESEARCH_TOOL_NON_CLINICAL,
+    "research_tool_non_clinical":   ProductArchetype.RESEARCH_TOOL_NON_CLINICAL,
+    "research_tool_agronomy":       ProductArchetype.RESEARCH_TOOL_NON_CLINICAL,  # H-03: was missing — vocabulary gate was inactive for agronomy
     "research_infrastructure_saas": ProductArchetype.RESEARCH_INFRASTRUCTURE_SAAS,
     # Platforms
     "other_crispr":            ProductArchetype.GENE_CELL_THERAPY,

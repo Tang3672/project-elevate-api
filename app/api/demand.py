@@ -210,6 +210,36 @@ async def provision_user(
     }
 
 
+# ── Admin: prompt submission logs ────────────────────────────────────────────
+
+@admin_router.get("/prompt-logs")
+async def admin_prompt_logs(
+    page: int = Query(default=1, ge=1),
+    per_page: int = Query(default=50, ge=1, le=500),
+    user_id: Optional[int] = Query(default=None),
+    sub_expert_id: Optional[str] = Query(default=None),
+    since: Optional[str] = Query(default=None, description="ISO date, e.g. 2025-01-01"),
+    until: Optional[str] = Query(default=None, description="ISO date, e.g. 2025-12-31"),
+):
+    """All prompt submissions across all users, paginated. Admin only."""
+    from app.db.prompt_sessions_repository import admin_get_all_submissions
+    return await admin_get_all_submissions(
+        page=page,
+        per_page=per_page,
+        user_id=user_id,
+        sub_expert_id=sub_expert_id,
+        since=since,
+        until=until,
+    )
+
+
+@admin_router.get("/prompt-logs/stats")
+async def admin_prompt_stats():
+    """Aggregate stats: total submissions, unique users, breakdown by expert type and day."""
+    from app.db.prompt_sessions_repository import admin_get_submission_stats
+    return await admin_get_submission_stats()
+
+
 @admin_router.post("/reddit/run")
 async def run_reddit_ingestion_endpoint(
     max_per_subreddit: int = 30,

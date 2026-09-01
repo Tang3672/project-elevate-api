@@ -153,18 +153,22 @@ def _url_to_name(url: str) -> str:
 
 def build_sources_from_report(report: dict) -> dict:
     """
-    Build sources list from structured source_url fields in the report.
-    Works alongside extract_and_format_sources for complete coverage.
+    Build sources list from structured source_url fields and inline [SOURCE:] markers.
+    Returns the text-processed report (all [SOURCE:...] markers replaced with [N]).
     """
     from datetime import datetime
-    sources = []
-    url_to_idx = {}
+
+    # M-06: process inline markers first — returns report with [SOURCE:] replaced by [N]
+    processed = extract_and_format_sources(report)
+
+    # Seed dedup index from already-extracted inline sources
+    url_to_idx: dict = {s["url"]: s["number"] for s in processed.get("sources", []) if s.get("url")}
+    sources: list = list(processed.get("sources", []))
     today = datetime.utcnow().strftime("%Y-%m-%d")
 
     def add_source(name: str, url: str):
         if not url or url == "None":
             return
-        # B-06: skip search/query endpoints — they are not citable sources
         if _is_query_url(url):
             return
         key = url.strip()
@@ -178,34 +182,26 @@ def build_sources_from_report(report: dict) -> dict:
                 "accessed": today,
             })
 
-    # Extract from disease_intelligence data_points
-    di = report.get("disease_intelligence") or {}
+    # Merge additional sources from structured source_url fields in the processed report
+    di = processed.get("disease_intelligence") or {}
     for dp in di.get("data_points", []):
         add_source(dp.get("source", ""), dp.get("source_url", ""))
 
-    # Extract from market_sizing steps
-    ms = report.get("market_sizing") or {}
+    ms = processed.get("market_sizing") or {}
     for step in ms.get("steps", []):
         add_source(step.get("source", ""), step.get("source_url", ""))
 
-    # Extract from regulatory_pathway designations
-    rp = report.get("regulatory_pathway") or {}
+    rp = processed.get("regulatory_pathway") or {}
     for des in rp.get("designations", []):
         add_source(des.get("source", ""), des.get("source_url", ""))
     for trial in rp.get("clinical_trial_requirements", []):
         add_source(trial.get("fda_guidance_document", ""), trial.get("source_url", ""))
 
-    # Extract from market_access buyer_segments
-    ma = report.get("market_access") or {}
+    ma = processed.get("market_access") or {}
     for seg in ma.get("buyer_segments", []):
         add_source(seg.get("source", ""), seg.get("source_url", ""))
 
-    # Also run inline [SOURCE:] extraction on text fields
-    inline_report = extract_and_format_sources(report)
-    for s in inline_report.get("sources", []):
-        add_source(s["name"], s["url"])
-
     if sources:
-        report["sources"] = sources
+        processed["sources"] = sources
 
-    return report
+    return processed

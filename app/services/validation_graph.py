@@ -858,11 +858,12 @@ def _modality_contamination_flags(report: dict, sub_expert_id: str) -> list:
     existing self-correction regenerates the offending sections. Returns [] for
     antibiotics and small-molecule drugs (their tokens are legitimate there)."""
     sid = (sub_expert_id or "").lower()
-    if sid.startswith("drug_amr"):
+    if sid.startswith(("drug_amr", "antibiotic_amr")):
         return []                          # antibiotic — tokens are expected
     is_drug = sid.startswith("drug_")
     is_non_drug = sid.startswith(("device_", "diagnostic_", "digital_", "biologic_",
-                                  "gene_therapy_", "vaccine_", "other_"))
+                                  "gene_therapy_", "vaccine_", "other_",
+                                  "research_tool_", "research_infrastructure_"))  # H-07
     if not (is_drug or is_non_drug):
         return []
 
@@ -897,7 +898,7 @@ def _modality_contamination_flags(report: dict, sub_expert_id: str) -> list:
     }]
 
 
-async def validate_pi_report(report: dict, sub_expert_id: str = "drug_amr") -> dict:
+async def validate_pi_report(report: dict, sub_expert_id: str = "") -> dict:
     """
     Run PI report through 5-agent parallel validation graph.
     Returns report with validation section attached.

@@ -267,7 +267,7 @@ _ROUTER_TO_EXPERT: dict[str, str] = {
     "drug_metabolic":              "drug_metabolic",
     "drug_cardiovascular":         "drug_cardiology",
     "drug_immunology":             "drug_immunology",
-    "drug_respiratory":            "drug_infectious_non_amr",
+    "drug_respiratory":            "drug_immunology",          # C-01: asthma/COPD → immunology, not HIV/HCV
     "drug_rare_disease":           "drug_rare_disease",
     "drug_mental_health":          "drug_mental_health",
     "drug_infectious_non_amr":     "drug_infectious_non_amr",
@@ -283,10 +283,10 @@ _ROUTER_TO_EXPERT: dict[str, str] = {
     "gene_therapy_rna":            "gene_therapy_rna",
     "device_cardiovascular":       "device_cardiovascular",
     "device_neurology":            "device_neurology",
-    "device_surgical_orthopedic":  "device_neurology",
+    "device_surgical_orthopedic":  "device_cardiovascular",    # C-02: interim — at least covers implant hardware logic
     "device_metabolic":            "device_metabolic",
-    "device_surgical_general":     "device_cardiovascular",
-    "device_ophthalmology":        "device_cardiovascular",
+    "device_surgical_general":     "device_metabolic",         # C-03: interim — less wrong than cardiac
+    "device_ophthalmology":        "device_neurology",         # C-03: interim — Class III PMA parallel
     "diagnostic_molecular_lab":    "diagnostic_molecular",
     "diagnostic_companion":        "diagnostic_companion",
     "diagnostic_poc":              "diagnostic_molecular",
@@ -298,7 +298,7 @@ _ROUTER_TO_EXPERT: dict[str, str] = {
     "digital_samd_radiology":      "digital_cds",
     "vaccine_prophylactic":        "vaccine_prophylactic",
     "vaccine_cancer_immuno":       "vaccine_cancer_immuno",
-    "vaccine_infectious_therapeutic": "vaccine_prophylactic",
+    "vaccine_infectious_therapeutic": "vaccine_cancer_immuno",  # M-01: therapeutic vaccines → cancer-immuno proxy (both are therapeutic, not prophylactic)
     "other_crispr":                "other_crispr",
     "other_microbiome":            "other_microbiome",
     "other_delivery":              "other_delivery",
@@ -312,8 +312,10 @@ _ROUTER_TO_EXPERT: dict[str, str] = {
 _DEFAULT_DOMAIN = "antibiotic_amr"
 
 # Set of all medical modality sub-expert IDs (excludes research-tool categories).
-# Used by H-02 to detect when Claude has assigned a clinical expert to a non-clinical product.
-_MEDICAL_MODALITIES: frozenset[str] = frozenset(_ROUTER_TO_EXPERT.keys()) - frozenset((
+# H-02: must use VALUES (the mapped output sub_expert_ids) not keys — by the time H-02
+# runs, sub_expert_id has already been mapped through _ROUTER_TO_EXPERT, so checking
+# against keys (e.g. "drug_cns_neurodegen") misses outputs like "drug_cns".
+_MEDICAL_MODALITIES: frozenset[str] = frozenset(_ROUTER_TO_EXPERT.values()) - frozenset((
     "research_tool_non_clinical", "research_tool_agronomy",
     "research_infrastructure_saas",
 ))
@@ -323,10 +325,17 @@ _MEDICAL_MODALITIES: frozenset[str] = frozenset(_ROUTER_TO_EXPERT.keys()) - froz
 # NOT registry keys — down to a valid top-level expert, so the registry lookup in
 # route() can never KeyError.
 _TOPLEVEL_HINTS = [
-    ("antibiotic_amr",    ("amr", "antibiotic", "antimicrobial", "infect", "antiviral", "vaccine", "sepsis", "microbiome")),
-    ("neurology_cns",     ("cns", "neuro", "brain", "alzheimer", "parkinson", "epilep", "psych_cns", "digital_cds", "digital_therapeutic", "digital_rpm", "digital_samd")),
-    ("oncology",          ("oncolog", "cancer", "tumor", "carcinom", "leukemia", "lymphoma", "car-t", "car_t", "diagnostic", "crispr", "gene_therapy", "other_delivery", "immunol")),
-    ("cardiology",        ("cardio", "cardiac", "heart", "vascular", "hematolog", "blood")),
+    # C-04: "vaccine" removed — vaccine_prophylactic falls through to antibiotic_amr default
+    #        (infectious-disease territory); vaccine_cancer_immuno catches "cancer" below.
+    ("antibiotic_amr",    ("amr", "antibiotic", "antimicrobial", "infect", "antiviral", "sepsis", "microbiome")),
+    # H-01: "rare" added — biologic_rare_disease and drug_rare_disease now route to neurology_cns
+    #        instead of defaulting to antibiotic_amr.
+    ("neurology_cns",     ("cns", "neuro", "brain", "alzheimer", "parkinson", "epilep", "psych_cns", "digital_cds", "digital_therapeutic", "digital_rpm", "digital_samd", "rare")),
+    # C-05: "immunol" removed from oncology (autoimmune ≠ oncology).
+    ("oncology",          ("oncolog", "cancer", "tumor", "carcinom", "leukemia", "lymphoma", "car-t", "car_t", "diagnostic", "crispr", "gene_therapy", "other_delivery")),
+    # C-05: "immunol" added here — JAK inhibitors / TNF inhibitors closer to cardiology
+    #        deal structure than oncology; no dedicated immunology key in EXPERT_REGISTRY.
+    ("cardiology",        ("cardio", "cardiac", "heart", "vascular", "hematolog", "blood", "immunol")),
     ("metabolic_diabetes",("metabolic", "diabet", "obesity", "glp", "nash", "mash", "lipid", "renal", "device_metabolic")),
     ("mental_health",     ("mental", "depress", "psych", "anxiety", "bipolar", "schizo", "addiction")),
 ]
@@ -437,14 +446,15 @@ async def route(
         _has_research = any(k in idea_l for k in _research_kws)
         _has_clinical = any(k in idea_l for k in _CLINICAL_SIGNALS)
         if _has_research and not _has_clinical:
+            _prev = sub_expert_id   # M-02: capture before overwrite so reasoning records original ID
             logger.info(
                 "H-01: %s overridden → research_tool_non_clinical "
-                "(research signals present, no clinical signals in idea text)", sub_expert_id
+                "(research signals present, no clinical signals in idea text)", _prev
             )
             sub_expert_id = "research_tool_non_clinical"
             claude_domain = _coerce_to_registry(sub_expert_id)
             confidence    = min(confidence, 0.75)
-            reasoning     = f"Corrected from {sub_expert_id}: non-clinical research-tool signals, no patient/clinical signals."
+            reasoning     = f"Corrected from {_prev}: non-clinical research-tool signals, no patient/clinical signals."
 
     # H-02: Explicit non-biomedical signal guard — catches products whose idea text
     # contains clear non-medical domain signals (agriculture, energy, materials,
@@ -504,7 +514,8 @@ async def route(
     # trials, or drug-mechanism terms. This catches materials science, energy, civil
     # engineering, and any other non-medical product that slips past H-02's keyword list.
     # Confidence gate (< 0.60) prevents overriding genuine drug ideas with unusual wording.
-    _DRUG_MODALITIES_H03 = frozenset(k for k in _ROUTER_TO_EXPERT if k.startswith("drug_"))
+    # H-02: use VALUES — sub_expert_id is already a mapped output (drug_cns, drug_cardiology)
+    _DRUG_MODALITIES_H03 = frozenset(v for k, v in _ROUTER_TO_EXPERT.items() if k.startswith("drug_"))
     if sub_expert_id in _DRUG_MODALITIES_H03 and confidence < 0.60:
         idea_l = idea.lower()
         _MEDICAL_LANGUAGE = (

@@ -532,15 +532,16 @@ def get_buyer_universe(therapeutic_area: str, subcategory_id: str) -> dict:
             "note": "Disproportionate share of indigent CRE patients; 340B drug pricing critical for access",
         }
 
-    # Payer segments (all)
-    segments["Medicare (Part B/D Payer)"] = {
-        "count": _PROVIDER_UNIVERSE["medicare_covered_lives_millions"],
-        "note": "65M+ covered lives; Part B for infused drugs, Part D for oral",
-    }
-    segments["Commercial Health Plans"] = {
-        "count": _PROVIDER_UNIVERSE["commercial_lives_millions"],
-        "note": "178M commercial lives; prior authorization policies vary by plan",
-    }
+    # Payer segments — regulated clinical products only, not research tools or SaaS (H-08)
+    if any(x in sub for x in ["drug", "biologic", "gene_therapy", "device", "diagnostic", "vaccine"]):
+        segments["Medicare (Part B/D Payer)"] = {
+            "count": _PROVIDER_UNIVERSE["medicare_covered_lives_millions"],
+            "note": "65M+ covered lives; Part B for infused drugs, Part D for oral",
+        }
+        segments["Commercial Health Plans"] = {
+            "count": _PROVIDER_UNIVERSE["commercial_lives_millions"],
+            "note": "178M commercial lives; prior authorization policies vary by plan",
+        }
 
     # Specialty pharmacy
     if any(x in sub for x in ["biologic", "gene_therapy", "drug_rare", "drug_cns", "drug_oncology"]):
@@ -900,9 +901,12 @@ async def get_all_chapter_data(
     if not isinstance(strategic_intel, Exception):
         context_blocks["strategic_playbook"] = format_strategic_intelligence_for_prompt(strategic_intel)
 
-    # Regulatory precedents
-    precedents = get_regulatory_precedents(subcategory_id, disease_name)
-    context_blocks["regulatory_pathway"] = format_regulatory_precedents(precedents)
+    _is_research = subcategory_id.startswith(("research_tool_", "research_infrastructure_"))
+
+    # Regulatory precedents and REMS risk — skip for non-clinical research tools (H-09)
+    if not _is_research:
+        precedents = get_regulatory_precedents(subcategory_id, disease_name)
+        context_blocks["regulatory_pathway"] = format_regulatory_precedents(precedents)
 
     # Market access buyer counts
     buyer_data = get_buyer_universe(therapeutic_area, subcategory_id)
@@ -917,8 +921,8 @@ async def get_all_chapter_data(
         f"Source: {geo.get('source', '')} | {geo.get('url', '')}"
     )
 
-    # REMS risk
-    rems = get_rems_risk(subcategory_id, idea)
+    # REMS risk — skip for non-clinical research tools (H-09)
+    rems = None if _is_research else get_rems_risk(subcategory_id, idea)
     if rems:
         context_blocks["rems_warning"] = (
             f"\n=== REMS RISK ===\n"

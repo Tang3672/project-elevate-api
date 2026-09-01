@@ -635,19 +635,20 @@ def _fetch_tier0(
                 ))
         except Exception: pass
 
-    # Reactome pathways (pre-loaded)
-    try:
-        from app.ingestion.connectors.reactome import get_disease_pathways
-        pathways = get_disease_pathways(disease_name)
-        if pathways:
-            facts.append(RetrievedFact(
-                concept_type="pathway_biology",
-                source_id="reactome",
-                value=pathways,
-                quality_score=compute_quality("reactome", "pathway_biology", pathways, disease_name, 2024),
-                tier=0,
-            ))
-    except Exception: pass
+    # Reactome pathways (pre-loaded) — H-15: skip for non-clinical archetypes
+    if subcategory_id not in _NON_CLINICAL_ARCHETYPES:
+        try:
+            from app.ingestion.connectors.reactome import get_disease_pathways
+            pathways = get_disease_pathways(disease_name)
+            if pathways:
+                facts.append(RetrievedFact(
+                    concept_type="pathway_biology",
+                    source_id="reactome",
+                    value=pathways,
+                    quality_score=compute_quality("reactome", "pathway_biology", pathways, disease_name, 2024),
+                    tier=0,
+                ))
+        except Exception: pass
 
     # PTRS back-validation (pre-loaded)
     try:
@@ -732,47 +733,46 @@ def _fetch_tier0(
             ))
     except Exception: pass
 
-    # ClinVar gene therapy data (pre-loaded)
-    try:
-        from app.ingestion.connectors.clinvar import get_gene_therapy_eligibility
-        clinvar_data = get_gene_therapy_eligibility(disease_name)
-        if clinvar_data.get("found"):
-            facts.append(RetrievedFact(
-                concept_type="gene_variant_data",
-                source_id="clinvar",
-                value=clinvar_data,
-                quality_score=compute_quality("clinvar", "gene_variant_data", clinvar_data, disease_name, 2024),
-                tier=0,
-            ))
-    except Exception: pass
+    # ClinVar, Orphanet, regulatory precedents — H-15: skip for non-clinical archetypes (D-01)
+    if subcategory_id not in _NON_CLINICAL_ARCHETYPES:
+        try:
+            from app.ingestion.connectors.clinvar import get_gene_therapy_eligibility
+            clinvar_data = get_gene_therapy_eligibility(disease_name)
+            if clinvar_data.get("found"):
+                facts.append(RetrievedFact(
+                    concept_type="gene_variant_data",
+                    source_id="clinvar",
+                    value=clinvar_data,
+                    quality_score=compute_quality("clinvar", "gene_variant_data", clinvar_data, disease_name, 2024),
+                    tier=0,
+                ))
+        except Exception: pass
 
-    # Orphanet (pre-loaded prevalence table, no API call)
-    try:
-        from app.ingestion.connectors.orphanet import get_rare_disease_prevalence
-        orphan_data = get_rare_disease_prevalence(disease_name)
-        if orphan_data.get("found"):
-            facts.append(RetrievedFact(
-                concept_type="prevalence_incidence",
-                source_id="orphanet",
-                value=orphan_data,
-                quality_score=compute_quality("orphanet", "prevalence_incidence", orphan_data, disease_name, 2024),
-                tier=0,
-            ))
-    except Exception: pass
+        try:
+            from app.ingestion.connectors.orphanet import get_rare_disease_prevalence
+            orphan_data = get_rare_disease_prevalence(disease_name)
+            if orphan_data.get("found"):
+                facts.append(RetrievedFact(
+                    concept_type="prevalence_incidence",
+                    source_id="orphanet",
+                    value=orphan_data,
+                    quality_score=compute_quality("orphanet", "prevalence_incidence", orphan_data, disease_name, 2024),
+                    tier=0,
+                ))
+        except Exception: pass
 
-    # Regulatory precedents (pre-loaded)
-    try:
-        from app.services.chapter_data_service import get_regulatory_precedents
-        precedents = get_regulatory_precedents(subcategory_id, disease_name)
-        if precedents:
-            facts.append(RetrievedFact(
-                concept_type="fda_approval_timeline",
-                source_id="preloaded_fda_timelines",
-                value=precedents,
-                quality_score=1.0,
-                tier=0,
-            ))
-    except Exception: pass
+        try:
+            from app.services.chapter_data_service import get_regulatory_precedents
+            precedents = get_regulatory_precedents(subcategory_id, disease_name)
+            if precedents:
+                facts.append(RetrievedFact(
+                    concept_type="fda_approval_timeline",
+                    source_id="preloaded_fda_timelines",
+                    value=precedents,
+                    quality_score=1.0,
+                    tier=0,
+                ))
+        except Exception: pass
 
     # CDMRP + DoD funding opportunities (pre-loaded)
     try:
@@ -805,6 +805,14 @@ async def _fetch_source(
 ) -> list[RetrievedFact]:
     """Fetch from a single source, with caching. Returns list of RetrievedFacts."""
     cache_key = f"{disease_name}:{subcategory_id}"
+    # C-11: UniProt/STRING results depend on target gene extracted from idea — include it
+    if source_id in ("uniprot", "string_db"):
+        import re as _re_ck
+        _ck_genes = _re_ck.findall(r'\b([A-Z][A-Z0-9]{1,7})\b', idea)
+        cache_key = f"{cache_key}:{_ck_genes[0] if _ck_genes else ''}"
+    # Cache key must include therapeutic_area for TA-specific sources
+    if source_id in ("who_gho", "nice_hta", "icer", "oecd_health", "ahrq_meps", "cms_prescriber_part_d"):
+        cache_key = f"{cache_key}:{therapeutic_area}"
     cached = _CACHE.get(source_id, cache_key)
     if cached is not None:
         return [RetrievedFact(
@@ -908,6 +916,7 @@ async def _fetch_source(
                     "criteria": {
                         "disease_conditions": [disease_name[:50]],
                         "fiscal_years": [2024, 2025],
+                        "is_active": True,  # L: skip expired grants
                     },
                     "limit": 3,
                 }

@@ -2323,6 +2323,20 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
                     if _b01_cleaned != _b01_raw:
                         setattr(report, _b01_fname, _b01_cleaned)
                         logger.info("B-01: stripped authored panel scores from '%s' (research tool)", _b01_fname)
+                elif isinstance(_b01_raw, list):  # M-05: recommended_next_steps is List[str]
+                    _b01_cleaned_list = []
+                    _b01_changed = False
+                    for _item in _b01_raw:
+                        if isinstance(_item, str):
+                            _c = _B01_APPROVAL_RE.sub("", _B01_MECHANISM_RE.sub("", _item)).strip()
+                            _b01_cleaned_list.append(_c)
+                            if _c != _item:
+                                _b01_changed = True
+                        else:
+                            _b01_cleaned_list.append(_item)
+                    if _b01_changed:
+                        setattr(report, _b01_fname, _b01_cleaned_list)
+                        logger.info("B-01: stripped authored panel scores from list '%s' (research tool)", _b01_fname)
         # Also scrub the formula string itself if it has horizon contradiction
         _ms = getattr(report, "market_sizing", None)
         if _ms:
@@ -2995,6 +3009,8 @@ async def _generate_antibiotic_report(
     demand_results: list,
     hospital_matches_raw: list,
     total_signals: int,
+    product_name: str | None = None,  # C-10
+    institution: str | None = None,   # C-10
 ) -> PIReport:
     """Full antibiotic-specific PI report."""
 
@@ -3177,6 +3193,8 @@ async def _generate_generic_pi_report(
     demand_results: list,
     hospital_matches_raw: list,
     total_signals: int,
+    product_name: str | None = None,  # C-10
+    institution: str | None = None,   # C-10
 ) -> PIReport:
     context = _build_legacy_context(idea, demand_results, hospital_matches_raw)
     raw  = await _call_claude(context, GENERIC_PI_SYSTEM_PROMPT, max_tokens=3000)

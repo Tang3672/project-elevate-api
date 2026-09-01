@@ -284,7 +284,14 @@ async def run(
 
     # ── Step 2: Indication sequence ──────────────────────────────────────────
     init_frac, expansion_path = await _load_indication_sequence(disease_name, product_type)
-    initial_population = pf_result.final_population * init_frac
+    # C-09: None means DB error — use full disease population but make it visible
+    if init_frac is None:
+        logger.warning("[C-09] indication_sequence not found for '%s' / '%s' — no fraction applied",
+                       disease_name, product_type)
+        initial_population = pf_result.final_population
+        init_frac = 1.0  # for downstream use in expansion_path
+    else:
+        initial_population = pf_result.final_population * init_frac
 
     # ── Step 3: Monetization ─────────────────────────────────────────────────
     mon_result = await monetization_engine.compute(
@@ -447,8 +454,8 @@ async def _load_indication_sequence(
                     exp = json.loads(exp)
                 return frac, exp or []
     except Exception as e:
-        logger.warning("_load_indication_sequence DB error: %s", e)
-    return 1.0, []
+        logger.warning("[C-09] _load_indication_sequence DB error for '%s': %s", disease_name, e)
+    return None, []  # C-09: None signals DB miss — caller must not assume 1.0
 
 
 def _fmt(v: float) -> str:
