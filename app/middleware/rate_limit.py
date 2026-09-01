@@ -27,6 +27,10 @@ from fastapi import Request, HTTPException
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
+# BUG-23: evict stale entries so _ip_requests doesn't grow without bound.
+_LAST_EVICT: float = 0.0
+_EVICT_EVERY: float = 300.0  # prune every 5 minutes
+
 logger = logging.getLogger(__name__)
 
 # ── In-memory rate limit stores (reset on restart — fine for Railway) ─────────
@@ -76,6 +80,14 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         now = time.monotonic()
 
+        # BUG-23: periodically evict IPs whose last request was over an hour ago
+        global _LAST_EVICT
+        if now - _LAST_EVICT > _EVICT_EVERY:
+            stale = [ip for ip, ts in _ip_requests.items() if not ts or now - ts[-1] > _WINDOW_HOUR]
+            for ip in stale:
+                del _ip_requests[ip]
+            _LAST_EVICT = now
+
         # ── 1. Hourly burst protection (hard block for extreme abuse) ─────────
         hour_reqs = _prune(_ip_requests[client_ip], _WINDOW_HOUR)
         if len(hour_reqs) >= _BURST_LIMIT_PER_HOUR:
@@ -97,7 +109,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 headers={"Retry-After": "60"},
             )
 
-        # Record this request
-        _ip_requests[client_ip] = min_reqs + [now]
+        # Record this request — BUG-9: store full hour window so burst check accumulates
+        # correctly across minutes. min_reqs is already a subset of hour_reqs.
+        _ip_requests[client_ip] = hour_reqs + [now]
 
         return await call_next(request)

@@ -59,7 +59,6 @@ class Settings(BaseSettings):
 
 
     # ── Stripe Billing ────────────────────────────────────────────────────────
-    SMTP_PASS: str = ""
     STRIPE_SECRET_KEY:     str = ""
     STRIPE_WEBHOOK_SECRET: str = ""
     STRIPE_PRICE_ID:       str = ""
@@ -96,8 +95,8 @@ def get_settings() -> Settings:
         s.SMTP_PASS = os.environ.get("SMTP_PASS", "").strip()
     if not s.EMAIL_FROM:
         s.EMAIL_FROM = os.environ.get("EMAIL_FROM", "").strip()
-    if not s.SMTP_PORT:
-        s.SMTP_PORT = int(os.environ.get("SMTP_PORT", 587))
+    # BUG-20: `if not s.SMTP_PORT` was dead code — default 587 is always truthy.
+    # pydantic-settings already reads SMTP_PORT from env; no override needed.
     if not s.DATABASE_URL or "localhost" in s.DATABASE_URL:
         db = os.environ.get("DATABASE_URL", "")
         if db:

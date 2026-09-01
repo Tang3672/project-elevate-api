@@ -11,13 +11,19 @@ Usage:
 """
 import os
 import hmac
-from fastapi import HTTPException, Query
+from fastapi import HTTPException, Header
+from typing import Optional
 
 
-def require_admin_key(key: str = Query(default="", alias="key")) -> None:
-    """Reject requests that don't supply the correct ADMIN_KEY query param."""
+def require_admin_key(x_admin_key: Optional[str] = Header(default=None, alias="X-Admin-Key")) -> None:
+    """Reject requests that don't supply the correct ADMIN_KEY in the X-Admin-Key header.
+
+    BUG-11: was a URL query param — leaked the key to server access logs and browser history.
+    Clients: send header `X-Admin-Key: <key>` instead of `?key=<key>`.
+    """
     expected = os.environ.get("ADMIN_KEY", "")
     if not expected:
         raise HTTPException(status_code=503, detail="Admin key not configured on server")
-    if not hmac.compare_digest(key, expected):
+    provided = x_admin_key or ""
+    if not hmac.compare_digest(provided, expected):
         raise HTTPException(status_code=403, detail="Invalid admin key")

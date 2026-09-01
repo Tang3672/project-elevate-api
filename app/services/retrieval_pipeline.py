@@ -811,7 +811,8 @@ async def _fetch_source(
         _ck_genes = _re_ck.findall(r'\b([A-Z][A-Z0-9]{1,7})\b', idea)
         cache_key = f"{cache_key}:{_ck_genes[0] if _ck_genes else ''}"
     # Cache key must include therapeutic_area for TA-specific sources
-    if source_id in ("who_gho", "nice_hta", "icer", "oecd_health", "ahrq_meps", "cms_prescriber_part_d"):
+    if source_id in ("who_gho", "nice_hta", "icer", "oecd_health", "ahrq_meps", "cms_prescriber_part_d",
+                     "clinicaltrials_gov"):  # BUG-24: CT trials differ by TA for same disease
         cache_key = f"{cache_key}:{therapeutic_area}"
     cached = _CACHE.get(source_id, cache_key)
     if cached is not None:
@@ -860,25 +861,27 @@ async def _fetch_source(
                 ))
 
         elif source_id == "clinicaltrials_gov":
-            import requests as _req
+            # BUG-8: was requests.get (sync) — blocks event loop for up to 4 s per call
+            import httpx as _httpx_ct
             from app.services.knowledge_retriever import _log_fetch, FetchLog
             _t0_ct = time.monotonic()
             _ct_url = "https://clinicaltrials.gov/api/v2/studies"
             _ct_params = {"query.cond": disease_name, "filter.overallStatus": "RECRUITING,ACTIVE_NOT_RECRUITING",
                           "fields": "NCTId,Phase,BriefTitle", "pageSize": 3}
-            r = _req.get(_ct_url, params=_ct_params, timeout=4)
-            _studies = r.json().get("studies", []) if r.ok else []
+            async with _httpx_ct.AsyncClient(timeout=4.0) as _ct_client:
+                r = await _ct_client.get(_ct_url, params=_ct_params)
+            _studies = r.json().get("studies", []) if r.is_success else []
             _log_fetch(FetchLog(
                 service="clinicaltrials_gov",
                 url=_ct_url,
                 method="GET",
                 status=r.status_code,
                 latency_ms=(time.monotonic() - _t0_ct) * 1000,
-                response_bytes=len(r.content) if r.ok else 0,
+                response_bytes=len(r.content) if r.is_success else 0,
                 parsed_records=len(_studies),
                 query_summary=f"clinicaltrials_gov cond={disease_name[:50]!r}",
             ))
-            if r.ok:
+            if r.is_success:
                 facts.append(RetrievedFact(
                     concept_type="competitor_trial_count", source_id=source_id,
                     value={"count": len(_studies), "studies": _studies},
@@ -887,7 +890,8 @@ async def _fetch_source(
                 ))
 
         elif source_id == "nih_reporter":
-            import requests as _req
+            # BUG-8: was requests.post (sync) — blocks event loop for up to 6 s per call
+            import httpx as _httpx_nih
             from app.services.knowledge_retriever import _log_fetch, FetchLog
             _RT_EXPERTS = frozenset({"research_tool_non_clinical", "research_infrastructure_saas",
                                      "research_tool_agronomy"})
@@ -922,24 +926,24 @@ async def _fetch_source(
                 }
                 _concept = "funding_opportunities"
             _t0_nih = time.monotonic()
-            r = _req.post(
-                "https://api.reporter.nih.gov/v2/projects/search",
-                json=_nih_body,
-                timeout=6,
-            )
+            async with _httpx_nih.AsyncClient(timeout=6.0) as _nih_client:
+                r = await _nih_client.post(
+                    "https://api.reporter.nih.gov/v2/projects/search",
+                    json=_nih_body,
+                )
             _log_fetch(FetchLog(
                 service="nih_reporter",
                 url="https://api.reporter.nih.gov/v2/projects/search",
                 method="POST",
-                status=r.status_code if hasattr(r, "status_code") else None,
+                status=r.status_code,
                 latency_ms=(time.monotonic() - _t0_nih) * 1000,
-                response_bytes=len(r.content) if r.ok else 0,
-                parsed_records=len(r.json().get("results", [])) if r.ok else 0,
+                response_bytes=len(r.content) if r.is_success else 0,
+                parsed_records=len(r.json().get("results", [])) if r.is_success else 0,
                 query_summary=(f"nih_reporter research_tool text={_search_text[:60]!r}"
                                if subcategory_id in _RT_EXPERTS
                                else f"nih_reporter disease={disease_name[:40]!r}"),
             ))
-            if r.ok:
+            if r.is_success:
                 projects = r.json().get("results", [])
                 if projects:
                     facts.append(RetrievedFact(

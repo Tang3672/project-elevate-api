@@ -21,31 +21,44 @@ def get_stripe():
     return stripe
 
 
+def _price_id_for_plan(plan: str) -> str:
+    """Map plan name to Stripe price ID. Falls back to STRIPE_PRICE_ID."""
+    plan_map = {
+        "explorer":    settings.STRIPE_BASIC_PRICE_ID or settings.STRIPE_PRICE_ID,
+        "innovator":   settings.STRIPE_PRO_PRICE_ID   or settings.STRIPE_PRICE_ID,
+        "institution": settings.STRIPE_PRICE_ID,
+        "starter":     settings.STRIPE_BASIC_PRICE_ID or settings.STRIPE_PRICE_ID,
+    }
+    return plan_map.get(plan, settings.STRIPE_PRICE_ID) or settings.STRIPE_PRICE_ID
+
+
 async def create_checkout_session(
     user_id:    int,
     user_email: str,
     success_url: str,
     cancel_url:  str,
+    plan:        str = "starter",
 ) -> str:
     """
     Create a Stripe Checkout session with 7-day free trial.
     Returns the checkout URL to redirect the user to.
     """
     s = get_stripe()
+    price_id = _price_id_for_plan(plan)
     try:
         session = s.checkout.Session.create(
             mode               = "subscription",
             payment_method_types = ["card"],
             customer_email     = user_email,
             line_items         = [{
-                "price":    settings.STRIPE_PRICE_ID,
+                "price":    price_id,
                 "quantity": 1,
             }],
             subscription_data  = {
                 "trial_period_days": 7,
-                "metadata": {"user_id": str(user_id)},
+                "metadata": {"user_id": str(user_id), "plan": plan},
             },
-            metadata           = {"user_id": str(user_id)},
+            metadata           = {"user_id": str(user_id), "plan": plan},
             success_url        = success_url,
             cancel_url         = cancel_url,
             allow_promotion_codes = True,

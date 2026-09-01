@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 VERIFIER_MODEL    = "claude-haiku-4-5-20251001"  # Fast + cheap for verification
-ARBITRATOR_MODEL  = "claude-sonnet-5"           # Stronger for final synthesis
+ARBITRATOR_MODEL  = "claude-sonnet-4-5-20251001"  # Stronger for final synthesis
 TIMEOUT           = 60.0
 
 

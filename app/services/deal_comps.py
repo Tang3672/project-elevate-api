@@ -395,11 +395,13 @@ _DEAL_COMPS_ALIASES: dict[str, str] = {
     "gene_therapy_oncology":    "biologic_oncology",
     "gene_therapy_rna":         "vaccine_prophylactic",
     "gene_therapy_cns":         "gene_therapy_rare",
-    # Digital / SaMD
-    "digital_therapeutic":      "research_tool_non_clinical",
-    "digital_cds":              "research_tool_non_clinical",
-    "digital_rpm":              "research_tool_non_clinical",
-    "digital_samd":             "research_tool_non_clinical",
+    # Digital / SaMD — BUG-16: was aliased to research_tool_non_clinical ($10K–$150K range).
+    # SaMD/CDS/RPM products that touch patient care trade like medical devices,
+    # not lab tools — licensing deals in the $1M–$10M+ range.
+    "digital_therapeutic":      "device_cardiovascular",
+    "digital_cds":              "device_cardiovascular",
+    "digital_rpm":              "device_cardiovascular",
+    "digital_samd":             "device_cardiovascular",
     # Other
     "other_delivery":           "biologic_oncology",
     "drug_rare_disease":        "drug_rare_disease",  # explicit passthrough

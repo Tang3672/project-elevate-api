@@ -18,6 +18,7 @@ DELETE /api/v1/auth/drafts/{id}   — delete a draft
 """
 import logging
 from fastapi import APIRouter, HTTPException, Request, Depends, Header
+from pydantic import BaseModel, Field
 from typing import Optional, List
 
 from app.models.user import (
@@ -144,16 +145,10 @@ async def login(payload: LoginRequest):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     if not verify_password(payload.password, user['password_hash']):
         raise HTTPException(status_code=401, detail="Invalid email or password")
-    # Check email verification — skip for dev accounts
-    DEV_EMAILS = {"test@projectelevate.io", "ijw91021@gmail.com", "admin@projectelevate.io", "oneonesie100@gmail.com", "lizpeek11@gmail.com", "peek@wustl.edu"}
-    if not user.get('email_verified', False) and user['email'] not in DEV_EMAILS:
-        raise HTTPException(
-            status_code=403,
-            detail="Please verify your email before logging in. Check your inbox."
-        )
-    # Block unverified accounts (skip for dev emails)
-    DEV_EMAILS = {"test@projectelevate.io", "ijw91021@gmail.com", "admin@projectelevate.io", "oneonesie100@gmail.com", "lizpeek11@gmail.com", "peek@wustl.edu"}
-    if not user.get('email_verified', False) and user.get('email') not in DEV_EMAILS:
+    # Block unverified accounts — dev emails bypass verification for local testing (BUG-10: deduplicated)
+    _DEV_EMAILS = {"test@projectelevate.io", "ijw91021@gmail.com", "admin@projectelevate.io",
+                   "oneonesie100@gmail.com", "lizpeek11@gmail.com", "peek@wustl.edu"}
+    if not user.get('email_verified', False) and user.get('email') not in _DEV_EMAILS:
         raise HTTPException(
             status_code=403,
             detail="Please verify your email before logging in. Check your inbox for a verification link."
@@ -296,14 +291,18 @@ async def remove_report(
     return {"deleted": True}
 
 
+class _RenameRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+
+
 @router.patch("/reports/{report_id}")
 async def update_report_name(
     report_id:    int,
-    name:         str,
+    body:         _RenameRequest,  # BUG-12: was `name: str` query param — broke on &, #, % chars
     current_user: dict = Depends(get_current_user),
 ):
     """Rename a saved report."""
-    updated = await rename_report(report_id, current_user['id'], name)
+    updated = await rename_report(report_id, current_user['id'], body.name)
     if not updated:
         raise HTTPException(status_code=404, detail="Report not found")
     return {"updated": True}
@@ -396,19 +395,7 @@ async def submit_waitlist(body: dict):
 
     pool = await get_pool()
     async with pool.acquire() as conn:
-        # Create table if not exists
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS waitlist (
-                id          SERIAL PRIMARY KEY,
-                name        TEXT,
-                email       TEXT NOT NULL,
-                institution TEXT,
-                role        TEXT,
-                plan        TEXT DEFAULT 'starter',
-                message     TEXT,
-                created_at  TIMESTAMPTZ DEFAULT NOW()
-            )
-        """)
+        # BUG-21: DDL moved to init_user_tables() — keep only the INSERT here
         # Check for duplicate
         existing = await conn.fetchrow("SELECT id FROM waitlist WHERE lower(email)=lower($1)", email)
         if not existing:

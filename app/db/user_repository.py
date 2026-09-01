@@ -24,13 +24,14 @@ async def init_user_tables():
 
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS users (
-                id           SERIAL PRIMARY KEY,
-                email        VARCHAR(200) UNIQUE NOT NULL,
-                password_hash VARCHAR(500),
-                google_id    VARCHAR(200) UNIQUE,
-                name         VARCHAR(100),
-                created_at   TIMESTAMPTZ DEFAULT NOW(),
-                updated_at   TIMESTAMPTZ DEFAULT NOW()
+                id             SERIAL PRIMARY KEY,
+                email          VARCHAR(200) UNIQUE NOT NULL,
+                password_hash  VARCHAR(500),
+                google_id      VARCHAR(200) UNIQUE,
+                name           VARCHAR(100),
+                email_verified BOOLEAN DEFAULT FALSE,
+                created_at     TIMESTAMPTZ DEFAULT NOW(),
+                updated_at     TIMESTAMPTZ DEFAULT NOW()
             )
         """)
 
@@ -43,6 +44,8 @@ async def init_user_tables():
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_status VARCHAR(50) DEFAULT 'none'",
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS trial_ends_at TIMESTAMPTZ",
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS free_reports_used INTEGER DEFAULT 0",
+            # BUG-2: email_verified was missing from schema — users were permanently blocked at login
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT FALSE",
         ]:
             try:
                 await conn.execute(col_sql)
@@ -87,6 +90,20 @@ async def init_user_tables():
             CREATE INDEX IF NOT EXISTS drafts_user_idx ON draft_ideas (user_id)
         """)
 
+        # BUG-21: waitlist DDL belongs here at startup, not in every POST /waitlist handler
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS waitlist (
+                id          SERIAL PRIMARY KEY,
+                name        TEXT,
+                email       TEXT NOT NULL,
+                institution TEXT,
+                role        TEXT,
+                plan        TEXT DEFAULT 'starter',
+                message     TEXT,
+                created_at  TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+
     logger.info("✅ User tables initialized")
 
 
@@ -122,19 +139,9 @@ async def get_user_by_email(email: str) -> Optional[dict]:
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT id, email, password_hash, google_id, name, created_at FROM users WHERE email = $1",
+            # BUG-2: include email_verified so login gate works correctly
+            "SELECT id, email, password_hash, google_id, name, email_verified, created_at FROM users WHERE email = $1",
             email.lower().strip()
-        )
-        return dict(row) if row else None
-
-
-async def get_user_by_id(user_id: int) -> Optional[dict]:
-    """Fetch a user by ID."""
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT id, email, name, created_at FROM users WHERE id = $1",
-            user_id
         )
         return dict(row) if row else None
 
@@ -348,24 +355,26 @@ async def update_user_subscription(
     trial_ends_at=None,
     stripe_customer_id:  str = None,
 ):
-    """Update user subscription fields."""
+    """Update user subscription fields atomically."""
     pool = await get_pool()
     async with pool.acquire() as conn:
-        if stripe_customer_id:
-            await conn.execute(
-                "UPDATE users SET stripe_customer_id = $1 WHERE id = $2",
-                stripe_customer_id, user_id
-            )
-        if subscription_status:
-            await conn.execute(
-                "UPDATE users SET subscription_status = $1 WHERE id = $2",
-                subscription_status, user_id
-            )
-        if trial_ends_at:
-            await conn.execute(
-                "UPDATE users SET trial_ends_at = $1 WHERE id = $2",
-                trial_ends_at, user_id
-            )
+        # BUG-15: wrap in a single transaction — partial updates on crash left users in inconsistent state
+        async with conn.transaction():
+            if stripe_customer_id:
+                await conn.execute(
+                    "UPDATE users SET stripe_customer_id = $1 WHERE id = $2",
+                    stripe_customer_id, user_id
+                )
+            if subscription_status:
+                await conn.execute(
+                    "UPDATE users SET subscription_status = $1 WHERE id = $2",
+                    subscription_status, user_id
+                )
+            if trial_ends_at:
+                await conn.execute(
+                    "UPDATE users SET trial_ends_at = $1 WHERE id = $2",
+                    trial_ends_at, user_id
+                )
 
 
 async def get_user_by_stripe_customer_id(stripe_customer_id: str):
