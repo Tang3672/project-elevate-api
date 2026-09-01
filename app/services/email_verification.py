@@ -59,7 +59,8 @@ async def verify_token(token: str) -> int | None:
             return None
         if row['used']:
             return None
-        if row['expires_at'].replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
+        # BUG-3/22: asyncpg returns TIMESTAMPTZ already timezone-aware; .replace() raises TypeError
+        if row['expires_at'].astimezone(timezone.utc) < datetime.now(timezone.utc):
             return None
         # Mark as used
         await conn.execute(

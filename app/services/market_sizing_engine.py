@@ -203,7 +203,11 @@ def poly_hazard_survival(t, phases: list[dict]):
             rate = ph.get("rate", 0.1)
             h = weight * rate * np.ones_like(t)
         H += h
-    H_cum = np.array([_np_trapz(H[:i+1], t[:i+1]) if i > 0 else 0.0 for i in range(len(t))])
+    # BUG-14: was O(n²) list-comp calling trapz on growing prefix — 2M ops at n=2000.
+    # cumsum of trapezoid slices is O(n) and mathematically identical.
+    _dt = np.diff(t, prepend=t[0])
+    _h_mid = np.concatenate(([0.0], 0.5 * (H[:-1] + H[1:]) * np.diff(t)))
+    H_cum = np.cumsum(_h_mid)
     return np.exp(-H_cum)
 
 
@@ -819,7 +823,10 @@ def compute_market_size(
     net_price, gtn_pct = gross_to_net_price(wac_annual_usd, ta, has_orphan)
 
     # Revenue per patient (annualised)
-    is_one_time  = modality.lower() in ("gene_cell_therapy",) or dot >= 15.0
+    # BUG-27: `dot >= 15.0` could flip chronic metabolic/CNS therapies into one-time revenue model
+    # when Weibull lam drifts marginally above 15. One-time dosing is only valid for gene/cell.
+    _one_time_modalities = {"gene_cell_therapy", "gene_therapy", "cell_therapy"}
+    is_one_time = modality.lower() in _one_time_modalities
     # C-06: diagnostic DoT (~0.02yr) must NOT discount the per-test price — price is per test, not per year
     _is_diag = modality.lower().startswith("diagnostic")
     if is_one_time:

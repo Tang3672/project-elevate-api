@@ -336,7 +336,10 @@ class FeedbackRequest(BaseModel):
 
 
 @router.post("/feedback")
-async def submit_feedback(req: FeedbackRequest):
+async def submit_feedback(
+    req: FeedbackRequest,
+    current_user: dict = Depends(get_current_user),  # BUG-5
+):
     """Capture what the user/TTO did with a recommendation and how it turned out (P11)."""
     from app.db.reports_repository import record_feedback
     try:
@@ -349,13 +352,20 @@ async def submit_feedback(req: FeedbackRequest):
 
 
 @router.get("/outcomes")
-async def get_outcomes(report_id: str = "", user_id: int = None):
+async def get_outcomes(
+    report_id: str = "",
+    user_id: Optional[int] = None,  # BUG-17: was `int = None` — wrong annotation
+    current_user: dict = Depends(get_current_user),  # BUG-5
+):
     from app.db.reports_repository import list_outcomes
     return {"outcomes": await list_outcomes(report_id=report_id, user_id=user_id)}
 
 
 @router.get("/eval-dashboard")
-async def get_eval_dashboard(institution_id: str = None):
+async def get_eval_dashboard(
+    institution_id: Optional[str] = None,
+    current_user: dict = Depends(get_current_user),  # BUG-5
+):
     """Internal evaluation metrics: trust, priority, abstention, acceptance, outcomes (P10)."""
     from app.db.reports_repository import eval_metrics
     return await eval_metrics(institution_id=institution_id)
@@ -364,7 +374,12 @@ async def get_eval_dashboard(institution_id: str = None):
 # ── TTO review dashboard / workflow (Sprint 5) ──────────────────────────────────
 
 @router.get("/review-queue")
-async def review_queue(institution_id: str = None, status: str = "", reviewer: str = ""):
+async def review_queue(
+    institution_id: Optional[str] = None,
+    status: str = "",
+    reviewer: str = "",
+    current_user: dict = Depends(get_current_user),  # BUG-5
+):
     """The TTO review queue: inventions with triage scores, status, reviewer, next action."""
     from app.db.reports_repository import list_review_queue
     return {"inventions": await list_review_queue(
@@ -372,7 +387,10 @@ async def review_queue(institution_id: str = None, status: str = "", reviewer: s
 
 
 @router.get("/invention/{report_id}")
-async def invention_detail(report_id: str):
+async def invention_detail(
+    report_id: str,
+    current_user: dict = Depends(get_current_user),  # BUG-5
+):
     from app.db.reports_repository import get_invention
     inv = await get_invention(report_id)
     if not inv:
@@ -388,7 +406,10 @@ class ReviewUpdateRequest(BaseModel):
 
 
 @router.post("/review-update")
-async def review_update(req: ReviewUpdateRequest):
+async def review_update(
+    req: ReviewUpdateRequest,
+    current_user: dict = Depends(get_current_user),  # BUG-5
+):
     from app.db.reports_repository import update_review
     try:
         return await update_review(req.report_id, status=req.status,
@@ -766,8 +787,8 @@ async def get_opportunities(
 
     curated_names = {o["disease"].lower() for o in curated_opps}
 
-    # If searching or extended universe is ready, supplement with disease_scored
-    if search or True:  # always check for extended diseases
+    # Always supplement curated results with disease_scored extended universe (BUG-13: was `if search or True`)
+    if True:  # noqa: SIM210 — explicit; future: add feature flag here
         try:
             from app.db.database import get_pool
             pool = await get_pool()

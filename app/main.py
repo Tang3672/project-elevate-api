@@ -69,7 +69,8 @@ async def startup():
     # Fire all initialization in the background so uvicorn starts serving
     # the /health endpoint immediately — Railway's 30s window is too tight
     # for 8 sequential DB schema calls on a cold-start DB connection.
-    _asyncio.create_task(_init_background())
+    # BUG-26: use ensure_future so the task is attached to the running loop.
+    _asyncio.ensure_future(_init_background())
 
 
 async def _init_background():
@@ -118,6 +119,19 @@ async def _init_background():
     if settings.ENABLE_SCHEDULER:
         from app.scheduler.ingestion_scheduler import init_scheduler
         init_scheduler()
+
+    # BUG-25: start tracker scheduler here (after DB init succeeds) instead of
+    # a separate @app.on_event("startup") that fires unconditionally
+    from app.services.weekly_tracker import run_weekly_tracker
+    import asyncio as _asyncio2
+    _tracker_scheduler.add_job(
+        lambda: _asyncio2.ensure_future(run_weekly_tracker()),
+        trigger="cron", day_of_week="mon", hour=8, minute=0,
+        id="weekly_tracker", replace_existing=True
+    )
+    _tracker_scheduler.start()
+    _log.info("Weekly tracker scheduler started")
+
 
 @app.on_event("shutdown")
 async def shutdown():
@@ -197,85 +211,9 @@ async def get_version():
 
 
 
-@app.get("/debug/env-full")
-def debug_env_full():
-    import os
-    # Find anything anthropic-related
-    anthropic_vars = {k: v[:10]+"..." for k,v in os.environ.items() if "anthrop" in k.lower()}
-    all_keys = [k for k in os.environ.keys()]
-    return {
-        "anthropic_related": anthropic_vars,
-        "all_var_names": sorted(all_keys),
-        "total_vars": len(all_keys)
-    }
-
-@app.get("/debug/env-check")
-def debug_env_check():
-    import os
-    # Scan all env vars stripping whitespace from key names
-    key = ""
-    for k, v in os.environ.items():
-        if k.strip() == "ANTHROPIC_API_KEY" and v.strip():
-            key = v.strip()
-            break
-    # Also check settings object
-    from app.core.config import settings
-    settings_key = settings.ANTHROPIC_API_KEY
-    return {
-        "anthropic_key_present": bool(key),
-        "anthropic_key_prefix": key[:14] + "..." if key else None,
-        "anthropic_key_length": len(key) if key else 0,
-        "settings_key_present": bool(settings_key),
-        "settings_key_length": len(settings_key),
-        "has_openai_key": bool(os.getenv("OPENAI_API_KEY")),
-        "has_database_url": bool(os.getenv("DATABASE_URL")),
-    }
 
 
-@app.get("/debug/test-anthropic")
-async def test_anthropic():
-    """Make a minimal real Anthropic API call and return the full response for debugging."""
-    import httpx as _httpx
-    key = settings.ANTHROPIC_API_KEY
-    if not key:
-        return {"error": "ANTHROPIC_API_KEY not set"}
-    try:
-        async with _httpx.AsyncClient(timeout=30.0) as c:
-            r = await c.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={
-                    "x-api-key": key,
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json",
-                },
-                json={
-                    "model": "claude-haiku-4-5-20251001",
-                    "max_tokens": 10,
-                    "messages": [{"role": "user", "content": "Say OK"}],
-                },
-            )
-        return {
-            "status": r.status_code,
-            "body": r.json(),
-            "key_prefix": key[:14] + "...",
-        }
-    except Exception as e:
-        return {"error": str(e)}
-
-
-# ── Weekly Tracker Scheduler ──────────────────────────────────────────────────
+# ── Weekly Tracker Scheduler (started inside _init_background after DB is ready) ─
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-import asyncio
 
 _tracker_scheduler = AsyncIOScheduler(timezone="UTC")
-
-@app.on_event("startup")
-async def start_tracker_scheduler():
-    from app.services.weekly_tracker import run_weekly_tracker
-    _tracker_scheduler.add_job(
-        lambda: asyncio.create_task(run_weekly_tracker()),
-        trigger="cron", day_of_week="mon", hour=8, minute=0,
-        id="weekly_tracker", replace_existing=True
-    )
-    _tracker_scheduler.start()
-    import logging; logging.getLogger(__name__).info("Weekly tracker scheduler started")
