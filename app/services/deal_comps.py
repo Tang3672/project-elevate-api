@@ -50,6 +50,12 @@ class DealCompProfile:
     # Additional context
     notes:                     str = ""
 
+    @property
+    def milestones_phase3_m(self) -> tuple[float, float]:
+        """Phase 3 milestone packages are ~60% larger than Phase 2 (later stage = more biobucks)."""
+        return (round(self.milestones_phase2_m[0] * 1.6, 1),
+                round(self.milestones_phase2_m[1] * 1.6, 1))
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Deal comps by therapeutic area / sub_expert_id
@@ -362,9 +368,51 @@ _DEFAULT_COMPS = DealCompProfile(
 )
 
 
+_DEAL_COMPS_ALIASES: dict[str, str] = {
+    # Clinical drugs without specific entries → closest analogue
+    "drug_cardiology":          "drug_oncology",
+    "drug_immunology":          "biologic_immunology",
+    "drug_metabolic":           "drug_oncology",
+    "drug_respiratory":         "biologic_immunology",
+    "drug_infectious_non_amr":  "drug_amr",
+    "antibiotic_amr":           "drug_amr",
+    "drug_amr_community":       "drug_amr",
+    # Biologics without entries
+    "biologic_cardiology":      "biologic_immunology",
+    "biologic_metabolic":       "biologic_immunology",
+    "biologic_hematology":      "biologic_rare_disease",
+    # Devices without entries
+    "device_metabolic":         "device_cardiovascular",
+    "device_neurology":         "device_cardiovascular",
+    "device_ophthalmology":     "device_cardiovascular",
+    "device_surgical_general":  "device_cardiovascular",
+    "device_surgical_orthopedic": "device_cardiovascular",
+    # Vaccines / immunotherapy
+    "vaccine_cancer_immuno":    "biologic_oncology",
+    "vaccine_therapeutic":      "biologic_oncology",
+    # Gene therapy variants
+    "gene_therapy_hematology":  "gene_therapy_rare",
+    "gene_therapy_oncology":    "biologic_oncology",
+    "gene_therapy_rna":         "vaccine_prophylactic",
+    "gene_therapy_cns":         "gene_therapy_rare",
+    # Digital / SaMD
+    "digital_therapeutic":      "research_tool_non_clinical",
+    "digital_cds":              "research_tool_non_clinical",
+    "digital_rpm":              "research_tool_non_clinical",
+    "digital_samd":             "research_tool_non_clinical",
+    # Other
+    "other_delivery":           "biologic_oncology",
+    "drug_rare_disease":        "drug_rare_disease",  # explicit passthrough
+}
+
+
 def get_deal_comps(sub_expert_id: str) -> DealCompProfile:
     """Return deal comparables for the given sub_expert_id."""
-    return DEAL_COMPS.get(sub_expert_id, _DEFAULT_COMPS)
+    if sub_expert_id in DEAL_COMPS:
+        return DEAL_COMPS[sub_expert_id]
+    # Fall back through the alias map before returning the pharma-scale default
+    alias = _DEAL_COMPS_ALIASES.get(sub_expert_id)
+    return DEAL_COMPS.get(alias, _DEFAULT_COMPS) if alias else _DEFAULT_COMPS
 
 
 def format_deal_comps_for_prompt(sub_expert_id: str, development_phase: str = "preclinical") -> str:
@@ -378,7 +426,7 @@ def format_deal_comps_for_prompt(sub_expert_id: str, development_phase: str = "p
         "preclinical": (comp.upfront_preclinical_m, comp.milestones_preclinical_m),
         "phase1":      (comp.upfront_phase1_m,      comp.milestones_phase1_m),
         "phase2":      (comp.upfront_phase2_m,      comp.milestones_phase2_m),
-        "phase3":      (comp.upfront_phase3_m,      comp.milestones_phase2_m),
+        "phase3":      (comp.upfront_phase3_m,      comp.milestones_phase3_m),
     }
     upfront, milestones = phase_map.get(development_phase.lower(), phase_map["phase1"])
 

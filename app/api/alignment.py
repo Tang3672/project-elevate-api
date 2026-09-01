@@ -2212,7 +2212,7 @@ async def market_model_node_edit(
     if not base:
         raise HTTPException(status_code=404,
             detail="No buyer model found for this report. "
-                   "Only research-tool reports (LIFE_SCIENCES_RESEARCH) have an editable buyer model.")
+                   "Only non-clinical research tool reports have an editable buyer model.")
 
     nodes = dict(base.get("nodes") or {})
 
@@ -2408,6 +2408,27 @@ class _GateRequest(BaseModel):
     rationale:      str   = Field(..., min_length=1, max_length=500)
 
 
+def _compute_model_verification(values: dict, formatted: dict) -> dict:
+    """Return a live verification object from the new model's resolved values."""
+    issues = []
+    tam = values.get("tam", 0.0)
+    sam = values.get("sam", 0.0)
+    som = values.get("som", 0.0)
+    if tam > 0 and sam / tam > 0.90:
+        issues.append({
+            "type": "FLAG",
+            "field": "sam",
+            "message": f"SAM ({formatted.get('sam', '')}) is {sam/tam:.0%} of TAM — unusually high addressable capture rate",
+        })
+    if sam > 0 and som / sam > 0.40:
+        issues.append({
+            "type": "FLAG",
+            "field": "som",
+            "message": f"SOM ({formatted.get('som', '')}) is {som/sam:.0%} of SAM — near-term penetration above 40% is aggressive",
+        })
+    return {"state": "FLAG" if issues else "PASS", "issues": issues}
+
+
 def _build_override_response(old_m, new_m) -> dict:
     """Construct the spec Part 3.2 response from two model versions."""
     old_v = old_m.values()
@@ -2475,7 +2496,7 @@ def _build_override_response(old_m, new_m) -> dict:
         "diff":                      diff_out,
         "active_gates":              active_gates,
         "recommendations_changed":   recommendations_changed,
-        "verification":              {"state": "PASS", "issues": []},
+        "verification":              _compute_model_verification(new_v, fmt),
         "export_unlocked":           True,
         "stale_narrative_sections":  stale,
     }
