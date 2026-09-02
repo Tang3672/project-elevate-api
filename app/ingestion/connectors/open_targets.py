@@ -18,6 +18,7 @@ These feed the PI report mechanism section and give the scoring engine
 richer drug-target context for white-space analysis.
 """
 
+import asyncio
 import logging
 import time
 from typing import Optional
@@ -229,8 +230,8 @@ async def load_disease_targets(top_n: int = 10) -> dict[str, int]:
         await _ensure_target_table(conn)
 
         for disease, efo_id in _OT_DISEASE_IDS.items():
-            targets = _get_top_targets(efo_id, n=top_n)
-            time.sleep(_DELAY)
+            targets = await asyncio.to_thread(_get_top_targets, efo_id, top_n)
+            await asyncio.sleep(_DELAY)
 
             mondo_id = None
             try:
@@ -261,8 +262,8 @@ async def load_chembl_indications() -> dict[str, int]:
 
     async with pool.acquire() as conn:
         for disease, search_term in _CHEMBL_SEARCH_TERMS.items():
-            indications = _get_chembl_indications(search_term)
-            time.sleep(_DELAY)
+            indications = await asyncio.to_thread(_get_chembl_indications, search_term)
+            await asyncio.sleep(_DELAY)
 
             mondo_id = None
             try:

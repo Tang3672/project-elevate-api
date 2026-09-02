@@ -28,6 +28,7 @@ Why the geographic layer matters for market sizing:
   - Urban academic medical center density = where to launch first
 """
 
+import asyncio
 import logging
 from typing import Optional
 import requests
@@ -134,9 +135,11 @@ async def get_county_svi(state_fips: str = None, county_fips: str = None, top_n:
         if state_fips:
             params["where"] = f"STATE='{state_fips}'"
 
-        r = requests.get(SVI_API, params=params, timeout=_TIMEOUT)
-        r.raise_for_status()
-        features = r.json().get("features", [])
+        def _do_fetch(_p=params):
+            rr = requests.get(SVI_API, params=_p, timeout=_TIMEOUT)
+            rr.raise_for_status()
+            return rr.json().get("features", [])
+        features = await asyncio.to_thread(_do_fetch)
 
         return [
             {

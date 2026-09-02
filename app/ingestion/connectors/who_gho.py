@@ -14,6 +14,7 @@ GHE cause-code → disease mapping is maintained in _GHE_CAUSE_MAP below.
 Extend as needed; keep mapping documented for auditing.
 """
 
+import asyncio
 import logging
 import time
 from typing import Optional
@@ -185,9 +186,9 @@ async def load_burden_for_diseases(
             ghe_code = mapping["ghe_code"]
             mondo_id = await _lookup_mondo_id(conn, disease)
 
-            # Fetch US DALYs
-            dalys_raw = _fetch_ghe_dalys(ghe_code, spatial_dim=_USA_CODE, year=year)
-            time.sleep(_DELAY)
+            # Fetch US DALYs — offload blocking requests.get to thread pool
+            dalys_raw = await asyncio.to_thread(_fetch_ghe_dalys, ghe_code, _USA_CODE, year)
+            await asyncio.sleep(_DELAY)
 
             if dalys_raw is not None:
                 # WHO GHE_DALYNUM is in thousands
@@ -204,8 +205,8 @@ async def load_burden_for_diseases(
                 logger.warning("WHO GHO: no DALY data for '%s' (code=%s)", disease, ghe_code)
 
             # Also fetch mortality for richer burden picture
-            deaths_raw = _fetch_mortality_rate(ghe_code, spatial_dim=_USA_CODE, year=year)
-            time.sleep(_DELAY)
+            deaths_raw = await asyncio.to_thread(_fetch_mortality_rate, ghe_code, _USA_CODE, year)
+            await asyncio.sleep(_DELAY)
             if deaths_raw is not None:
                 await _upsert_burden(
                     conn, mondo_id, disease, ghe_code,

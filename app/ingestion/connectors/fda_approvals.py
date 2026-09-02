@@ -22,6 +22,7 @@ All results stored in:
 License: openFDA CC0, Drugs@FDA US public domain — fully commercial-safe.
 """
 
+import asyncio
 import csv
 import io
 import logging
@@ -234,8 +235,8 @@ async def load_fda_approvals(api_key: str = "") -> dict[str, int]:
         await _ensure_drug_indication_table(conn)
 
         for disease, search_term in _DISEASE_SEARCH_TERMS.items():
-            count, drug_names = _count_approved_drugs(search_term, api_key)
-            time.sleep(_DELAY)
+            count, drug_names = await asyncio.to_thread(_count_approved_drugs, search_term, api_key)
+            await asyncio.sleep(_DELAY)
 
             # Resolve MONDO ID if available
             mondo_id = None
@@ -265,11 +266,11 @@ async def bulk_load_drugs_at_fda() -> int:
     Returns number of drug entries loaded.
     """
     logger.info("Downloading Drugs@FDA ZIP (~6MB)...")
-    zip_bytes = _download_drugs_at_fda()
+    zip_bytes = await asyncio.to_thread(_download_drugs_at_fda)
     if not zip_bytes:
         return 0
 
-    drugs = _parse_products_txt(zip_bytes)
+    drugs = await asyncio.to_thread(_parse_products_txt, zip_bytes)
     logger.info("Drugs@FDA: parsed %d product entries", len(drugs))
 
     pool = await get_pool()

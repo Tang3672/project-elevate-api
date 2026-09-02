@@ -15,6 +15,7 @@ Resolution cascade:
   4. Fallback: store raw name with confidence=0 for manual curation
 """
 
+import asyncio
 import logging
 import time
 from typing import Optional
@@ -178,13 +179,14 @@ async def load_drugs_for_names(drug_names: list[str],
 
     async with pool.acquire() as conn:
         for name in drug_names:
-            result = resolve_drug_name(name)
+            # Offload blocking RxNav HTTP calls to thread pool
+            result = await asyncio.to_thread(resolve_drug_name, name)
             if not result:
                 logger.warning("RxNorm: no match for '%s'", name)
                 continue
 
             rxcui = result["rxcui"]
-            row   = _build_drug_row(rxcui, result["label"], result["tty"])
+            row   = await asyncio.to_thread(_build_drug_row, rxcui, result["label"], result["tty"])
             if await _upsert_drug(conn, row):
                 await _upsert_xref(conn, source_name, name, rxcui,
                                    result["label"], result["method"], result["confidence"])
@@ -201,8 +203,8 @@ async def normalize_drug_id(rxcui_or_name: str) -> Optional[str]:
     Otherwise resolve by name. Returns RxCUI string or None.
     """
     if rxcui_or_name.isdigit():
-        data = _get(f"rxcui/{rxcui_or_name}/status.json")
+        data = await asyncio.to_thread(_get, f"rxcui/{rxcui_or_name}/status.json")
         if data and data.get("rxcuiStatus", {}).get("status") not in ("NotCurrent", "Unknown", ""):
             return rxcui_or_name
-    result = resolve_drug_name(rxcui_or_name)
+    result = await asyncio.to_thread(resolve_drug_name, rxcui_or_name)
     return result["rxcui"] if result else None
