@@ -758,7 +758,7 @@ def get_validation_graph():
 
 # ── Self-correction: fix verifier-flagged sections, then the caller re-validates ──
 
-CORRECTOR_MODEL = "claude-sonnet-5"
+CORRECTOR_MODEL = "claude-sonnet-4-5-20251001"
 
 _SECTION_FIELDS = {  # top-level report sections a flag can target
     "disease_intelligence", "market_sizing", "regulatory_pathway",
@@ -973,10 +973,12 @@ async def validate_pi_report(report: dict, sub_expert_id: str = "") -> dict:
         return result
     except Exception as e:
         logger.error(f"Validation graph failed: {e}")
+        # BUG-5: was passed=True, export_blocked=False — a graph crash must BLOCK export,
+        # not silently mark the report as validated
         report["validation"] = {
             "status": "ERROR",
-            "passed": True,
-            "export_blocked": False,
+            "passed": False,
+            "export_blocked": True,
             "errors": [], "warnings": [], "notes": [],
             "total_flags": 0,
             "agents_run": [],

@@ -133,7 +133,8 @@ async def harvest_all_conditions(max_pages: int = 50) -> dict[str, int]:
         next_token = None
 
         try:
-            r = requests.get(CTGOV_BASE, params=params, timeout=20)
+            # BUG-8: was blocking requests.get in an async def — offload to thread
+            r = await asyncio.to_thread(requests.get, CTGOV_BASE, params=params, timeout=20)
             if r.status_code == 200:
                 data = r.json()
                 for study in data.get("studies", []):
@@ -155,7 +156,7 @@ async def harvest_all_conditions(max_pages: int = 50) -> dict[str, int]:
 
         pages += 1
         logger.info("CT.gov harvest: page %d, total unique conditions: %d", pages, len(counter))
-        time.sleep(_DELAY)
+        await asyncio.sleep(_DELAY)  # BUG-8: was time.sleep — blocks event loop
 
         if not next_token:
             break

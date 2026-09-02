@@ -603,7 +603,9 @@ def _fetch_tier0(
             quality_score=compute_quality("ptrs_tables", "ptrs_probability", loa, disease_name, 2021),
             tier=0,
         ))
-    except Exception: pass
+    except Exception as _e:
+        # BUG-13: was bare `except: pass` — operator had no signal that Tier 0 was broken
+        logger.warning("Tier 0 ptrs_tables fetch failed (report degrades to Tier 1+): %s", _e)
 
     # NCI SEER pre-loaded stats — skip for non-clinical archetypes (D-01: prevents
     # disease prevalence facts from contaminating lab-tool / agronomy reports).
@@ -844,7 +846,8 @@ async def _fetch_source(
             gene = candidates[0] if candidates else None
             if gene:
                 from app.ingestion.connectors.uniprot import get_target_biology
-                target = get_target_biology(gene)
+                # BUG-9: sync requests call — offload to thread
+                target = await asyncio.to_thread(get_target_biology, gene)
                 if target:
                     facts.append(RetrievedFact(
                         concept_type="target_druggability", source_id=source_id,
@@ -853,7 +856,8 @@ async def _fetch_source(
 
         elif source_id == "nice_hta":
             from app.ingestion.connectors.nice_hta import get_hta_payer_signal
-            nice = get_hta_payer_signal(therapeutic_area, idea[:80])
+            # BUG-9: sync requests call — offload to thread
+            nice = await asyncio.to_thread(get_hta_payer_signal, therapeutic_area, idea[:80])
             if nice.get("found"):
                 facts.append(RetrievedFact(
                     concept_type="payer_access_signal", source_id=source_id,
@@ -953,7 +957,8 @@ async def _fetch_source(
 
         elif source_id == "grants_gov":
             from app.ingestion.connectors.grants_gov import search_funding_opportunities
-            opps = search_funding_opportunities(disease_name, agency_code="HHS", limit=3)
+            # BUG-9: sync requests call — offload to thread
+            opps = await asyncio.to_thread(search_funding_opportunities, disease_name, "HHS", 3)
             if opps:
                 facts.append(RetrievedFact(
                     concept_type="funding_opportunities", source_id=source_id,
@@ -962,7 +967,8 @@ async def _fetch_source(
 
         elif source_id == "cms_open_payments":
             from app.ingestion.connectors.cms_open_payments import get_kol_landscape_summary
-            kol = get_kol_landscape_summary(therapeutic_area)
+            # BUG-9: sync requests call — offload to thread
+            kol = await asyncio.to_thread(get_kol_landscape_summary, therapeutic_area)
             if kol:
                 facts.append(RetrievedFact(
                     concept_type="kol_landscape", source_id=source_id,
@@ -971,7 +977,8 @@ async def _fetch_source(
 
         elif source_id == "oecd_health":
             from app.ingestion.connectors.oecd_health import compute_global_tam
-            global_data = compute_global_tam(1_000_000_000, therapeutic_area)
+            # BUG-9: sync requests call — offload to thread
+            global_data = await asyncio.to_thread(compute_global_tam, 1_000_000_000, therapeutic_area)
             facts.append(RetrievedFact(
                 concept_type="global_market_size", source_id=source_id,
                 value=global_data, quality_score=1.0, tier=1,
@@ -984,7 +991,8 @@ async def _fetch_source(
             gene = candidates[0] if candidates else None
             if gene:
                 from app.ingestion.connectors.string_db import assess_network_liability
-                ppi = assess_network_liability(gene)
+                # BUG-9: sync requests call — offload to thread
+                ppi = await asyncio.to_thread(assess_network_liability, gene)
                 if ppi.get("hub_score") != "unknown":
                     facts.append(RetrievedFact(
                         concept_type="target_druggability", source_id=source_id,

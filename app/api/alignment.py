@@ -1704,6 +1704,10 @@ async def get_assumption_ledger(job_id: str, current_user=Depends(get_current_us
     job = await get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    # BUG-3: IDOR — missing ownership check allowed any subscriber to read any job's ledger
+    _owner = job.get("owner_id")
+    if _owner and str((current_user or {}).get("id", "")) != _owner:
+        raise HTTPException(status_code=403, detail="Not authorised to view this report")
     if job.get("status") != "done":
         raise HTTPException(status_code=409, detail="Report not yet complete")
     report_data = job.get("report") or {}
@@ -1726,6 +1730,10 @@ async def get_assumption_diff(job_id: str, current_user=Depends(get_current_user
     job = await get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    # BUG-3: IDOR — missing ownership check
+    _owner = job.get("owner_id")
+    if _owner and str((current_user or {}).get("id", "")) != _owner:
+        raise HTTPException(status_code=403, detail="Not authorised to view this report")
     report_data = job.get("report") or {}
     ledger_raw = report_data.get("assumption_ledger")
     if not ledger_raw:
@@ -1775,6 +1783,10 @@ async def override_assumption(
     job = await get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    # BUG-3: IDOR — missing ownership check allowed any subscriber to overwrite any job's assumptions
+    _owner = job.get("owner_id")
+    if _owner and str((current_user or {}).get("id", "")) != _owner:
+        raise HTTPException(status_code=403, detail="Not authorised to view this report")
     if job.get("status") != "done":
         raise HTTPException(status_code=409, detail="Report not yet complete")
 

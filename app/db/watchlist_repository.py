@@ -230,10 +230,10 @@ async def get_recent_alerts_for_digest(user_id: int, days: int = 7) -> List[Aler
             """
             SELECT * FROM user_alerts
             WHERE user_id = $1
-              AND created_at >= NOW() - INTERVAL '%s days'
+              AND created_at >= NOW() - make_interval(days => $2)
             ORDER BY severity DESC, created_at DESC
-            """ % days,
-            user_id
+            """,
+            user_id, days
         )
         return [_row_to_alert(r) for r in rows]
 
@@ -255,12 +255,13 @@ def _row_to_alert(row) -> Alert:
     )
 
 
-async def get_all_active_watchlists() -> list:
-    """Get all watchlists for weekly tracker."""
+async def get_all_active_watchlists(limit: int = 5000) -> list:
+    """Get all watchlists for weekly tracker. BUG-12: was unbounded — added LIMIT."""
     pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT * FROM user_watchlists ORDER BY created_at DESC"
+            "SELECT * FROM user_watchlists ORDER BY created_at DESC LIMIT $1",
+            limit
         )
         return [dict(r) for r in rows]
 

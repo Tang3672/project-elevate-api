@@ -95,7 +95,7 @@ async def _extract_facts(idea: str, report_data: dict) -> Optional[dict]:
 
 PI's idea: {idea[:500]}
 Disease/condition: {condition}
-TAM estimate: ${tam:,} if tam else 'unknown'
+TAM estimate: ${f'{tam:,}' if tam else 'unknown'}
 Key competitors identified: {competitors}
 Regulatory strategy: {reg_strategy}
 
@@ -124,6 +124,8 @@ Return this exact JSON structure:
                 "messages": [{"role": "user", "content": prompt}]
             }
         )
+        # BUG-7: missing status check — error responses have no "content" key, causing KeyError
+        r.raise_for_status()
         data = r.json()
         text = data["content"][0]["text"].strip()
         # Strip markdown fences if present

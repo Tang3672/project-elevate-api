@@ -281,6 +281,7 @@ def _invention_row(r) -> dict:
 
 async def list_review_queue(institution_id: Optional[str] = None, status: str = "",
                             reviewer: str = "", limit: int = 200) -> list[dict]:
+    # BUG-14: cap limit so callers cannot pass limit=10000 and dump the full table
     """The TTO review queue: every invention disclosure with its triage scores,
     workflow status, assigned reviewer, and next action."""
     try:
@@ -294,7 +295,7 @@ async def list_review_queue(institution_id: Optional[str] = None, status: str = 
         if institution_id:
             args.append(institution_id); clauses.append(f"institution_id = ${len(args)}")
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-        args.append(limit)
+        args.append(min(limit, 200))  # BUG-14: hard cap
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 f"SELECT * FROM reports{where} ORDER BY "
@@ -346,19 +347,30 @@ async def get_invention(report_id: str) -> dict:
 
 
 async def eval_metrics(institution_id: Optional[str] = None) -> dict:
-    """Aggregate metrics for the internal evaluation dashboard (P10)."""
+    """Aggregate metrics for the internal evaluation dashboard (P10).
+    BUG-15: was aggregating across ALL institutions — now scoped when institution_id provided."""
     try:
         from app.db.database import get_pool
         pool = await get_pool()
         async with pool.acquire() as conn:
-            r = await conn.fetchrow("""
-                SELECT COUNT(*) AS n,
-                       AVG(citation_support)  AS avg_citation_support,
-                       AVG(retrieval_coverage) AS avg_coverage,
-                       AVG(overall_priority)  AS avg_priority,
-                       AVG(CASE WHEN abstention_required THEN 1.0 ELSE 0.0 END) AS abstention_rate
-                FROM reports
-            """)
+            if institution_id:
+                r = await conn.fetchrow("""
+                    SELECT COUNT(*) AS n,
+                           AVG(citation_support)  AS avg_citation_support,
+                           AVG(retrieval_coverage) AS avg_coverage,
+                           AVG(overall_priority)  AS avg_priority,
+                           AVG(CASE WHEN abstention_required THEN 1.0 ELSE 0.0 END) AS abstention_rate
+                    FROM reports WHERE institution_id = $1
+                """, institution_id)
+            else:
+                r = await conn.fetchrow("""
+                    SELECT COUNT(*) AS n,
+                           AVG(citation_support)  AS avg_citation_support,
+                           AVG(retrieval_coverage) AS avg_coverage,
+                           AVG(overall_priority)  AS avg_priority,
+                           AVG(CASE WHEN abstention_required THEN 1.0 ELSE 0.0 END) AS abstention_rate
+                    FROM reports
+                """)
             actions = await conn.fetch(
                 "SELECT user_action, COUNT(*) AS c FROM report_outcomes WHERE user_action IS NOT NULL GROUP BY user_action")
             outcomes = await conn.fetch(

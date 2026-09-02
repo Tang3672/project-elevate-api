@@ -5,11 +5,10 @@ import logging
 import traceback
 from fastapi import APIRouter, Depends, HTTPException
 from app.api.auth import get_current_user
+from app.api.admin_auth import require_admin_key
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-
-ADMIN_EMAILS = {"ijw91021@gmail.com", "admin@projectelevate.io", "test@projectelevate.io"}
 
 
 @router.post("/tracker/run")
@@ -31,10 +30,8 @@ async def trigger_tracker(current_user: dict = Depends(get_current_user)):
 
 
 @router.post("/tracker/run-all")
-async def trigger_all(current_user: dict = Depends(get_current_user)):
-    """Admin: trigger tracker for all users."""
-    if current_user.get("email") not in ADMIN_EMAILS:
-        raise HTTPException(status_code=403, detail="Admin only")
+async def trigger_all(_: None = Depends(require_admin_key)):
+    """Admin: trigger tracker for all users. BUG-10: was guarded by hardcoded email list."""
     from app.services.weekly_tracker import run_weekly_tracker
     results = await run_weekly_tracker()
     return {"status": "complete", "processed": len(results) if results else 0}
@@ -218,8 +215,9 @@ async def get_competitive_intel(
     return ci
 
 @router.get("/tracker/debug")
-async def debug_tracker(current_user: dict = Depends(get_current_user)):
+async def debug_tracker(_: None = Depends(require_admin_key), current_user: dict = Depends(get_current_user)):
+    """BUG-11: was leaking raw JWT claims to any authenticated user. Now admin-key gated."""
     from app.db.watchlist_repository import get_watchlists_for_user
     user_id = current_user.get("id")
     watchlists = await get_watchlists_for_user(user_id)
-    return {"current_user": current_user, "user_id": user_id, "watchlists": watchlists}
+    return {"user_id": user_id, "watchlists": watchlists}
