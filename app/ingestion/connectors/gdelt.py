@@ -19,6 +19,7 @@ Rate: API is free but rate-limits aggressively. We add 2s delay between
 requests and cache results for 24h.
 """
 
+import asyncio
 import logging
 import time
 from typing import Optional
@@ -159,8 +160,8 @@ async def load_gdelt_signals(disease_names: list[str] | None = None) -> dict[str
         if not query:
             continue
 
-        data = _fetch_gdelt_volume(query)
-        time.sleep(_DELAY)
+        data = await asyncio.to_thread(_fetch_gdelt_volume, query)
+        await asyncio.sleep(_DELAY)
 
         results[disease] = data
 

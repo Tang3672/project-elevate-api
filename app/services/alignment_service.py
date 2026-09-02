@@ -1776,8 +1776,9 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
     kols: list = []   # H-06: initialise so it's always in scope for person verifier
     try:
         from app.ingestion.connectors.semantic_scholar import get_kol_network, get_disease_literature_signal
-        kols = get_kol_network(disease_name, limit=6)
-        lit_signal = get_disease_literature_signal(disease_name)
+        import asyncio as _asyncio
+        kols = await _asyncio.to_thread(get_kol_network, disease_name, 6)
+        lit_signal = await _asyncio.to_thread(get_disease_literature_signal, disease_name)
         if kols:
             kol_lines = [
                 "KEY OPINION LEADERS (by citation influence — Semantic Scholar):",

@@ -16,6 +16,7 @@ We store items in the disease_burden table as 'rss_recent_mention_count'
 and also write raw items to raw_ingest for downstream RAG pipeline use.
 """
 
+import asyncio
 import logging
 import time
 import xml.etree.ElementTree as ET
@@ -125,11 +126,11 @@ async def load_rss_signals(disease_names: list[str] | None = None) -> dict[str, 
     # Fetch all feeds
     all_items: list[dict] = []
     for feed_name, url in RSS_FEEDS.items():
-        items = _parse_rss(url)
+        items = await asyncio.to_thread(_parse_rss, url)
         for item in items:
             item["feed"] = feed_name
         all_items.extend(items)
-        time.sleep(_DELAY)
+        await asyncio.sleep(_DELAY)
 
     logger.info("RSS: fetched %d total items from %d feeds", len(all_items), len(RSS_FEEDS))
 

@@ -23,6 +23,7 @@ License note on individual articles:
   Abstracts are generally fair use / covered by open access licensing.
 """
 
+import asyncio
 import logging
 import time
 from typing import Optional
@@ -248,7 +249,7 @@ async def load_publications(limit_per_disease: int = 50) -> dict[str, int]:
         await _ensure_publication_table(conn)
 
         for disease, query in _DISEASE_SEARCH_TERMS.items():
-            total, works = _get_top_works(query, limit=limit_per_disease)
+            total, works = await asyncio.to_thread(_get_top_works, query, limit_per_disease)
 
             mondo_id = None
             try:
