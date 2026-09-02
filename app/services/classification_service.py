@@ -58,11 +58,14 @@ OUTPUT FORMAT: Respond with ONLY a JSON object. No markdown, no explanation outs
   "reasoning": "<2-3 sentences explaining your classification decisions>"
 }}"""
 
+_RAW_TEXT_MAX_CHARS = 4_000  # cap to prevent oversized prompt injection
+
 async def classify_need(raw_text: str) -> ClassifiedNeed:
     """
     Send raw hospital need text to GPT-4o for structured classification.
     Returns a ClassifiedNeed object.
     """
+    raw_text = (raw_text or "")[:_RAW_TEXT_MAX_CHARS]
     response = await client.chat.completions.create(
         model="gpt-4o",
         messages=[
