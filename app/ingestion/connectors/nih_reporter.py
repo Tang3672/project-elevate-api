@@ -15,6 +15,7 @@ Also stores per-grant records in nih_grants table for drill-down.
 Used by the opportunity scorer as a funding-validation signal.
 """
 
+import asyncio
 import logging
 import time
 from typing import Optional
@@ -206,8 +207,9 @@ async def load_nih_funding(from_year: int = 2022) -> dict[str, dict]:
         await _ensure_grants_table(conn)
 
         for disease, search_text in _DISEASE_SEARCH_TERMS.items():
-            total, funding, grants = _get_all_grants(search_text, from_year)
-            time.sleep(_DELAY)
+            # BUG-70: _get_all_grants uses blocking requests.post + time.sleep; offload to thread
+            total, funding, grants = await asyncio.to_thread(_get_all_grants, search_text, from_year)
+            await asyncio.sleep(_DELAY)
 
             # Resolve MONDO
             mondo_id = None
@@ -252,7 +254,7 @@ async def get_nih_grant_count(disease_name: str, from_year: int = 2022) -> int:
         except Exception:
             pass
 
-    # Live fetch
+    # Live fetch — BUG-70: offload blocking call to thread
     search_text = _DISEASE_SEARCH_TERMS.get(disease_name, disease_name)
-    data = _search_grants(search_text, from_year, limit=1)
+    data = await asyncio.to_thread(_search_grants, search_text, from_year, 1)
     return data.get("meta", {}).get("total", 0)

@@ -11,12 +11,15 @@ GET  /api/v1/etl/aggregate        — disease aggregate table snapshot
 
 import asyncio
 import logging
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
 
 from app.db.database import get_pool
+from app.api.admin_auth import require_admin_key
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
+# BUG-57: all ETL endpoints were completely unauthenticated — anyone could drain API credits
+# or DDoS the DB by spamming 30-60 minute ETL jobs.
+router = APIRouter(dependencies=[Depends(require_admin_key)])
 
 
 @router.post("/run/weekly")

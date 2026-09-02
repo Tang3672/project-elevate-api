@@ -19,6 +19,7 @@ We store per-disease:
   pubmed_5yr_trend        — growth rate of publications (accelerating or declining field)
 """
 
+import asyncio
 import logging
 import time
 from typing import Optional
@@ -159,14 +160,16 @@ async def load_pubmed_signals(disease_names: list[str] | None = None) -> dict[st
         if not cfg:
             continue
 
-        total  = _count_pubmed(cfg["base"])
-        time.sleep(_DELAY)
-        rct    = _count_pubmed(cfg["rct"])
-        time.sleep(_DELAY)
-        review = _count_pubmed(cfg["review"])
-        time.sleep(_DELAY)
-        trend  = _compute_5yr_trend(cfg["base"])
-        time.sleep(_DELAY)
+        # BUG-68: _count_pubmed / _compute_5yr_trend use blocking requests + time.sleep;
+        # offload to thread so the scheduler event loop stays responsive
+        total  = await asyncio.to_thread(_count_pubmed, cfg["base"])
+        await asyncio.sleep(_DELAY)
+        rct    = await asyncio.to_thread(_count_pubmed, cfg["rct"])
+        await asyncio.sleep(_DELAY)
+        review = await asyncio.to_thread(_count_pubmed, cfg["review"])
+        await asyncio.sleep(_DELAY)
+        trend  = await asyncio.to_thread(_compute_5yr_trend, cfg["base"])
+        await asyncio.sleep(_DELAY)
 
         data = {
             "total":        total,

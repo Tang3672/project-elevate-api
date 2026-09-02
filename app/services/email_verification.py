@@ -110,7 +110,7 @@ async def send_verification_email(email: str, name: str, token: str, base_url: s
     smtp_pass = getattr(settings, 'SMTP_PASS', '') or os.environ.get('SMTP_PASS', '') or os.environ.get('EMAIL_PASSWORD', '')
     email_from = os.environ.get('EMAIL_FROM', '') or getattr(settings, 'EMAIL_FROM', '') or 'noreply@hudatabase.online'
 
-    logger.info(f"SMTP debug: host={smtp_host} user={smtp_user} pass_len={len(smtp_pass)} from={email_from}")
+    # BUG-73: SMTP host+username were logged at INFO level on every registration, leaking infra topology
     if not smtp_host or not smtp_user:
         logger.warning(f"SMTP not configured — verification URL: {verify_url}")
         return
@@ -122,10 +122,17 @@ async def send_verification_email(email: str, name: str, token: str, base_url: s
         msg['To']      = email
         msg.attach(MIMEText(html, 'html'))
 
-        with smtplib.SMTP(smtp_host, smtp_port) as server:
-            server.starttls()
-            server.login(smtp_user, smtp_pass)
-            server.sendmail(email_from, email, msg.as_string())
+        # BUG-67: was blocking smtplib.SMTP call inside async def, stalling event loop on every registration
+        import asyncio as _asyncio
+
+        def _do_send():
+            with smtplib.SMTP(smtp_host, smtp_port) as server:
+                server.starttls()
+                server.login(smtp_user, smtp_pass)
+                server.sendmail(email_from, email, msg.as_string())
+
+        loop = _asyncio.get_event_loop()
+        await loop.run_in_executor(None, _do_send)
         logger.info(f"Verification email sent to {email}")
     except Exception as e:
         logger.error(f"Failed to send verification email: {e}")

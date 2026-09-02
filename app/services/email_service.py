@@ -26,11 +26,27 @@ from app.models.watchlist import Alert
 logger = logging.getLogger(__name__)
 
 
+def _send_smtp_sync(host: str, port: int, user: str, password: str,
+                    from_addr: str, to: str, msg_string: str) -> None:
+    """Synchronous SMTP send — called via run_in_executor to avoid blocking the event loop."""
+    import smtplib as _smtp
+    with _smtp.SMTP(host, port) as server:
+        server.ehlo()
+        server.starttls()
+        server.login(user, password)
+        server.sendmail(from_addr, to, msg_string)
+
+
 async def send_email(to: str, subject: str, body: str, html: str = "") -> bool:
     """
     Generic email sender — used for waitlist notifications, alerts, etc.
     Tries SMTP_* settings first, falls back to EMAIL_* settings.
+    BUG-65: SMTP was called synchronously, blocking the event loop for 200-800ms per call.
     """
+    import asyncio, re as _re
+    from email.mime.multipart import MIMEMultipart as _MMP
+    from email.mime.text import MIMEText as _MMT
+
     host     = getattr(settings, 'SMTP_HOST', '') or getattr(settings, 'EMAIL_HOST', '')
     port     = int(getattr(settings, 'SMTP_PORT', 0) or getattr(settings, 'EMAIL_PORT', 587))
     user     = getattr(settings, 'SMTP_USER', '') or getattr(settings, 'EMAIL_USER', '')
@@ -42,10 +58,6 @@ async def send_email(to: str, subject: str, body: str, html: str = "") -> bool:
         return False
 
     try:
-        import smtplib as _smtp
-        from email.mime.multipart import MIMEMultipart as _MMP
-        from email.mime.text import MIMEText as _MMT
-
         msg = _MMP("alternative")
         msg["Subject"] = subject
         msg["From"]    = from_addr
@@ -54,16 +66,13 @@ async def send_email(to: str, subject: str, body: str, html: str = "") -> bool:
         if html:
             msg.attach(_MMT(html, "html"))
 
-        # Extract bare email for SMTP envelope (SES rejects "Name <email>" format)
-        import re as _re
         _match = _re.search(r'<(.+?)>', from_addr)
         envelope_from = _match.group(1) if _match else from_addr
 
-        with _smtp.SMTP(host, port) as server:
-            server.ehlo()
-            server.starttls()
-            server.login(user, password)
-            server.sendmail(envelope_from, to, msg.as_string())
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None, _send_smtp_sync, host, port, user, password, envelope_from, to, msg.as_string()
+        )
 
         logger.info("Email sent to %s: %s", to, subject)
         return True
@@ -245,12 +254,15 @@ async def send_digest_email(
         msg.attach(MIMEText(plain, "plain"))
         msg.attach(MIMEText(html, "html"))
 
+        # BUG-66: was synchronous SMTP in async def, blocking event loop for every user in the for-loop
+        import asyncio as _asyncio
         port = int(getattr(settings, 'EMAIL_PORT', 587))
-        with smtplib.SMTP(settings.EMAIL_HOST, port) as server:
-            server.ehlo()
-            server.starttls()
-            server.login(settings.EMAIL_USER, settings.EMAIL_PASSWORD)
-            server.sendmail(settings.EMAIL_USER, user_email, msg.as_string())
+        _loop = _asyncio.get_event_loop()
+        await _loop.run_in_executor(
+            None, _send_smtp_sync,
+            settings.EMAIL_HOST, port, settings.EMAIL_USER, settings.EMAIL_PASSWORD,
+            settings.EMAIL_USER, user_email, msg.as_string()
+        )
 
         logger.info(f"Digest sent to {user_email}: {len(alerts)} alerts")
         return True

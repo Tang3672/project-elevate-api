@@ -18,6 +18,7 @@ We extract per-disease:
   edgar_recent_filers       — top companies filing about this disease
 """
 
+import asyncio
 import logging
 import time
 from typing import Optional
@@ -113,10 +114,11 @@ async def load_edgar_signals(disease_names: list[str] | None = None) -> dict[str
         # Use first two words for tighter filing search
         short_term = " ".join(term.split()[:3])
 
-        d10k = _search_edgar(short_term, "10-K")
-        time.sleep(_DELAY)
-        d8k  = _search_edgar(short_term, "8-K")
-        time.sleep(_DELAY)
+        # BUG-69: _search_edgar uses blocking requests.get; offload to thread
+        d10k = await asyncio.to_thread(_search_edgar, short_term, "10-K")
+        await asyncio.sleep(_DELAY)
+        d8k  = await asyncio.to_thread(_search_edgar, short_term, "8-K")
+        await asyncio.sleep(_DELAY)
 
         data = {
             "10k_count":   d10k["count"],

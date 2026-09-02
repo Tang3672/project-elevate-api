@@ -76,6 +76,10 @@ async def startup():
 async def _init_background():
     import logging, asyncio as _asyncio
     _log = logging.getLogger(__name__)
+    # BUG-64: warn loudly if JWT secret is still the well-known default from source control
+    _JWT_DEFAULT = "project-elevate-dev-secret-change-in-production"
+    if settings.JWT_SECRET == _JWT_DEFAULT:
+        _log.warning("⚠️  JWT_SECRET is the default dev value — all tokens are forgeable. Set JWT_SECRET in production.")
     try:
         await init_db()
         await ensure_demand_signals_table()
@@ -138,6 +142,9 @@ async def shutdown():
     if settings.ENABLE_SCHEDULER:
         from app.scheduler.ingestion_scheduler import shutdown_scheduler
         shutdown_scheduler()
+    # BUG-62: _tracker_scheduler was never shut down — process hung on container restart
+    if _tracker_scheduler.running:
+        _tracker_scheduler.shutdown(wait=False)
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 # Step 1: hospital need submissions

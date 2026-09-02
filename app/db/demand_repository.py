@@ -162,20 +162,86 @@ async def upsert_signal(signal: DemandSignal, embedding: List[float]) -> Optiona
     return row["id"] if row else None
 
 
+_UPSERT_SQL = """
+    INSERT INTO demand_signals (
+        source, source_record_id, signal_type, fetched_at,
+        title, description,
+        condition_or_topic, innovation_category_hint,
+        icd10_codes, keywords,
+        geographic_scope, country, state_code, county_fips,
+        census_tract, location_name,
+        age_group, sex, race_ethnicity, income_level, insurance_status,
+        magnitude, magnitude_unit, national_average,
+        trend_direction, trend_magnitude,
+        data_year, data_period, data_freshness_days,
+        source_url, confidence_score, raw_data, embedding
+    ) VALUES (
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
+        $11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
+        $21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33::vector
+    )
+    ON CONFLICT (source, source_record_id) DO NOTHING
+    RETURNING id
+"""
+
+
 async def bulk_upsert_signals(
     signals_with_embeddings: List[Tuple[DemandSignal, List[float]]]
 ) -> Tuple[int, int]:
     """
     Insert multiple signals efficiently. Returns (inserted_count, skipped_count).
+    BUG-74: was acquiring a new connection per signal (N pool round-trips).
+    Now reuses one connection for the whole batch inside a transaction.
     """
+    if not signals_with_embeddings:
+        return 0, 0
+
     inserted = 0
     skipped = 0
-    for signal, embedding in signals_with_embeddings:
-        result = await upsert_signal(signal, embedding)
-        if result is not None:
-            inserted += 1
-        else:
-            skipped += 1
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            for signal, embedding in signals_with_embeddings:
+                row = await conn.fetchrow(
+                    _UPSERT_SQL,
+                    signal.source.value,
+                    signal.source_record_id,
+                    signal.signal_type.value,
+                    signal.fetched_at,
+                    signal.title,
+                    signal.description,
+                    signal.condition_or_topic,
+                    signal.innovation_category_hint,
+                    signal.icd10_codes or [],
+                    signal.keywords or [],
+                    signal.geographic_scope.value,
+                    signal.country,
+                    signal.state_code,
+                    signal.county_fips,
+                    signal.census_tract,
+                    signal.location_name,
+                    signal.age_group,
+                    signal.sex,
+                    signal.race_ethnicity,
+                    signal.income_level,
+                    signal.insurance_status,
+                    signal.magnitude,
+                    signal.magnitude_unit,
+                    signal.national_average,
+                    signal.trend_direction,
+                    signal.trend_magnitude,
+                    signal.data_year,
+                    signal.data_period,
+                    signal.data_freshness_days,
+                    signal.source_url,
+                    signal.confidence_score,
+                    json.dumps(signal.raw_data) if signal.raw_data else None,
+                    str(embedding),
+                )
+                if row is not None:
+                    inserted += 1
+                else:
+                    skipped += 1
     return inserted, skipped
 
 
@@ -222,10 +288,12 @@ async def search_similar_signals(
                 magnitude, magnitude_unit, national_average,
                 trend_direction, data_year, confidence_score,
                 keywords, icd10_codes,
-                1 - (embedding <=> $1::vector) / 2 AS similarity_score
+                1 - (embedding <=> $1::vector) AS similarity_score
             FROM demand_signals
             WHERE {where}
-              AND 1 - (embedding <=> $1::vector) / 2 >= $2
+              -- BUG-61: was `/ 2` — wrong formula; pgvector <=> returns cosine distance ∈ [0,2],
+              -- so similarity = 1 - distance (not 1 - distance/2)
+              AND 1 - (embedding <=> $1::vector) >= $2
             ORDER BY embedding <=> $1::vector
             LIMIT $3
         """, *params)

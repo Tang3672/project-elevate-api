@@ -6,6 +6,7 @@ Handles subscription lifecycle:
 - Handle webhooks (subscription created/updated/deleted, checkout completed)
 - Query subscription status
 """
+import asyncio
 import logging
 import stripe
 from typing import Optional
@@ -42,27 +43,26 @@ async def create_checkout_session(
     """
     Create a Stripe Checkout session with 7-day free trial.
     Returns the checkout URL to redirect the user to.
+    BUG-71: Stripe SDK is fully synchronous — wrapped in run_in_executor.
     """
     s = get_stripe()
     price_id = _price_id_for_plan(plan)
     try:
-        session = s.checkout.Session.create(
-            mode               = "subscription",
+        loop = asyncio.get_event_loop()
+        session = await loop.run_in_executor(None, lambda: s.checkout.Session.create(
+            mode                 = "subscription",
             payment_method_types = ["card"],
-            customer_email     = user_email,
-            line_items         = [{
-                "price":    price_id,
-                "quantity": 1,
-            }],
-            subscription_data  = {
+            customer_email       = user_email,
+            line_items           = [{"price": price_id, "quantity": 1}],
+            subscription_data    = {
                 "trial_period_days": 7,
                 "metadata": {"user_id": str(user_id), "plan": plan},
             },
-            metadata           = {"user_id": str(user_id), "plan": plan},
-            success_url        = success_url,
-            cancel_url         = cancel_url,
+            metadata             = {"user_id": str(user_id), "plan": plan},
+            success_url          = success_url,
+            cancel_url           = cancel_url,
             allow_promotion_codes = True,
-        )
+        ))
         logger.info(f"Checkout session created for user {user_id}: {session.id}")
         return session.url
     except Exception as e:
@@ -74,10 +74,10 @@ async def get_subscription_status(stripe_customer_id: str) -> dict:
     """Get current subscription status for a customer."""
     s = get_stripe()
     try:
-        subscriptions = s.Subscription.list(
-            customer=stripe_customer_id,
-            status="all",
-            limit=1,
+        # BUG-71: Stripe SDK is synchronous — wrapped in run_in_executor
+        loop = asyncio.get_event_loop()
+        subscriptions = await loop.run_in_executor(
+            None, lambda: s.Subscription.list(customer=stripe_customer_id, status="all", limit=1)
         )
         if not subscriptions.data:
             return {"status": "none", "trial_end": None, "current_period_end": None}
@@ -106,11 +106,14 @@ async def cancel_subscription(stripe_customer_id: str) -> bool:
     """Cancel subscription at period end."""
     s = get_stripe()
     try:
-        subscriptions = s.Subscription.list(customer=stripe_customer_id, limit=1)
+        # BUG-71: Stripe SDK is synchronous — wrapped in run_in_executor
+        loop = asyncio.get_event_loop()
+        subscriptions = await loop.run_in_executor(
+            None, lambda: s.Subscription.list(customer=stripe_customer_id, limit=1)
+        )
         if subscriptions.data:
-            s.Subscription.modify(
-                subscriptions.data[0].id,
-                cancel_at_period_end=True,
+            await loop.run_in_executor(
+                None, lambda: s.Subscription.modify(subscriptions.data[0].id, cancel_at_period_end=True)
             )
             return True
         return False

@@ -8,8 +8,9 @@ GET /pi-report/{job_id}/html  — returns HTML for preview / debugging
 from __future__ import annotations
 
 import logging
+from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import HTMLResponse, Response
 
 from app.services.report_jobs import get_job
@@ -19,15 +20,22 @@ from app.services.pdf_renderer import (
     render_report_html,
     generate_pdf,
 )
+from app.api.auth import get_current_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/pi-report", tags=["pdf"])
 
 
-async def _load_report(job_id: str) -> dict:
+async def _load_report(job_id: str, current_user: dict) -> dict:
+    """Load report and verify the requesting user owns it."""
     row = await get_job(job_id)
     if row is None:
         raise HTTPException(status_code=404, detail=f"Job {job_id!r} not found")
+    # BUG-58: verify ownership — job_id is guessable; unauthenticated access leaks
+    # other users' confidential PI reports (market sizing, regulatory strategy, IP).
+    owner_id = row.get("owner_id") or row.get("user_id")
+    if owner_id is not None and str(current_user["id"]) != str(owner_id):
+        raise HTTPException(status_code=403, detail="Not authorised to access this report")
     if row.get("status") != "done":
         raise HTTPException(status_code=409, detail=f"Job {job_id!r} status={row.get('status')}")
     report = row.get("report")
@@ -37,9 +45,12 @@ async def _load_report(job_id: str) -> dict:
 
 
 @router.get("/{job_id}/html", response_class=HTMLResponse)
-async def get_report_html(job_id: str):
+async def get_report_html(
+    job_id: str,
+    current_user: dict = Depends(get_current_user),  # BUG-58
+):
     """Return the report as a print-ready HTML document (for preview and debugging)."""
-    report = await _load_report(job_id)
+    report = await _load_report(job_id, current_user)
     html = render_report_html(
         report=report,
         product_name=report.get("product_name", ""),
@@ -49,14 +60,17 @@ async def get_report_html(job_id: str):
 
 
 @router.get("/{job_id}/pdf")
-async def get_report_pdf(job_id: str):
+async def get_report_pdf(
+    job_id: str,
+    current_user: dict = Depends(get_current_user),  # BUG-58
+):
     """
     Return the report as a PDF (via headless Chromium) or HTML fallback.
     Content-Disposition sets the F-01 filename: {product}-commercial-intelligence-{date}.pdf
     Blocked when validation.export_blocked is True (arithmetic errors make the
     market model factually wrong — the artifact must not be shared).
     """
-    report = await _load_report(job_id)
+    report = await _load_report(job_id, current_user)
 
     val = report.get("validation") or {}
     if val.get("export_blocked"):
