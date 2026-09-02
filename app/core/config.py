@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     REDDIT_CLIENT_SECRET: str = ""
     REDDIT_USERNAME:      str = ""
 
-    # Auth
+    # Auth — BUG-64: well-known default in source control; startup check below enforces override in prod
     JWT_SECRET:       str = "project-elevate-dev-secret-change-in-production"
     GOOGLE_CLIENT_ID: str = ""
 
@@ -47,8 +47,8 @@ class Settings(BaseSettings):
     SMTP_USER:      str = ""
     SMTP_PASS:      str = ""
 
-    # App
-    DEBUG:            bool = True
+    # App — BUG-63: DEBUG defaulted to True, exposing stack traces in prod HTTP 500s
+    DEBUG:            bool = False
     ENVIRONMENT:      str  = "development"
     ENABLE_SCHEDULER: bool = _ON_RAILWAY
 

@@ -427,32 +427,30 @@ PLAN_MONTHLY_LIMITS: dict[str, int | None] = {
 
 async def get_usage(user_id: int) -> dict:
     """Return current plan, monthly usage, quota, and reports_remaining."""
-    from datetime import datetime, timezone
     pool = await get_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT * FROM users WHERE id = $1", user_id)
+        # BUG-75: non-atomic reset — two concurrent callers both read expired reset_at,
+        # both issue the UPDATE, and both see used=0 independently.
+        # Fix: CTE-based atomic reset; WHERE guard ensures only the first caller resets.
+        row = await conn.fetchrow("""
+            WITH maybe_reset AS (
+                UPDATE users SET
+                    monthly_reports_used = 0,
+                    monthly_reset_at = date_trunc('month', NOW()) + interval '1 month'
+                WHERE id = $1
+                  AND monthly_reset_at IS NOT NULL
+                  AND monthly_reset_at <= NOW()
+            )
+            SELECT * FROM users WHERE id = $1
+        """, user_id)
+
     if not row:
         return {"plan": "explorer", "used": 0, "quota": 5, "remaining": 5}
 
-    row = dict(row)
-    plan        = row.get("plan_name") or "explorer"
-    reset_at    = row.get("monthly_reset_at")
-    used        = row.get("monthly_reports_used", 0) or 0
-
-    # Reset monthly counter if the billing period rolled over
-    now = datetime.now(timezone.utc)
-    if reset_at:
-        reset_aware = reset_at.replace(tzinfo=timezone.utc) if reset_at.tzinfo is None else reset_at
-        if now >= reset_aware:
-            pool2 = await get_pool()
-            async with pool2.acquire() as conn2:
-                await conn2.execute("""
-                    UPDATE users SET
-                        monthly_reports_used = 0,
-                        monthly_reset_at = date_trunc('month', NOW()) + interval '1 month'
-                    WHERE id = $1
-                """, user_id)
-            used = 0
+    row       = dict(row)
+    plan      = row.get("plan_name") or "explorer"
+    reset_at  = row.get("monthly_reset_at")
+    used      = row.get("monthly_reports_used", 0) or 0
 
     quota     = PLAN_MONTHLY_LIMITS.get(plan)
     remaining = None if quota is None else max(0, quota - used)

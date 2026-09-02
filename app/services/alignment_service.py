@@ -511,6 +511,8 @@ async def generate_pi_report(
     # '[device number not verified]' so the report never ships a hallucinated citation.
     try:
         from app.services.openfda_verifier import scrub_unverified_device_numbers as _scrub
+        import asyncio as _asyncio
+        _scrub_loop = _asyncio.get_event_loop()
         _TEXT_FIELDS = (
             "executive_summary",
             "recommended_next_steps",
@@ -519,7 +521,8 @@ async def generate_pi_report(
         for _fname in _TEXT_FIELDS:
             _val = getattr(report, _fname, None)
             if isinstance(_val, str) and _val:
-                _cleaned, _removed = _scrub(_val)
+                # BUG-76: _scrub makes sync HTTP requests to openFDA — run in executor
+                _cleaned, _removed = await _scrub_loop.run_in_executor(None, _scrub, _val)
                 if _removed:
                     setattr(report, _fname, _cleaned)
                     _all_scrubbed.extend(_removed)
@@ -527,7 +530,7 @@ async def generate_pi_report(
                 _new_list = []
                 for _item in _val:
                     if isinstance(_item, str):
-                        _cleaned, _removed = _scrub(_item)
+                        _cleaned, _removed = await _scrub_loop.run_in_executor(None, _scrub, _item)
                         _new_list.append(_cleaned)
                         _all_scrubbed.extend(_removed)
                     else:
@@ -539,7 +542,7 @@ async def generate_pi_report(
         if _rp and hasattr(_rp, "notes"):
             _rp_notes = getattr(_rp, "notes", None)
             if isinstance(_rp_notes, str) and _rp_notes:
-                _cleaned, _removed = _scrub(_rp_notes)
+                _cleaned, _removed = await _scrub_loop.run_in_executor(None, _scrub, _rp_notes)
                 if _removed:
                     _rp.notes = _cleaned
                     _all_scrubbed.extend(_removed)

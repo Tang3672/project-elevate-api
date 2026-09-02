@@ -9,8 +9,9 @@ import logging
 from datetime import date, datetime
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, HTTPException, Response, Depends
 from fastapi.responses import Response as FastAPIResponse
+from app.api.auth import get_current_user
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -29,7 +30,7 @@ class ICalRequest(BaseModel):
 
 
 @router.post("/generate")
-async def generate_timeline(payload: TimelineRequest):
+async def generate_timeline(payload: TimelineRequest, current_user: dict = Depends(get_current_user)):  # BUG-60
     try:
         from app.services.timeline_service import generate_timeline as _gen
         start = (date.fromisoformat(payload.start_date)
@@ -47,7 +48,7 @@ async def generate_timeline(payload: TimelineRequest):
 
 
 @router.post("/export/ical")
-async def export_ical(payload: ICalRequest):
+async def export_ical(payload: ICalRequest, current_user: dict = Depends(get_current_user)):  # BUG-60
     """Export a timeline as an .ics file downloadable by any calendar app."""
     try:
         ical_bytes = _build_ical(payload.timeline)

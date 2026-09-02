@@ -6,11 +6,17 @@ POST /api/v1/portfolio/analyze    — analyze lab portfolio (up to 10 ideas)
 POST /api/v1/grant/generate       — generate grant sections
 """
 import logging
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 from typing import List, Optional
 
 logger = logging.getLogger(__name__)
+
+# BUG-59: all three routers called Claude (2k–5k tokens per req) with no auth —
+# anyone could farm trial-sites, portfolio analysis, and grant generation for free.
+def _get_current_user():
+    from app.api.auth import get_current_user
+    return get_current_user
 
 # ── Trial Sites ───────────────────────────────────────────────────────────────
 
@@ -25,7 +31,7 @@ class TrialSiteRequest(BaseModel):
 
 
 @trial_router.post("/trial-sites")
-async def get_trial_sites(payload: TrialSiteRequest):
+async def get_trial_sites(payload: TrialSiteRequest, current_user: dict = Depends(_get_current_user())):
     """
     Get top Phase II/III trial recruitment site recommendations.
     Returns ranked list of hospitals with scores and map coordinates.
@@ -79,7 +85,7 @@ class PortfolioRequest(BaseModel):
 
 
 @portfolio_router.post("/portfolio/analyze")
-async def analyze_portfolio(payload: PortfolioRequest):
+async def analyze_portfolio(payload: PortfolioRequest, current_user: dict = Depends(_get_current_user())):
     """
     Analyze a lab portfolio of 2-10 ideas.
     Returns innovation heatmap with demand, funding, competition, and market scores.
@@ -136,7 +142,7 @@ class GrantRequest(BaseModel):
 
 
 @grant_router.post("/grant/generate")
-async def generate_grant(payload: GrantRequest):
+async def generate_grant(payload: GrantRequest, current_user: dict = Depends(_get_current_user())):
     """
     Generate ready-to-paste grant sections for NIH R01, SBIR/STTR, or NSF.
     Sections are written in proper grant language with current data citations.

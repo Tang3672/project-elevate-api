@@ -108,7 +108,10 @@ async def register(payload: RegisterRequest, request: Request):
     if existing:
         raise HTTPException(status_code=409, detail="Email already registered")
 
-    hashed = hash_password(payload.password)
+    # BUG-72: PBKDF2 100k rounds is CPU-bound; wrap in executor to avoid blocking the event loop
+    import asyncio as _asyncio
+    _loop = _asyncio.get_event_loop()
+    hashed = await _loop.run_in_executor(None, hash_password, payload.password)
     user   = await create_user(
         email         = payload.email,
         password_hash = hashed,
@@ -143,7 +146,10 @@ async def login(payload: LoginRequest):
     user = await get_user_by_email(payload.email)
     if not user or not user.get('password_hash'):
         raise HTTPException(status_code=401, detail="Invalid email or password")
-    if not verify_password(payload.password, user['password_hash']):
+    # BUG-72: PBKDF2 100k rounds — run in executor
+    import asyncio as _asyncio
+    _loop = _asyncio.get_event_loop()
+    if not await _loop.run_in_executor(None, verify_password, payload.password, user['password_hash']):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     # Block unverified accounts — dev emails bypass verification for local testing (BUG-10: deduplicated)
     _DEV_EMAILS = {"test@projectelevate.io", "ijw91021@gmail.com", "admin@projectelevate.io",
@@ -354,7 +360,10 @@ async def change_password(request: Request, current_user: dict = Depends(get_cur
     if not user or not user.get("password_hash"):
         raise HTTPException(status_code=400, detail="Cannot change password for OAuth accounts")
 
-    if not verify_password(current_pw, user["password_hash"]):
+    # BUG-72: PBKDF2 100k rounds — run in executor
+    import asyncio as _asyncio
+    _loop = _asyncio.get_event_loop()
+    if not await _loop.run_in_executor(None, verify_password, current_pw, user["password_hash"]):
         raise HTTPException(status_code=400, detail="Current password is incorrect")
 
     import re
@@ -367,7 +376,7 @@ async def change_password(request: Request, current_user: dict = Depends(get_cur
     if errors:
         raise HTTPException(status_code=400, detail={"message": "Password requirements not met", "requirements_failed": errors})
 
-    hashed = hash_password(new_pw)
+    hashed = await _loop.run_in_executor(None, hash_password, new_pw)
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute("UPDATE users SET password_hash=$1 WHERE id=$2", hashed, current_user["id"])
