@@ -164,7 +164,7 @@ async def provision_user(
     Returns the generated temp password so it can be shared with the user.
     plan_name: explorer (5/mo), innovator (20/mo), institution (unlimited)
     """
-    import secrets, string
+    import asyncio, secrets, string
     from app.db.user_repository import create_user, get_user_by_email
     from app.services.auth_service import hash_password
     from app.db.database import get_pool
@@ -189,7 +189,8 @@ async def provision_user(
             )
         return {"status": "updated", "email": email, "plan_name": plan_name, "note": "existing account plan updated"}
 
-    hashed = hash_password(password)
+    # BUG-B: hash_password runs 100k PBKDF2 iterations — must not block the event loop
+    hashed = await asyncio.to_thread(hash_password, password)
     user = await create_user(email=email, password_hash=hashed, name=name or None)
     if not user:
         raise HTTPException(status_code=409, detail="Could not create user — email already exists")

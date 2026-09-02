@@ -26,7 +26,8 @@ logger = logging.getLogger(__name__)
 
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 HAIKU_MODEL       = "claude-haiku-4-5-20251001"
-SONNET_MODEL      = "claude-sonnet-5"
+# BUG-D: "claude-sonnet-5" is a non-existent model ID — corrected to match the rest of the codebase
+SONNET_MODEL      = "claude-sonnet-4-5-20251001"
 TIMEOUT           = 45.0
 
 
@@ -83,12 +84,15 @@ async def check_report_staleness(saved_report: dict) -> dict:
                         "messages": [{"role": "user", "content": f"Search: {q}\nExtract 3 key facts with dates and sources."}],
                     }
                 )
+                # BUG-E: missing raise_for_status — HTTP 4xx/5xx errors were silently swallowed
+                r.raise_for_status()
                 text = ""
                 for block in r.json().get("content", []):
                     if block.get("type") == "text":
                         text += block.get("text", "")
                 results.append(text)
         except Exception as e:
+            logger.warning("Staleness search %d failed: %s", i, e)
             results.append("")
 
     combined = "\n\n".join(results)

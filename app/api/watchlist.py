@@ -16,7 +16,7 @@ POST /api/v1/admin/alerts/run-match  — manually trigger the weekly matcher
 """
 import asyncio
 import logging
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends, Query
 from typing import Optional, List
 from pydantic import BaseModel
 
@@ -130,7 +130,8 @@ async def create_from_report(
 @router.get("/alerts", response_model=List[Alert])
 async def get_alerts(
     unread_only:  bool = False,
-    limit:        int  = 50,
+    # BUG-C: no upper cap — users could pass limit=999999 and dump the full table
+    limit:        int  = Query(default=50, ge=1, le=500),
     current_user: dict = Depends(get_current_user),
 ):
     """Get all alerts for the current user."""
