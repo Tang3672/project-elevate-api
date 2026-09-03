@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field, asdict
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from dateutil.relativedelta import relativedelta
 from typing import Optional
 
@@ -606,5 +606,5 @@ def generate_timeline(
         "strategic_calendar":      strategic,
         "probability_of_approval": _LOA_BY_PHASE.get("phase1", "~10%"),
         "key_risks":               risks,
-        "generated_at":            datetime.utcnow().isoformat() + "Z",
+        "generated_at":            datetime.now(timezone.utc).isoformat() + "Z",
     }

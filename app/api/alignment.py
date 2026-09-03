@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 """
 Alignment API v2
 ================
@@ -882,7 +882,7 @@ async def get_opportunities(
                         o["rank"] = i
                     return {
                         "opportunities": all_opps[:top_n],
-                        "generated_at":  datetime.utcnow().isoformat(),
+                        "generated_at":  datetime.now(timezone.utc).isoformat(),
                         "algorithm":     f"Expert 309 + {extended_total:,} MONDO diseases",
                         "total_scored":  len(all_opps),
                         "universe_size": 309 + extended_total,
@@ -911,7 +911,7 @@ async def get_opportunities(
                     universe = len(curated_opps) + extended_total
                     return {
                         "opportunities": page,
-                        "generated_at":  datetime.utcnow().isoformat(),
+                        "generated_at":  datetime.now(timezone.utc).isoformat(),
                         "algorithm":     f"Expert {len(curated_opps)} curated + {extended_total:,} extended diseases",
                         "total_scored":  len(all_opps),
                         "universe_size": universe,
@@ -931,7 +931,7 @@ async def get_opportunities(
         o["rank"] = i
     return {
         "opportunities": page,
-        "generated_at":  datetime.utcnow().isoformat(),
+        "generated_at":  datetime.now(timezone.utc).isoformat(),
         "algorithm":     f"Expert {curated_size} curated diseases",
         "total_scored":  len(curated_opps[:top_n]),
         "universe_size": total_known,
@@ -1665,7 +1665,7 @@ Return ONLY valid JSON with these exact fields:
         data["institution"]   = payload.institution or ""
         data["contact_name"]  = payload.contact_name or ""
         data["contact_email"] = payload.contact_email or ""
-        data["generated_at"]  = datetime.utcnow().isoformat() + "Z"
+        data["generated_at"]  = datetime.now(timezone.utc).isoformat() + "Z"
         return data
     except Exception as e:
         logger.error("NCS generation failed: %s", e, exc_info=True)
@@ -1740,7 +1740,7 @@ async def analyze_experimental_data(
                 for c in result.column_stats
             ],
             "formatted_analysis": result.formatted,
-            "generated_at": datetime.utcnow().isoformat() + "Z",
+            "generated_at": datetime.now(timezone.utc).isoformat() + "Z",
         }
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

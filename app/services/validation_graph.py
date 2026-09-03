@@ -21,7 +21,7 @@ import json
 import logging
 import asyncio
 from typing import TypedDict, Optional, List, Annotated
-from datetime import datetime
+from datetime import datetime, timezone
 import operator
 
 import httpx
@@ -690,7 +690,7 @@ def formatter_node(state: PIReportState) -> dict:
         "factual_skipped":  factual_skipped,
         "by_agent":         errors_by_agent,
         "validator_model":  VERIFIER_MODEL,
-        "validated_at":     datetime.utcnow().isoformat(),
+        "validated_at":     datetime.now(timezone.utc).isoformat(),
         "summary": (
             (
                 f"✓ PASS: 4 of 5 verification agents found no issues — math, sources, regulatory, and market checks all clear. "
@@ -984,6 +984,6 @@ async def validate_pi_report(report: dict, sub_expert_id: str = "") -> dict:
             "agents_run": [],
             "error": str(e),
             "summary": "Validation service unavailable",
-            "validated_at": datetime.utcnow().isoformat(),
+            "validated_at": datetime.now(timezone.utc).isoformat(),
         }
         return report

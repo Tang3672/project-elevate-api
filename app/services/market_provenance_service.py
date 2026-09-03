@@ -38,7 +38,7 @@ Assumption object schema (matches the brief exactly):
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -156,7 +156,7 @@ def build_provenance(deriv, *, geography: str = "United States") -> dict:
     Turn a MarketSizingDerivation into the structured provenance bundle.
     `deriv` is duck-typed (MarketSizingDerivation) so this stays import-light.
     """
-    retrieved_at = datetime.utcnow().isoformat()
+    retrieved_at = datetime.now(timezone.utc).isoformat()
 
     assumptions: list[dict] = []
     waterfall: list[dict] = []

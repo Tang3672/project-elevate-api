@@ -21,7 +21,7 @@ from __future__ import annotations
 import html
 import logging
 import re
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Optional
 
 from app.utils import fmt_usd
@@ -90,7 +90,7 @@ def derive_report_date(report: dict, report_date: str = "") -> str:
             elif isinstance(gen, datetime):
                 d = gen
             else:
-                d = datetime.utcnow()
+                d = datetime.now(timezone.utc)
             return d.strftime("%B %Y")
         except Exception:
             pass

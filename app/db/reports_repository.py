@@ -17,7 +17,7 @@ All writes are best-effort and never raise into the report path.
 """
 
 import logging
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -413,7 +413,7 @@ async def eval_metrics(institution_id: Optional[str] = None) -> dict:
                 "recommendation_acceptance_rate": round(accepted / total_actions, 3) if total_actions else None,
                 "user_action_counts": action_counts,
                 "outcome_counts": {o["outcome"]: o["c"] for o in outcomes},
-                "generated_at": datetime.utcnow().isoformat(),
+                "generated_at": datetime.now(timezone.utc).isoformat(),
             }
     except Exception as e:
         logger.warning("eval_metrics failed: %s", e)

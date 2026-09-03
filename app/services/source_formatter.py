@@ -8,7 +8,7 @@ and builds a deduplicated sources list.
 import re
 import logging
 from typing import List, Dict
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +83,7 @@ def extract_and_format_sources(report: dict) -> dict:
                     "number":       idx,
                     "name":         name,
                     "url":          url,
-                    "accessed":     datetime.utcnow().strftime("%Y-%m-%d"),
+                    "accessed":     datetime.now(timezone.utc).strftime("%Y-%m-%d"),
                 })
             n = url_to_idx[key]
             return f"[{n}]"
@@ -156,15 +156,13 @@ def build_sources_from_report(report: dict) -> dict:
     Build sources list from structured source_url fields and inline [SOURCE:] markers.
     Returns the text-processed report (all [SOURCE:...] markers replaced with [N]).
     """
-    from datetime import datetime
-
     # M-06: process inline markers first — returns report with [SOURCE:] replaced by [N]
     processed = extract_and_format_sources(report)
 
     # Seed dedup index from already-extracted inline sources
     url_to_idx: dict = {s["url"]: s["number"] for s in processed.get("sources", []) if s.get("url")}
     sources: list = list(processed.get("sources", []))
-    today = datetime.utcnow().strftime("%Y-%m-%d")
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     def add_source(name: str, url: str):
         if not url or url == "None":

@@ -19,7 +19,7 @@ import logging
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from typing import List
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.core.config import settings
 from app.models.watchlist import Alert
@@ -244,7 +244,7 @@ async def send_digest_email(
         logger.warning("Email not configured — skipping digest send. Add EMAIL_HOST/EMAIL_USER to .env")
         return False
 
-    week_of = datetime.utcnow().strftime("%B %d, %Y")
+    week_of = datetime.now(timezone.utc).strftime("%B %d, %Y")
     html    = build_digest_email(user_name, user_email, alerts, week_of)
     if not html:
         return False

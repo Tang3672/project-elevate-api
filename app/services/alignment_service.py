@@ -23,7 +23,7 @@ source citations added.
 import json
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
@@ -434,7 +434,7 @@ async def generate_pi_report(
         "routing_method":     router_result.routing_method,
         "routing_confidence": round(router_result.confidence, 3),
         "domain":             _resolved_domain,
-        "generated_at":       datetime.utcnow().isoformat() + "Z",
+        "generated_at":       datetime.now(timezone.utc).isoformat() + "Z",
     }
 
     #  Generate with Expert context
@@ -2107,7 +2107,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
     # "[date removed — update to future milestone]".
     try:
         import re as _re_r04
-        _now_r04 = datetime.utcnow()
+        _now_r04 = datetime.now(timezone.utc)
         _MONTH_NAMES = {
             "january":1,"february":2,"march":3,"april":4,"may":5,"june":6,
             "july":7,"august":8,"september":9,"october":10,"november":11,"december":12,
@@ -2169,7 +2169,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
     # R-04 scrubs past dates to an internal placeholder; this step converts that
     # placeholder to a real, actionable future deadline so users never see the marker.
     try:
-        _now_b06 = datetime.utcnow()
+        _now_b06 = datetime.now(timezone.utc)
         _steps_b06 = data.get("recommended_next_steps") or []
         if isinstance(_steps_b06, list):
             _resolved = [
@@ -2191,7 +2191,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
     # conservative enough to leave milestone/deadline dates untouched.
     try:
         import re as _re_b03
-        _now_b03 = datetime.utcnow()
+        _now_b03 = datetime.now(timezone.utc)
         # Matches: "Author et al. (Science December 2026)" or "Smith et al. (2027, Nature)"
         _CITE_RE = _re_b03.compile(
             r"\b\w[\w\s,\.&\-]+et al\.?\s*\(([^)]*\b(20\d{2})\b[^)]*)\)",

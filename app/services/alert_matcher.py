@@ -19,7 +19,7 @@ Alert types and severity:
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Tuple
 
 from app.db.database import get_pool
@@ -68,7 +68,7 @@ async def run_weekly_match() -> Dict:
     Returns a summary of alerts created.
     """
     logger.info("Starting weekly alert matching run...")
-    cutoff = datetime.utcnow() - timedelta(days=7)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=7)
 
     # Get all signals from the past 7 days
     new_signals = await _get_recent_signals(cutoff)
@@ -150,7 +150,7 @@ async def run_weekly_match() -> Dict:
         "watchlists_checked": len(watchlists),
         "alerts_created":   total_alerts,
         "duplicates_skipped": skipped,
-        "run_at":           datetime.utcnow().isoformat(),
+        "run_at":           datetime.now(timezone.utc).isoformat(),
     }
 
 

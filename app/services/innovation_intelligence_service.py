@@ -35,7 +35,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 from dataclasses import dataclass, field, asdict
 
@@ -548,7 +548,7 @@ def run_intelligence_sweep(
     result = InnovationIntelligence(
         idea_summary=idea[:150],
         disease_name=disease_name or medium_term,
-        sweep_timestamp=datetime.utcnow().isoformat() + "Z",
+        sweep_timestamp=datetime.now(timezone.utc).isoformat() + "Z",
     )
     sources_swept = []
 

@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
@@ -509,7 +509,7 @@ async def score_report_trust(report: dict) -> dict:
         card["summary"] = _trust_summary(card)
         card["judge_model"] = JUDGE_MODEL
         card["claims"] = judged.get("claims", [])   # auditable per-claim trail
-        card["scored_at"] = datetime.utcnow().isoformat()
+        card["scored_at"] = datetime.now(timezone.utc).isoformat()
         logger.info(
             "Trust layer: grade=%s support=%.2f coverage=%.2f unsupported=%d contradictions=%d abstain=%s",
             card["trust_grade"], card["citation_support_score"], card["retrieval_coverage"],
@@ -524,5 +524,5 @@ async def score_report_trust(report: dict) -> dict:
             "summary": "Trust scoring unavailable for this report.",
             "abstention_required": False,
             "human_review_recommended": False,
-            "scored_at": datetime.utcnow().isoformat(),
+            "scored_at": datetime.now(timezone.utc).isoformat(),
         }
