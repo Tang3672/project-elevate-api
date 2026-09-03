@@ -71,7 +71,7 @@ async def get_optional_user(authorization: Optional[str] = Header(None)) -> Opti
 
 # ── Register ──────────────────────────────────────────────────────────────────
 
-@router.post("/register", response_model=AuthResponse)
+@router.post("/register", response_model=AuthResponse, status_code=201)
 async def register(payload: RegisterRequest, request: Request):
     """Create a new account with email + password."""
     # Password strength validation — check all rules, return all failures at once
@@ -238,7 +238,7 @@ async def get_me(current_user: dict = Depends(get_current_user)):
 
 # ── Saved Reports ─────────────────────────────────────────────────────────────
 
-@router.post("/reports", response_model=SavedReport)
+@router.post("/reports", response_model=SavedReport, status_code=201)
 async def create_report(
     payload:      SaveReportRequest,
     current_user: dict = Depends(get_current_user),
@@ -315,7 +315,7 @@ async def update_report_name(
 
 # ── Drafts ────────────────────────────────────────────────────────────────────
 
-@router.post("/drafts", response_model=SavedDraft)
+@router.post("/drafts", response_model=SavedDraft, status_code=201)
 async def create_draft(
     payload:      SaveDraftRequest,
     current_user: dict = Depends(get_current_user),
@@ -392,7 +392,7 @@ async def change_password(request: Request, current_user: dict = Depends(get_cur
 
 # ── EARLY ACCESS WAITLIST ──────────────────────────────────────────────────────
 
-@router.post("/waitlist")
+@router.post("/waitlist", status_code=201)
 async def submit_waitlist(body: dict):
     """
     Save an early access request. No auth required — anyone can submit.

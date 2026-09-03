@@ -10,7 +10,8 @@ GET  /api/v1/alignment/examples     — example ideas
 
 import logging
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel, Field
+import math as _math
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional
 
 from app.services.alignment_service import generate_alignment_report, generate_pi_report
@@ -353,7 +354,7 @@ class FeedbackRequest(BaseModel):
     institution_id:    Optional[str] = None
 
 
-@router.post("/feedback")
+@router.post("/feedback", status_code=201)
 async def submit_feedback(
     req: FeedbackRequest,
     current_user: dict = Depends(get_current_user),  # BUG-5
@@ -2493,10 +2494,18 @@ async def revert_market_model(
 
 class _OverrideRequest(BaseModel):
     node_id:   str   = Field(..., description="id of the node to override")
-    value:     float = Field(..., description="new scalar value")
+    value:     float = Field(..., ge=0, description="new scalar value (must be ≥ 0 and finite)")
     rationale: str   = Field(..., min_length=1, max_length=500,
                              description="required — stored in override_events")
     version:   Optional[int] = Field(default=None, description="base version; latest if omitted")
+
+    @field_validator("value")
+    @classmethod
+    def _value_must_be_finite(cls, v: float) -> float:
+        """Reject NaN and ±infinity — they bypass the SAM ≤ TAM invariant checks."""
+        if not _math.isfinite(v):
+            raise ValueError("value must be a finite number (not NaN or infinity)")
+        return v
 
 
 class _GateRequest(BaseModel):

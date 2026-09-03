@@ -15,6 +15,10 @@ async def get_pool():
             min_size=2,
             max_size=10,
             command_timeout=30,
+            # Recycle idle connections every 5 minutes so stale connections
+            # (e.g., after a DB restart or network partition) are discarded
+            # before they are handed to the next request and fail mid-query.
+            max_inactive_connection_lifetime=300,
         )
     return _pool
 
