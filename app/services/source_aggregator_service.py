@@ -531,7 +531,7 @@ async def aggregate_all_sources(
         # Industry news - multiple queries
         get_industry_news(news_query, max_results=5),
         get_industry_news(f"{disease_name} market size revenue", max_results=3),
-        get_industry_news(f"{disease_name} FDA approval 2023 2024 2025", max_results=3),
+        get_industry_news(f"{disease_name} FDA approval {datetime.now().year - 2} {datetime.now().year - 1} {datetime.now().year}", max_results=3),
         # SEC filings for competitor intelligence
         search_sec_filings(drug_names[:3] if drug_names else [disease_name]),
         return_exceptions=True

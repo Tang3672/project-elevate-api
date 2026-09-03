@@ -30,6 +30,7 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Optional
 
 from app.services.buyer_model import HORIZON_YEARS
@@ -1698,6 +1699,7 @@ def _query_nih_reporter_total(search_text: str, timeout: float = 3.0) -> "Option
     No API key required. Returns project count or None on any error."""
     try:
         import requests as _req
+        _fy = date.today().year
         resp = _req.post(
             "https://api.reporter.nih.gov/v2/projects/search",
             json={
@@ -1707,7 +1709,7 @@ def _query_nih_reporter_total(search_text: str, timeout: float = 3.0) -> "Option
                         "search_field": "projecttitle,abstract",
                         "search_text": search_text,
                     },
-                    "fiscal_years": [2023, 2024, 2025],
+                    "fiscal_years": [_fy - 2, _fy - 1, _fy],
                     "is_active": True,
                     "activity_codes": ["R01", "R21", "R15", "R41", "R43"],
                 },
@@ -2016,8 +2018,9 @@ def _derive_research_tool_formula(
             _nih_lo = max(int(_nih_total * 0.65), 100)
             _nih_hi = _nih_total
             pop_lo, pop_hi = _nih_lo, _nih_hi
+            _nih_fy_cur = date.today().year
             pop_src = (
-                f"NIH RePORTER (live, FY2023–25): {_nih_total:,} active R-series grants "
+                f"NIH RePORTER (live, FY{_nih_fy_cur - 2}–{_nih_fy_cur % 100:02d}): {_nih_total:,} active R-series grants "
                 f"matching '{_nih_kw[:60]}'; estimated {_nih_lo:,}–{_nih_hi:,} unique PIs"
             )
             logger.info("NIH RePORTER: %d grants → pop %d–%d for '%s'",

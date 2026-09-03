@@ -912,6 +912,7 @@ async def _fetch_source(
             from app.services.knowledge_retriever import _log_fetch, FetchLog
             _RT_EXPERTS = frozenset({"research_tool_non_clinical", "research_infrastructure_saas",
                                      "research_tool_agronomy"})
+            _nih_fy = date.today().year  # use current calendar year; NIH FY lags by ~3 months but same number
             if subcategory_id in _RT_EXPERTS:
                 # Research tools: search by product text, not disease_conditions.
                 # "disease_conditions" on a soil sensor returns NIH clinical grants —
@@ -924,7 +925,7 @@ async def _fetch_source(
                             "search_field": "all",
                             "search_text": _search_text,
                         },
-                        "fiscal_years": [2023, 2024, 2025],
+                        "fiscal_years": [_nih_fy - 2, _nih_fy - 1, _nih_fy],
                         "is_active": True,
                     },
                     "include_fields": ["ProjectNum", "ProjectTitle", "AwardAmount",
@@ -936,7 +937,7 @@ async def _fetch_source(
                 _nih_body = {
                     "criteria": {
                         "disease_conditions": [disease_name[:50]],
-                        "fiscal_years": [2024, 2025],
+                        "fiscal_years": [_nih_fy - 1, _nih_fy],
                         "is_active": True,  # L: skip expired grants
                     },
                     "limit": 3,
