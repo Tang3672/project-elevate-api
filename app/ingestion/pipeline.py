@@ -233,7 +233,7 @@ async def run_pipeline_cli(connector_filter: str = None):
     """Entry point for running from command line or scripts."""
     names = [connector_filter] if connector_filter else None
     result = await run_pipeline(connector_names=names)
-    print(result.summary())
+    logger.info(result.summary())
     return result
 
 

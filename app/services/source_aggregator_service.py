@@ -408,13 +408,16 @@ async def get_industry_news(query: str, max_results: int = 5) -> List[Dict]:
     # Fallback: recent PubMed articles if web search returned nothing
     if not results:
         try:
+            _now = datetime.utcnow()
+            _min_year = str(_now.year - 2)
+            _date_range = f"{_min_year}-{_now.year}"
             async with httpx.AsyncClient(timeout=TIMEOUT) as client:
                 r = await client.get(
                     "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",
                     params={
                         "db": "pubmed", "term": query + "[Title/Abstract]",
                         "retmax": max_results, "sort": "date",
-                        "datetype": "pdat", "mindate": "2024",
+                        "datetype": "pdat", "mindate": _min_year,
                         "retmode": "json",
                     }
                 )
@@ -425,7 +428,7 @@ async def get_industry_news(query: str, max_results: int = 5) -> List[Dict]:
                             "source": "PubMed Recent",
                             "title": f"Recent publication on {query} (PMID {pmid})",
                             "url": f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
-                            "date": "2024-2025",
+                            "date": _date_range,
                             "summary": "",
                             "type": "recent_publication",
                         })
