@@ -1003,9 +1003,13 @@ async def generate_alignment_report(idea: str) -> AlignmentReport:
         query_embedding=idea_embedding, top_k=10, min_similarity=0.55)
     context       = _build_legacy_context(idea, demand_results, hospital_matches_raw)
     claude_resp   = await _call_claude(context, LEGACY_SYSTEM_PROMPT)
-    return _parse_legacy_response(
+    # Offload to thread — _parse_legacy_response calls filter_literature_citations
+    # which makes blocking httpx calls that would block the event loop.
+    return await asyncio.to_thread(
+        _parse_legacy_response,
         claude_resp, idea, demand_results, hospital_matches_raw,
-        total_signals, len(hospital_matches_raw))
+        total_signals, len(hospital_matches_raw),
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2239,9 +2243,14 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
     except Exception as _b03_e:
         logger.warning("B-03 future-citation scrub failed (non-fatal): %s", _b03_e)
 
-    # Parse into PIReport
-    report = _parse_expert_response(data, idea, product_type, expert, demand_results, hospital_matches_raw, total_signals,
-                                    product_name=product_name, institution=institution, sub_expert_id=sub_expert_id)
+    # Parse into PIReport — offload to thread because filter_literature_citations
+    # makes blocking httpx calls (resolve_pmid / resolve_via_openalex / resolve_via_crossref)
+    # that would block the event loop if called directly from async code.
+    report = await asyncio.to_thread(
+        _parse_expert_response, data, idea, product_type, expert,
+        demand_results, hospital_matches_raw, total_signals,
+        product_name, institution, sub_expert_id,
+    )
 
     # Fix 1 — make market sizing arithmetically self-consistent so the Math Verifier
     # can't flag rounding drift (LLMs round $99.45M->$99M inconsistently). Recompute
@@ -3095,6 +3104,10 @@ async def _generate_antibiotic_report(
         logger.warning("market_geography parse failed (non-fatal): %s", _geo_e)
         geography = None
 
+    # Offload blocking citation verification (httpx) to a thread
+    _lit_amr = await asyncio.to_thread(
+        _filter_lit, data.get("literature_citations") or [], idea, "drug_amr"
+    )
     return PIReport(
         product_type=ProductType.ANTIBIOTIC,
         idea_submitted=idea,
@@ -3108,7 +3121,7 @@ async def _generate_antibiotic_report(
         market_geography=geography,
         recommended_next_steps=data.get("recommended_next_steps") or [],
         strategic_playbook=data.get("strategic_playbook") or [],
-        literature_citations=_filter_lit(data.get("literature_citations") or [], idea, "drug_amr") or None,
+        literature_citations=_lit_amr or None,
         limitations=data.get("limitations"),
         signals_searched=total_signals,
         hospital_needs_searched=len(hospital_matches_raw),
@@ -3237,6 +3250,10 @@ async def _generate_generic_pi_report(
         logger.warning("market_geography parse failed (non-fatal): %s", _geo_e)
         geography = None
 
+    # Offload blocking citation verification (httpx) to a thread
+    _lit_generic = await asyncio.to_thread(
+        _filter_lit, data.get("literature_citations") or [], idea, ""
+    )
     return PIReport(
         product_type=product_type,
         idea_submitted=idea,
@@ -3249,7 +3266,7 @@ async def _generate_generic_pi_report(
         market_geography=geography,
         recommended_next_steps=data.get("recommended_next_steps") or [],
         strategic_playbook=data.get("strategic_playbook") or [],
-        literature_citations=_filter_lit(data.get("literature_citations") or [], idea, "") or None,
+        literature_citations=_lit_generic or None,
         limitations=data.get("limitations"),
         signals_searched=total_signals,
         hospital_needs_searched=len(hospital_matches_raw),

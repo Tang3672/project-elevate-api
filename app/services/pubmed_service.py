@@ -227,7 +227,8 @@ async def _get_openalex_publications(topic: str, sub_expert_id: str, max_results
             "sort":     "cited_by_count:desc",
         }
         t0 = time.monotonic()
-        r = httpx.get(_OPENALEX_URL, params=params, timeout=12.0)
+        # Offload blocking httpx.get to a thread so the event loop stays free
+        r = await asyncio.to_thread(httpx.get, _OPENALEX_URL, params=params, timeout=12.0)
         latency_ms = (time.monotonic() - t0) * 1000
         items = r.json().get("results", []) if r.status_code == 200 else []
         _log_fetch_pubmed(
