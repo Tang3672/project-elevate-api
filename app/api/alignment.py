@@ -73,21 +73,28 @@ class AlignmentRequest(BaseModel):
 class PIReportRequest(BaseModel):
     idea: str = Field(..., min_length=30, max_length=2000,
         description="Description of the product — what it does, who it's for, what it solves")
-    product_type: str = Field(default="other",
+    product_type: str = Field(default="other", max_length=60,
         description="antibiotic | medical_device | software | diagnostic | other")
-    funding_pathway: Optional[str] = Field(default="commercial",
+    funding_pathway: Optional[str] = Field(default="commercial", max_length=50,
         description="commercial | sbir | basic_science — controls report framing")
-    target_pathogen: Optional[str] = Field(default=None,
+    # BUG-74: target_pathogen was unbounded — _idea_from_payload() appends it to `idea`,
+    # so an attacker could bypass the idea max_length=2000 cap by sending a multi-MB
+    # target_pathogen value, inflating the LLM prompt and API cost.  Cap at 200 chars
+    # (sufficient for any pathogen name or resistance phenotype description).
+    target_pathogen: Optional[str] = Field(default=None, max_length=200,
         description="For antibiotics: primary target pathogen (e.g. MRSA, CRE, C. difficile)")
-    disease_domain: str = Field(default="auto",
+    disease_domain: str = Field(default="auto", max_length=100,
         description="auto | antibiotic_amr | oncology | cardiology | neurology_cns | metabolic_diabetes | mental_health")
-    tier1_category: str = Field(default="drug_small_molecule",
+    tier1_category: str = Field(default="drug_small_molecule", max_length=100,
         description="drug_small_molecule | biologic | gene_cell_therapy | medical_device | diagnostic | digital_health | vaccine_immunotherapy | other_platform")
-    product_name: Optional[str] = Field(default=None,
+    # BUG-74: product_name and institution were unbounded — product_name feeds into
+    # _sanitize_product_name() (word-by-word iteration) and render_report_html() CSS
+    # generation; institution is embedded in PDF HTML.  Cap both to sane maximums.
+    product_name: Optional[str] = Field(default=None, max_length=100,
         description="Short brand / working name (e.g. 'NeuroSense'). If omitted, derived from idea text.")
-    institution: Optional[str] = Field(default=None,
+    institution: Optional[str] = Field(default=None, max_length=200,
         description="Originating institution (e.g. 'University of Michigan', 'NIH NIBIB').")
-    domain: Optional[str] = Field(default=None,
+    domain: Optional[str] = Field(default=None, max_length=100,
         description="LIFE_SCIENCES_CLINICAL | LIFE_SCIENCES_RESEARCH | ENGINEERING_HARDWARE | SOFTWARE_INFRASTRUCTURE | ENERGY_CLIMATE | OTHER_DEEP_TECH. Auto-detected if omitted.")
     clarify_answers: Optional[dict] = Field(default=None,
         description="Structured answers from /clarify intake questions, keyed by binds_to field (e.g. 'seg.target_lab_count': '1,000-5,000 labs'). Used to override default market sizing parameters.")
@@ -1678,7 +1685,11 @@ Return ONLY valid JSON with these exact fields:
 # ── Dataset Analysis (Edison Scientific play) ─────────────────────────────────
 
 class DatasetAnalysisRequest(BaseModel):
-    csv_data:          str  = Field(..., description="CSV text with column headers in first row")
+    # BUG-74: csv_data had no Pydantic max_length — the runtime check at line ~1715
+    # catches oversized payloads, but only after Pydantic has already built the model.
+    # Adding max_length here gives a proper 422 with a descriptive error before model
+    # construction succeeds, and serves as defense-in-depth documentation.
+    csv_data:          str  = Field(..., max_length=50_000, description="CSV text with column headers in first row")
     disease_name:      str  = Field(..., min_length=3, max_length=200)
     research_question: str  = Field(
         default="What do these results mean for drug development?",
