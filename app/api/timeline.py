@@ -44,7 +44,7 @@ async def generate_timeline(payload: TimelineRequest, current_user: dict = Depen
         return tl
     except Exception as e:
         logger.error("Timeline generation failed: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Timeline generation failed")
 
 
 @router.post("/export/ical")
@@ -61,7 +61,7 @@ async def export_ical(payload: ICalRequest, current_user: dict = Depends(get_cur
         )
     except Exception as e:
         logger.error("iCal export failed: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="iCal export failed")
 
 
 def _build_ical(tl: dict) -> bytes:

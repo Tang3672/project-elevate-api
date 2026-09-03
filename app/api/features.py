@@ -68,7 +68,7 @@ async def get_trial_sites(payload: TrialSiteRequest, current_user: dict = Depend
         }
     except Exception as e:
         logger.error(f"Trial site request failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Trial site analysis failed")
 
 
 # ── Portfolio ─────────────────────────────────────────────────────────────────
@@ -126,7 +126,7 @@ async def analyze_portfolio(payload: PortfolioRequest, current_user: dict = Depe
         }
     except Exception as e:
         logger.error(f"Portfolio analysis failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Portfolio analysis failed")
 
 
 # ── Grant Co-Pilot ────────────────────────────────────────────────────────────
@@ -173,4 +173,4 @@ async def generate_grant(payload: GrantRequest, current_user: dict = Depends(_ge
         }
     except Exception as e:
         logger.error(f"Grant generation failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Grant generation failed")

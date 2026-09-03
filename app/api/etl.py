@@ -104,7 +104,8 @@ async def disease_aggregate_snapshot(disease: str = None):
                 )
             return {"diseases": [dict(r) for r in rows], "count": len(rows)}
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            logger.error("disease_aggregate query failed: %s", e, exc_info=True)
+            raise HTTPException(status_code=500, detail="Failed to query disease aggregate")
 
 
 @router.post("/expand-universe/mondo")
@@ -196,7 +197,8 @@ async def cache_status():
             "ready":                len(_TRIAL_COUNT_CACHE) >= universe_size * 0.9,
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("cache_status failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to retrieve cache status")
 
 
 @router.get("/signals")
@@ -227,7 +229,8 @@ async def signal_ingestion_status():
             ],
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("signals status failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to retrieve signal ingestion status")
 
 
 @router.post("/signals/run")
@@ -273,4 +276,5 @@ async def license_registry():
             "disclaimer": data["_meta"]["reminder"],
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("licenses endpoint failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to load license registry")

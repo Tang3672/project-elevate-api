@@ -24,8 +24,8 @@ async def trigger_tracker(current_user: dict = Depends(get_current_user)):
             "results": results,
         }
     except Exception as e:
-        logger.error(f"Manual tracker run failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Manual tracker run failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Tracker run failed")
 
 
 @router.post("/tracker/run-all")

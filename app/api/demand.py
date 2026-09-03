@@ -127,7 +127,8 @@ async def search_demand_signals(
     try:
         query_embedding = await embed_text(query)
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Embedding failed: {e}")
+        logger.error("Embedding failed for demand search: %s", e, exc_info=True)
+        raise HTTPException(status_code=502, detail="Embedding service unavailable")
 
     results = await search_similar_signals(
         query_embedding=query_embedding,

@@ -46,6 +46,24 @@ async def init_report_jobs_table():
     logger.info("report_jobs table ready")
 
 
+async def count_running_jobs(owner_id: str) -> int:
+    """Return the number of jobs in 'running' state for a given owner."""
+    try:
+        from app.db.database import get_pool
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT COUNT(*) AS n FROM report_jobs "
+                "WHERE owner_id = $1 AND status = 'running' "
+                "AND created_at >= NOW() - INTERVAL '15 minutes'",
+                str(owner_id),
+            )
+            return int(row["n"]) if row else 0
+    except Exception as exc:
+        logger.warning("count_running_jobs failed (non-fatal): %s", exc)
+        return 0
+
+
 async def create_job(owner_id: str | None = None) -> str:
     job_id = uuid.uuid4().hex[:16]
     from app.db.database import get_pool
@@ -61,15 +79,24 @@ async def create_job(owner_id: str | None = None) -> str:
 
 
 async def set_done(job_id: str, report: dict) -> None:
-    try:
-        from app.db.database import get_pool
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            await conn.execute(
-                "UPDATE report_jobs SET status='done', report=$2::jsonb, updated_at=NOW() "
-                "WHERE job_id=$1", job_id, json.dumps(report))
-    except Exception as e:
-        logger.error("report_jobs.set_done failed for %s: %s", job_id, e)
+    """Persist a completed report. Retries once after a short delay so a
+    transient DB hiccup does not silently discard an expensive LLM result."""
+    import asyncio as _asyncio
+    serialized = json.dumps(report)
+    for attempt in range(2):
+        try:
+            from app.db.database import get_pool
+            pool = await get_pool()
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE report_jobs SET status='done', report=$2::jsonb, updated_at=NOW() "
+                    "WHERE job_id=$1", job_id, serialized)
+            return  # success
+        except Exception as e:
+            logger.error("report_jobs.set_done failed for %s (attempt %d): %s",
+                         job_id, attempt + 1, e)
+            if attempt == 0:
+                await _asyncio.sleep(2)  # brief pause before retry
 
 
 async def set_error(job_id: str, error: str) -> None:

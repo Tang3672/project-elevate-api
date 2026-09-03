@@ -101,7 +101,7 @@ async def check_alignment(payload: AlignmentRequest):
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         logger.error(f"Alignment failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Alignment check failed")
 
 
 _DEV_EMAILS = {"test@projectelevate.io", "admin@projectelevate.io"}
@@ -194,7 +194,7 @@ async def get_pi_report(payload: PIReportRequest, current_user = Depends(get_cur
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         logger.error(f"PI report failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Report generation failed")
 
 
 @router.post("/pi-report/async")
@@ -203,8 +203,21 @@ async def get_pi_report_async(payload: PIReportRequest, current_user = Depends(g
     the client never holds a long request open. Poll /pi-report/status/{job_id}."""
     await _enforce_quota(current_user)   # synchronous gate — 402 returns instantly
     import asyncio
-    from app.services.report_jobs import create_job, set_done, set_error, update_report
+    from app.services.report_jobs import create_job, set_done, set_error, update_report, count_running_jobs
+
+    # Concurrent-job cap: prevent a single user from saturating the server with
+    # many simultaneous LLM jobs.  2 in-flight jobs is enough for normal use.
+    _MAX_CONCURRENT_JOBS = 2
     _owner_id = str((current_user or {}).get("id", "")) or None
+    if _owner_id:
+        _running = await count_running_jobs(_owner_id)
+        if _running >= _MAX_CONCURRENT_JOBS:
+            raise HTTPException(
+                status_code=429,
+                detail=f"You already have {_running} report(s) in progress. "
+                       "Wait for them to finish before starting a new one.",
+            )
+
     job_id = await create_job(owner_id=_owner_id)
     idea = _idea_from_payload(payload)
     _user = current_user
@@ -661,7 +674,7 @@ async def get_market_sizing_derivation(body: dict):
         return asdict(deriv)
     except Exception as e:
         logger.error("Market sizing derivation failed: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Market sizing derivation failed")
 
 
 @router.post("/market-sizing-override")
@@ -1002,7 +1015,8 @@ async def score_custom_opportunity(
         )
         return result
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("Opportunity scoring failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Opportunity scoring failed")
 
 
 
@@ -1553,7 +1567,7 @@ Return ONLY a valid JSON array of 6 objects. No markdown, no explanation, no oth
                 return {"questions": _legacy, "pathway": pathway, "conditioned": True}
             except Exception:
                 pass
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Clarify question generation failed")
 
 
 # ── Non-Confidential Summary (NCS) generator ─────────────────────────────────
@@ -1648,7 +1662,7 @@ Return ONLY valid JSON with these exact fields:
         return data
     except Exception as e:
         logger.error("NCS generation failed: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="NCS generation failed")
 
 
 # ── Dataset Analysis (Edison Scientific play) ─────────────────────────────────
@@ -1725,7 +1739,7 @@ async def analyze_experimental_data(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error("Dataset analysis failed: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Dataset analysis failed")
 
 
 # ── Part E: Assumption Ledger endpoints ──────────────────────────────────────

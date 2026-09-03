@@ -59,7 +59,8 @@ async def create_checkout(
         )
         return {"checkout_url": checkout_url}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("Checkout session creation failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to create checkout session")
 
 
 @router.get("/billing/status")
