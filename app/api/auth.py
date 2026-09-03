@@ -194,6 +194,11 @@ async def google_auth(payload: GoogleAuthRequest):
     google_info = await verify_google_token(payload.token)
     if not google_info or not google_info.get('email'):
         raise HTTPException(status_code=401, detail="Invalid Google token")
+    # BUG-75: email_verified was never checked. The password /login path blocks
+    # unverified accounts; the Google OAuth path must enforce the same rule so
+    # a Google Workspace account with email_verified=false cannot bypass the gate.
+    if not google_info.get('email_verified', False):
+        raise HTTPException(status_code=401, detail="Google account email is not verified")
 
     email     = google_info['email']
     google_id = google_info['sub']

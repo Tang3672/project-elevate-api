@@ -121,9 +121,12 @@ async def verify_google_token(id_token: str) -> Optional[dict]:
                 logger.warning("Google token audience mismatch")
                 return None
             return {
-                'email': data.get('email'),
-                'name':  data.get('name'),
-                'sub':   data.get('sub'),   # Google's unique user ID
+                'email':          data.get('email'),
+                'name':           data.get('name'),
+                'sub':            data.get('sub'),   # Google's unique user ID
+                # Google tokeninfo returns email_verified as the STRING "true"/"false".
+                # Normalise to bool here so callers don't have to know the raw type.
+                'email_verified': data.get('email_verified') == 'true',
             }
     except Exception as e:
         logger.error(f"Google token verification error: {e}")
