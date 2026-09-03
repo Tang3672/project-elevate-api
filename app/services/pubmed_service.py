@@ -887,8 +887,10 @@ def _build_pubmed_queries(disease_name: str, sub_expert_id: str) -> List[str]:
     default_query = f'"{disease}"[Title/Abstract] AND (clinical trial[pt] OR systematic review[pt] OR meta-analysis[pt])'
     primary_query = domain_filters.get(sub_expert_id, default_query)
 
-    # Always add a recency query for last 3 years
-    recency_query = f'"{disease}"[Title/Abstract] AND ("2023"[Date - Publication] : "2026"[Date - Publication])'
+    # Always add a recency query for last 3 years — computed dynamically so the
+    # window slides forward each year instead of hardcoding a stale upper bound.
+    _cur_year = time.localtime().tm_year
+    recency_query = f'"{disease}"[Title/Abstract] AND ("{_cur_year - 3}"[Date - Publication] : "{_cur_year}"[Date - Publication])'
 
     # Guidelines query
     guidelines_query = f'"{disease}"[Title/Abstract] AND (guideline[pt] OR practice guideline[pt] OR consensus[Title/Abstract])'

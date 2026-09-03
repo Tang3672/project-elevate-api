@@ -280,10 +280,15 @@ def _invention_row(r) -> dict:
 
 
 async def list_review_queue(institution_id: Optional[str] = None, status: str = "",
-                            reviewer: str = "", limit: int = 200) -> list[dict]:
+                            reviewer: str = "", limit: int = 200,
+                            caller_user_id: Optional[int] = None) -> list[dict]:
     # BUG-14: cap limit so callers cannot pass limit=10000 and dump the full table
     """The TTO review queue: every invention disclosure with its triage scores,
-    workflow status, assigned reviewer, and next action."""
+    workflow status, assigned reviewer, and next action.
+
+    Callers MUST supply either institution_id or caller_user_id so the query is
+    always scoped — never returns the full cross-institution table.
+    """
     try:
         from app.db.database import get_pool
         pool = await get_pool()
@@ -294,6 +299,10 @@ async def list_review_queue(institution_id: Optional[str] = None, status: str = 
             args.append(reviewer); clauses.append(f"assigned_reviewer = ${len(args)}")
         if institution_id:
             args.append(institution_id); clauses.append(f"institution_id = ${len(args)}")
+        elif caller_user_id is not None:
+            # IDOR fix: fall back to scoping by the calling user's own reports when
+            # no institution is set — prevents unauthenticated full-table dumps.
+            args.append(caller_user_id); clauses.append(f"user_id = ${len(args)}")
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
         args.append(min(limit, 200))  # BUG-14: hard cap
         async with pool.acquire() as conn:

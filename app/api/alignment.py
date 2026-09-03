@@ -352,36 +352,66 @@ async def submit_feedback(
 @router.get("/outcomes")
 async def get_outcomes(
     report_id: str = "",
-    user_id: Optional[int] = None,  # BUG-17: was `int = None` — wrong annotation
     current_user: dict = Depends(get_current_user),  # BUG-5
 ):
+    # IDOR fix: ignore any caller-supplied user_id; always scope to the calling user's
+    # own outcomes so authenticated users cannot read other users' feedback records.
     from app.db.reports_repository import list_outcomes
-    return {"outcomes": await list_outcomes(report_id=report_id, user_id=user_id)}
+    return {"outcomes": await list_outcomes(report_id=report_id, user_id=current_user.get("id"))}
 
 
 @router.get("/eval-dashboard")
 async def get_eval_dashboard(
-    institution_id: Optional[str] = None,
     current_user: dict = Depends(get_current_user),  # BUG-5
 ):
-    """Internal evaluation metrics: trust, priority, abstention, acceptance, outcomes (P10)."""
+    """Internal evaluation metrics: trust, priority, abstention, acceptance, outcomes (P10).
+    Scoped to the calling user's institution; never accepts an external institution_id."""
     from app.db.reports_repository import eval_metrics
+    # IDOR fix: derive institution from the authenticated user's own record rather than
+    # accepting it as a query parameter (which any user could manipulate to see other
+    # institutions' aggregate metrics).
+    institution_id = current_user.get("institution") or None
     return await eval_metrics(institution_id=institution_id)
 
 
 # ── TTO review dashboard / workflow (Sprint 5) ──────────────────────────────────
 
+async def _check_report_ownership(report_id: str, current_user: dict) -> None:
+    """Verify the calling user owns the report or belongs to the same institution.
+    Raises HTTPException(403) if the check fails; HTTPException(404) if not found."""
+    from app.db.database import get_pool
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        raw = await conn.fetchrow(
+            "SELECT user_id, institution_id FROM reports WHERE report_id = $1", report_id
+        )
+    if not raw:
+        raise HTTPException(status_code=404, detail="Invention not found")
+    caller_id = current_user.get("id")
+    caller_institution = (current_user.get("institution") or "").strip()
+    report_institution = (raw.get("institution_id") or "").strip()
+    if raw["user_id"] != caller_id and not (caller_institution and caller_institution == report_institution):
+        raise HTTPException(status_code=403, detail="Not authorised to access this invention")
+
+
 @router.get("/review-queue")
 async def review_queue(
-    institution_id: Optional[str] = None,
     status: str = "",
     reviewer: str = "",
     current_user: dict = Depends(get_current_user),  # BUG-5
 ):
-    """The TTO review queue: inventions with triage scores, status, reviewer, next action."""
+    """The TTO review queue: inventions with triage scores, status, reviewer, next action.
+    Always scoped to the calling user's institution or their own reports — the institution_id
+    URL parameter has been removed to prevent IDOR (cross-institution data exposure)."""
     from app.db.reports_repository import list_review_queue
+    # IDOR fix: derive institution from the user record; fall back to user_id scoping
+    # when no institution is set so there is never an unfiltered full-table query.
+    institution_id = current_user.get("institution") or None
+    caller_id = current_user.get("id")
     return {"inventions": await list_review_queue(
-        institution_id=institution_id, status=status, reviewer=reviewer)}
+        institution_id=institution_id,
+        caller_user_id=None if institution_id else caller_id,
+        status=status, reviewer=reviewer)}
 
 
 @router.get("/invention/{report_id}")
@@ -389,6 +419,8 @@ async def invention_detail(
     report_id: str,
     current_user: dict = Depends(get_current_user),  # BUG-5
 ):
+    # IDOR fix: verify ownership before returning the full invention record.
+    await _check_report_ownership(report_id, current_user)
     from app.db.reports_repository import get_invention
     inv = await get_invention(report_id)
     if not inv:
@@ -408,6 +440,8 @@ async def review_update(
     req: ReviewUpdateRequest,
     current_user: dict = Depends(get_current_user),  # BUG-5
 ):
+    # IDOR fix: verify ownership before allowing any write to the report's review fields.
+    await _check_report_ownership(req.report_id, current_user)
     from app.db.reports_repository import update_review
     try:
         return await update_review(req.report_id, status=req.status,
