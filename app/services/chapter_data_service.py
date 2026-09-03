@@ -114,7 +114,9 @@ async def get_disease_intelligence_data(
     if any(x in therapeutic_area.lower() for x in ["rare", "orphan", "gene_therapy", "genetic"]):
         try:
             from app.ingestion.connectors.orphanet import get_rare_disease_prevalence
-            orphan_data = get_rare_disease_prevalence(disease_name)
+            # get_rare_disease_prevalence falls back to a blocking requests.get when the
+            # disease is not in the preloaded dict — offload so the event loop stays free.
+            orphan_data = await asyncio.to_thread(get_rare_disease_prevalence, disease_name)
             if orphan_data.get("found"):
                 data["data_points"].extend([
                     {
@@ -711,32 +713,39 @@ async def get_strategic_intelligence(
     }
 
     # ── ClinicalTrials.gov: what failed/succeeded in this space ──────────────
+    # Blocking requests.get — offload to thread pool so the event loop stays free.
     try:
         import requests as _req
         ct_url = "https://clinicaltrials.gov/api/v2/studies"
-        params = {
+        _ct_params = {
             "query.cond": disease_name,
             "filter.overallStatus": "COMPLETED",
             "fields": "NCTId,BriefTitle,OverallStatus,Phase,StartDate,PrimaryCompletionDate,EnrollmentCount,WhyStopped",
             "pageSize": 5,
         }
-        r = _req.get(ct_url, params=params, timeout=15)
-        if r.ok:
-            studies = r.json().get("studies", [])
-            for s in studies[:3]:
-                proto = s.get("protocolSection", {})
-                status_mod = proto.get("statusModule", {})
-                design_mod = proto.get("designModule", {})
-                id_mod = proto.get("identificationModule", {})
-                intel["clinical_trial_outcomes"].append({
-                    "nct_id": id_mod.get("nctId"),
-                    "title": id_mod.get("briefTitle", "")[:100],
-                    "phase": design_mod.get("phases", [""])[0] if design_mod.get("phases") else "N/A",
-                    "enrollment": design_mod.get("enrollmentInfo", {}).get("count"),
-                    "why_stopped": status_mod.get("whyStopped"),
-                    "source": "ClinicalTrials.gov (US public domain)",
-                    "url": f"https://clinicaltrials.gov/study/{id_mod.get('nctId')}",
-                })
+
+        def _fetch_ct_studies():
+            r = _req.get(ct_url, params=_ct_params, timeout=15)
+            results = []
+            if r.ok:
+                for s in r.json().get("studies", [])[:3]:
+                    proto = s.get("protocolSection", {})
+                    status_mod = proto.get("statusModule", {})
+                    design_mod = proto.get("designModule", {})
+                    id_mod = proto.get("identificationModule", {})
+                    results.append({
+                        "nct_id": id_mod.get("nctId"),
+                        "title": id_mod.get("briefTitle", "")[:100],
+                        "phase": design_mod.get("phases", [""])[0] if design_mod.get("phases") else "N/A",
+                        "enrollment": design_mod.get("enrollmentInfo", {}).get("count"),
+                        "why_stopped": status_mod.get("whyStopped"),
+                        "source": "ClinicalTrials.gov (US public domain)",
+                        "url": f"https://clinicaltrials.gov/study/{id_mod.get('nctId')}",
+                    })
+            return results
+
+        ct_studies = await asyncio.to_thread(_fetch_ct_studies)
+        intel["clinical_trial_outcomes"].extend(ct_studies)
     except Exception as e:
         logger.warning("CT.gov results query failed: %s", e)
 
@@ -776,14 +785,17 @@ async def get_strategic_intelligence(
     intel["fda_precedents"] = get_regulatory_precedents(subcategory_id, disease_name)
 
     # ── NIH funding opportunities (from NIH Reporter grants in area) ──────────
+    # Blocking requests.post — offload to thread pool so the event loop stays free.
     try:
         import requests as _req
+        from datetime import datetime as _dt
+        _cur_year = _dt.now().year
         nih_url = "https://api.reporter.nih.gov/v2/projects/search"
-        payload = {
+        _nih_payload = {
             "criteria": {
                 "disease_conditions": [disease_name[:50]],
                 "project_nums": [],
-                "fiscal_years": [2023, 2024, 2025],
+                "fiscal_years": [_cur_year - 2, _cur_year - 1, _cur_year],
                 "award_types": ["U","P","R01"],
             },
             "limit": 3,
@@ -791,20 +803,26 @@ async def get_strategic_intelligence(
             "sort_field": "award_amount",
             "sort_order": "desc",
         }
-        r = _req.post(nih_url, json=payload, timeout=15)
-        if r.ok:
-            projects = r.json().get("results", [])
-            for p in projects[:2]:
-                intel["funding_opportunities"].append({
-                    "type": "NIH Grant",
-                    "title": p.get("project_title", "")[:100],
-                    "agency": p.get("agency_ic_admin", "NIH"),
-                    "amount_usd": p.get("award_amount"),
-                    "fiscal_year": p.get("fiscal_year"),
-                    "project_num": p.get("project_num"),
-                    "source": "NIH RePORTER (US public domain)",
-                    "url": f"https://reporter.nih.gov/project-details/{p.get('appl_id')}",
-                })
+
+        def _fetch_nih_grants():
+            r = _req.post(nih_url, json=_nih_payload, timeout=15)
+            results = []
+            if r.ok:
+                for p in r.json().get("results", [])[:2]:
+                    results.append({
+                        "type": "NIH Grant",
+                        "title": p.get("project_title", "")[:100],
+                        "agency": p.get("agency_ic_admin", "NIH"),
+                        "amount_usd": p.get("award_amount"),
+                        "fiscal_year": p.get("fiscal_year"),
+                        "project_num": p.get("project_num"),
+                        "source": "NIH RePORTER (US public domain)",
+                        "url": f"https://reporter.nih.gov/project-details/{p.get('appl_id')}",
+                    })
+            return results
+
+        nih_grants = await asyncio.to_thread(_fetch_nih_grants)
+        intel["funding_opportunities"].extend(nih_grants)
     except Exception as e:
         logger.warning("NIH Reporter query failed: %s", e)
 
