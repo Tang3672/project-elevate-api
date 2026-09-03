@@ -195,11 +195,9 @@ async def search_preprints(query: str, max_results: int = 3) -> List[Dict]:
     """Search bioRxiv and medRxiv for cutting-edge preprints."""
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-            # medRxiv API
-            r = await client.get(
-                "https://api.biorxiv.org/details/medrxiv/2024-01-01/2026-12-31/0/json",
-            )
-            # Use search via Europe PMC which indexes preprints
+            # Use Europe PMC which indexes preprints from bioRxiv and medRxiv
+            # (the direct biorxiv.org endpoint was previously fetched but its
+            # result was never used — removed to eliminate the dead HTTP call)
             r2 = await client.get(
                 "https://www.ebi.ac.uk/europepmc/webservices/rest/search",
                 params={
@@ -321,8 +319,9 @@ async def search_sec_filings(company_names: List[str]) -> List[Dict]:
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:
             for company in company_names[:3]:
                 # Search EDGAR full-text search
+                _startdt = f"{datetime.now().year - 3}-01-01"
                 r = await client.get(
-                    "https://efts.sec.gov/LATEST/search-index?q=%22" + company.replace(" ", "+") + "%22&dateRange=custom&startdt=2023-01-01&forms=10-K",
+                    "https://efts.sec.gov/LATEST/search-index?q=%22" + company.replace(" ", "+") + f"%22&dateRange=custom&startdt={_startdt}&forms=10-K",
                 )
                 if r.status_code == 200:
                     hits = r.json().get("hits", {}).get("hits", [])
@@ -509,7 +508,8 @@ async def aggregate_all_sources(
         "digital_health":      f"{disease_name} digital health software clinical evidence",
     }
     query = domain_query_map.get(sub_expert_id, disease_name)
-    news_query = f"{disease_name} FDA approval clinical trial 2024 2025"
+    _cur_yr = datetime.now().year
+    news_query = f"{disease_name} FDA approval clinical trial {_cur_yr - 1} {_cur_yr}"
     grant_query = f"{disease_name} treatment therapy"
 
     # Domain-specific drug name queries for pricing/market data

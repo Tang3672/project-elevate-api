@@ -380,10 +380,27 @@ async def eval_metrics(institution_id: Optional[str] = None) -> dict:
                            AVG(CASE WHEN abstention_required THEN 1.0 ELSE 0.0 END) AS abstention_rate
                     FROM reports
                 """)
-            actions = await conn.fetch(
-                "SELECT user_action, COUNT(*) AS c FROM report_outcomes WHERE user_action IS NOT NULL GROUP BY user_action")
-            outcomes = await conn.fetch(
-                "SELECT outcome, COUNT(*) AS c FROM report_outcomes WHERE outcome IS NOT NULL GROUP BY outcome")
+            # BUG-XX: report_outcomes queries were not scoped by institution_id, causing
+            # cross-institution data leakage in action_counts and outcome_counts.
+            # Scope to matching report_ids when institution_id is provided.
+            if institution_id:
+                actions = await conn.fetch(
+                    "SELECT user_action, COUNT(*) AS c FROM report_outcomes "
+                    "WHERE user_action IS NOT NULL "
+                    "  AND report_id IN (SELECT report_id FROM reports WHERE institution_id = $1) "
+                    "GROUP BY user_action",
+                    institution_id)
+                outcomes = await conn.fetch(
+                    "SELECT outcome, COUNT(*) AS c FROM report_outcomes "
+                    "WHERE outcome IS NOT NULL "
+                    "  AND report_id IN (SELECT report_id FROM reports WHERE institution_id = $1) "
+                    "GROUP BY outcome",
+                    institution_id)
+            else:
+                actions = await conn.fetch(
+                    "SELECT user_action, COUNT(*) AS c FROM report_outcomes WHERE user_action IS NOT NULL GROUP BY user_action")
+                outcomes = await conn.fetch(
+                    "SELECT outcome, COUNT(*) AS c FROM report_outcomes WHERE outcome IS NOT NULL GROUP BY outcome")
             action_counts = {a["user_action"]: a["c"] for a in actions}
             total_actions = sum(action_counts.values()) or 0
             accepted = action_counts.get("accepted", 0)
