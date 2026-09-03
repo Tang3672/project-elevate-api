@@ -45,11 +45,13 @@ async def embed_publications(disease_label: Optional[str] = None,
 
     async with pool.acquire() as conn:
         where = "WHERE embedding IS NULL AND abstract IS NOT NULL"
+        params: list = [limit]
         if disease_label:
-            where += f" AND disease_label = '{disease_label.replace(chr(39), '')}'"
+            params.append(disease_label)
+            where += f" AND disease_label = ${len(params)}"
 
         rows = await conn.fetch(
-            f"SELECT id, title, abstract FROM publication {where} LIMIT $1", limit
+            f"SELECT id, title, abstract FROM publication {where} LIMIT $1", *params
         )
 
         for i in range(0, len(rows), _EMBED_BATCH):
