@@ -1681,14 +1681,22 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
         except Exception as e_pop:
             logger.debug("Population lookup failed: %s", e_pop)
 
-        deriv = generate_market_sizing_derivation(
-            idea=idea,
-            product_type=product_type,
-            disease_name=disease_name,
-            therapeutic_area=ta_for_deriv,
-            us_patient_population=us_pop,
-            sub_expert_id=sub_expert_id or "",   # H-07: research tools routed to buyer model
-            user_params=clarify_answers or {},
+        # generate_market_sizing_derivation is synchronous and may invoke a
+        # blocking requests.post() call (NIH RePORTER query) for research-tool
+        # archetypes.  Run it in a thread-pool executor so it never stalls the
+        # async event loop.
+        _deriv_loop = asyncio.get_event_loop()
+        deriv = await _deriv_loop.run_in_executor(
+            None,
+            lambda: generate_market_sizing_derivation(
+                idea=idea,
+                product_type=product_type,
+                disease_name=disease_name,
+                therapeutic_area=ta_for_deriv,
+                us_patient_population=us_pop,
+                sub_expert_id=sub_expert_id or "",   # H-07: research tools routed to buyer model
+                user_params=clarify_answers or {},
+            ),
         )
         market_derivation_text = format_derivation_for_prompt(deriv)
         logger.info("Market sizing derivation generated: TAM=%s SAM=%s", deriv.tam_fmt, deriv.sam_fmt)

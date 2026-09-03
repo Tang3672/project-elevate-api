@@ -456,7 +456,8 @@ async def get_global_burden_data(disease_query: str) -> List[Dict]:
                 "citation": "GBD 2021 Diseases and Injuries Collaborators. Lancet. 2024.",
                 "type": "epidemiology",
             }]
-    except Exception:
+    except Exception as e:
+        logger.warning("get_global_burden_data failed: %s", e)
         return []
 
 

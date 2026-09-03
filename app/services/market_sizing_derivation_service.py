@@ -446,7 +446,9 @@ def _bass_for_ta(ta: str) -> tuple[float, float]:
 
 
 def _bass_cumulative(t: float, p: float, q: float) -> float:
-    if p + q <= 0 or t <= 0:
+    # Guard p <= 0 separately: `p + q > 0` passes when p=0 and q>0,
+    # but q/p would then raise ZeroDivisionError in the formula below.
+    if p + q <= 0 or p <= 0 or t <= 0:
         return 0.0
     exp_t = math.exp(-(p + q) * t)
     return (1.0 - exp_t) / (1.0 + (q / p) * exp_t)
