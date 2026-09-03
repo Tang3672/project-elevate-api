@@ -22,6 +22,7 @@ We store per-disease:
 import asyncio
 import logging
 import time
+from datetime import datetime
 from typing import Optional
 
 import requests
@@ -130,12 +131,16 @@ def _count_pubmed(term: str) -> int:
 
 def _compute_5yr_trend(base_query: str) -> float:
     """
-    Compare publication count in last 2 years vs 3-5 years ago.
+    Compare publication count in last 3 years vs 3-5 years ago.
     Returns growth rate: >1 = growing field, <1 = declining.
+    Year windows are computed dynamically so they stay current without code changes.
     """
-    recent    = _count_pubmed(f"({base_query}) AND (\"2024\"[dp] OR \"2025\"[dp] OR \"2026\"[dp])")
+    current = datetime.now().year
+    recent_years = " OR ".join(f'"{y}"[dp]' for y in range(current - 2, current + 1))
+    prior_years  = " OR ".join(f'"{y}"[dp]' for y in range(current - 5, current - 2))
+    recent    = _count_pubmed(f"({base_query}) AND ({recent_years})")
     time.sleep(_DELAY)
-    prior     = _count_pubmed(f"({base_query}) AND (\"2021\"[dp] OR \"2022\"[dp] OR \"2023\"[dp])")
+    prior     = _count_pubmed(f"({base_query}) AND ({prior_years})")
     if prior == 0:
         return 1.0
     return round((recent / max(prior, 1)) * (5 / 3), 2)   # normalise for different time windows
@@ -197,10 +202,10 @@ async def load_pubmed_signals(disease_names: list[str] | None = None) -> dict[st
                             INSERT INTO disease_burden
                                 (mondo_id, disease_label, source_name, source_code, commercial_safe,
                                  metric, value, unit, location, year)
-                            VALUES ($1,$2,'pubmed','ncbi_eutils',TRUE,$3,$4,$5,'Global',2026)
+                            VALUES ($1,$2,'pubmed','ncbi_eutils',TRUE,$3,$4,$5,'Global',$6)
                             ON CONFLICT (mondo_id, source_name, metric, location, year, age_group, sex)
                             DO UPDATE SET value=EXCLUDED.value, fetched_at=NOW()
-                        """, mondo_id, disease, metric, value, unit)
+                        """, mondo_id, disease, metric, value, unit, datetime.now().year)
             except Exception as e:
                 logger.warning("PubMed DB store failed for %s: %s", disease, e)
 
