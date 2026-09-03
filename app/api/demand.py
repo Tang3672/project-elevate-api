@@ -109,7 +109,7 @@ async def init_demand_tables():
 
 @demand_router.post("/search")
 async def search_demand_signals(
-    query: str,
+    query: str = Query(..., max_length=2000),
     top_k: int = Query(default=15, ge=1, le=50),
     min_similarity: float = Query(default=0.55, ge=0.0, le=1.0),
     source: Optional[str] = Query(default=None, description="Filter by source name"),
