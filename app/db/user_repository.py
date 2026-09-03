@@ -555,12 +555,22 @@ async def try_consume_report(user_id: int) -> dict:
 
 
 async def update_user_plan(user_id: int, plan_name: str):
-    """Set the plan name for a user (called from Stripe webhook)."""
+    """Set the plan name for a user (called from Stripe webhook).
+
+    BUG-51-B: previously only reset monthly_reports_used, not free_reports_used.
+    The actual quota gate in _enforce_quota() uses free_reports_used (a lifetime
+    counter).  Without resetting it on plan change, a user who exhausted the free
+    tier (3 reports) would upgrade to explorer (limit=5) and find only 2 slots
+    remaining — then be permanently blocked even after monthly billing resets,
+    because the monthly reset CTE only resets monthly_reports_used, not
+    free_reports_used.  Both counters must be zeroed on every plan transition.
+    """
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute(
             "UPDATE users SET plan_name = $1, "
             "monthly_reset_at = date_trunc('month', NOW()) + interval '1 month', "
-            "monthly_reports_used = 0 WHERE id = $2",
+            "monthly_reports_used = 0, "
+            "free_reports_used = 0 WHERE id = $2",
             plan_name, user_id
         )

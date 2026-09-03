@@ -251,7 +251,16 @@ async def _handle_subscription_updated(sub: dict):
 
 
 async def _handle_subscription_deleted(sub: dict):
-    """Subscription cancelled/expired — mark as inactive."""
+    """Subscription cancelled/expired — mark as inactive and downgrade plan.
+
+    BUG-51-C: previously only set subscription_status='canceled' but left
+    plan_name unchanged (e.g., 'explorer').  _enforce_quota() derives the
+    quota limit from plan_name, so cancelled users retained their old plan
+    limit indefinitely — 5 reports for explorer, 20 for innovator — because
+    plan_name was never reset.  Reset plan_name to 'free' (the base unpaid
+    tier) so that after their period ends they are subject to the 3-report
+    free-tier limit, not their former paid plan's limit.
+    """
     customer_id = sub.get("customer")
     user_id = await _get_user_id_by_customer(customer_id)
     if not user_id:
@@ -260,7 +269,8 @@ async def _handle_subscription_deleted(sub: dict):
         user_id             = user_id,
         subscription_status = "canceled",
     )
-    logger.info(f"User {user_id} subscription canceled")
+    await update_user_plan(user_id, "free")
+    logger.info(f"User {user_id} subscription canceled — plan downgraded to free")
 
 
 async def _get_user_id_by_customer(customer_id: str) -> int | None:

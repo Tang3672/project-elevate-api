@@ -146,7 +146,12 @@ async def _enforce_quota(current_user):
                 # the column is "plan_name".  Using the wrong key meant every
                 # non-waitlist free user resolved plan="none", which is absent from
                 # _PLAN_LIMITS, so limit=None and the quota gate was never applied.
-                plan       = user.get("plan_name", "free")
+                # BUG-51-A: user.get("plan_name", "free") returns None (not "free")
+                # when plan_name IS NULL in the DB — dict.get() only uses the default
+                # when the key is absent, not when the value is None.  With plan=None,
+                # _PLAN_LIMITS.get(None)=None and _PLAN_LIMITS.get(sub_status) is also
+                # likely None, giving limit=None and bypassing the quota gate entirely.
+                plan       = user.get("plan_name") or "free"
                 used       = user.get("free_reports_used", 0) or 0
                 limit      = _PLAN_LIMITS.get(plan) or _PLAN_LIMITS.get(sub_status)
 
@@ -716,6 +721,27 @@ async def save_market_sizing_override(
     if not report_id:
         raise HTTPException(status_code=400, detail="report_id required")
     user_id = (current_user or {}).get("id")
+
+    # BUG-51-D: IDOR — endpoint previously had no ownership check. Any caller
+    # (even unauthenticated) could save overrides for any report_id, which
+    # corrupts the global override ledger used as training data.
+    # Fix: if the job has an owner_id, only that user may save overrides.
+    try:
+        from app.services.report_jobs import get_job as _get_job
+        _job = await _get_job(str(report_id))
+        if _job:
+            _job_owner = _job.get("owner_id")
+            if _job_owner:
+                if not user_id or str(user_id) != _job_owner:
+                    raise HTTPException(
+                        status_code=403,
+                        detail="Not authorised to override this report",
+                    )
+    except HTTPException:
+        raise
+    except Exception as _oc_err:
+        logger.warning("market-sizing-override ownership check failed (non-fatal): %s", _oc_err)
+
     step_overrides = body.get("step_overrides", {})
     rationale      = body.get("rationale", "")
     row_id = await _repo.save_override(
