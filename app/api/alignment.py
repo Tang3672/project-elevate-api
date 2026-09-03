@@ -2840,8 +2840,9 @@ async def _parse_assumption_nl(text: str, state: dict, ops: list) -> dict:
     """Call Claude to parse NL text into market model operations."""
     import os, json as _json
     import httpx
+    from app.core.config import settings as _settings
 
-    api_key = os.getenv("ANTHROPIC_API_KEY")
+    api_key = os.getenv("ANTHROPIC_API_KEY") or _settings.ANTHROPIC_API_KEY
     if not api_key:
         raise ValueError("ANTHROPIC_API_KEY not set")
 
@@ -3054,8 +3055,9 @@ async def regenerate_section(
     data-node-tagged spans so the numbers remain live after injection.
     """
     import os, httpx
+    from app.core.config import settings as _settings
 
-    api_key = os.getenv("ANTHROPIC_API_KEY")
+    api_key = os.getenv("ANTHROPIC_API_KEY") or _settings.ANTHROPIC_API_KEY
     if not api_key:
         raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY not configured")
 

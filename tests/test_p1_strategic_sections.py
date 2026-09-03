@@ -284,7 +284,13 @@ class TestAdversarialReviewService:
 
     def test_run_adversarial_review_no_api_key_returns_empty(self):
         import os
+        from app.core.config import settings
         orig = os.environ.pop("ANTHROPIC_API_KEY", None)
+        orig_settings_key = settings.ANTHROPIC_API_KEY
+        # Clear both sources so the service sees no key — the service now checks
+        # both os.getenv and settings.ANTHROPIC_API_KEY to handle the Railway
+        # trailing-space env-var-name bug.
+        settings.ANTHROPIC_API_KEY = ""
         try:
             report = {"recommended_next_steps": ["Apply to NSF SBIR", "Run PI interviews"]}
             result = _run(run_adversarial_review(report, "wearable data logger"))
@@ -295,6 +301,7 @@ class TestAdversarialReviewService:
         finally:
             if orig:
                 os.environ["ANTHROPIC_API_KEY"] = orig
+            settings.ANTHROPIC_API_KEY = orig_settings_key
 
     def test_run_adversarial_review_empty_report_returns_empty(self):
         result = _run(run_adversarial_review({}, "wearable"))

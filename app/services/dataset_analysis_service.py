@@ -48,6 +48,8 @@ from typing import Optional, List, Dict
 import httpx
 import numpy as np
 
+from app.core.config import settings
+
 logger = logging.getLogger(__name__)
 
 HAIKU_MODEL = "claude-haiku-4-5-20251001"
@@ -165,7 +167,7 @@ async def _haiku_interpret(
     data_type: str,
 ) -> dict:
     """Use Haiku to interpret statistics in biomedical context."""
-    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    api_key = os.getenv("ANTHROPIC_API_KEY") or settings.ANTHROPIC_API_KEY
     if not api_key:
         return {}
 
