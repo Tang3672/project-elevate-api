@@ -403,6 +403,10 @@ async def track_competitor_milestones(condition: str, product_desc: str) -> List
                         "messages": [{"role": "user", "content": f"Search: {q}\nList recent events with dates. Format: EVENT | DATE | COMPANY | URL"}],
                     }
                 )
+                # BUG-E (same class as check_report_staleness): raise so that HTTP 4xx/5xx
+                # errors are caught by the except block and logged as warnings rather than
+                # silently producing empty results when the API returns an error body.
+                r.raise_for_status()
                 for block in r.json().get("content", []):
                     if block.get("type") == "text":
                         all_results += block.get("text", "") + "\n"
@@ -514,6 +518,9 @@ async def compute_signal_delta(watchlist: dict, days_back: int = 30) -> dict:
                         )}],
                     }
                 )
+                # BUG-E (same class as check_report_staleness): raise so that HTTP 4xx/5xx
+                # errors are caught by the except block and logged, not silently discarded.
+                r.raise_for_status()
                 text = ""
                 for block in r.json().get("content", []):
                     if block.get("type") == "text":

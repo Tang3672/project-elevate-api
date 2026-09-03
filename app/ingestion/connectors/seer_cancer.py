@@ -172,7 +172,12 @@ def get_cancer_incidence(cancer_type: str) -> Optional[dict]:
         "nsclc": "Non-Small Cell Lung Cancer",
         "non-small cell": "Non-Small Cell Lung Cancer",
         "lung cancer": "Non-Small Cell Lung Cancer",
-        "kras": "Non-Small Cell Lung Cancer",        # KRAS mutations are in NSCLC
+        "kras g12c": "Non-Small Cell Lung Cancer",   # KRAS G12C (sotorasib/adagrasib) is an NSCLC target
+        # NOTE: "kras" without qualifier is intentionally NOT aliased here because KRAS
+        # mutations also drive Colorectal Cancer (~40%) and Pancreatic Cancer (~90%).
+        # A bare "kras" query for those cancers must fall through to the direct substring
+        # match or a disease-specific alias (e.g. "colorectal", "pdac") rather than
+        # silently returning NSCLC data.  Only the G12C mutation is NSCLC-specific.
         "egfr": "Non-Small Cell Lung Cancer",
         "alk+": "Non-Small Cell Lung Cancer",
         "pdl1": "Non-Small Cell Lung Cancer",
