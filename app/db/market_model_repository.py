@@ -253,6 +253,6 @@ def _row(row) -> Optional[dict]:
     if isinstance(d.get("nodes"), str):
         try:
             d["nodes"] = json.loads(d["nodes"])
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to parse JSONB nodes field: %s", e)
     return d

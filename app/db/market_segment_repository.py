@@ -220,6 +220,7 @@ def _row_to_dict(row) -> dict:
         if isinstance(d.get(jsonb_field), str):
             try:
                 d[jsonb_field] = json.loads(d[jsonb_field])
-            except Exception:
+            except Exception as e:
+                logger.warning("Failed to parse JSONB field %r: %s", jsonb_field, e)
                 d[jsonb_field] = []
     return d

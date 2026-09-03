@@ -84,7 +84,8 @@ async def etl_status(limit: int = 20):
                 LIMIT $1
             """, limit)
             return {"runs": [dict(r) for r in rows]}
-        except Exception:
+        except Exception as e:
+            logger.debug("etl_run table not yet initialized: %s", e)
             return {"runs": [], "note": "etl_run table not yet initialized"}
 
 
@@ -167,6 +168,7 @@ async def universe_stats():
                 "top5":    [{"disease": r["disease_label"], "score": r["score"], "tier": r["tier"]} for r in top5],
             }
         except Exception as e:
+            logger.debug("disease_scored table not yet created or empty: %s", e)
             return {"total_diseases": 0, "note": "disease_scored table empty or not yet created", "error": str(e)}
 
 

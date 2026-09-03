@@ -89,7 +89,8 @@ def _build_ical(tl: dict) -> bytes:
 
         try:
             d_start = date.fromisoformat(start_iso[:10])
-        except Exception:
+        except Exception as e:
+            logger.debug("iCal: skipping event %r — unparseable date %r: %s", title, start_iso, e)
             return
 
         if all_day:

@@ -361,8 +361,8 @@ async def _run_regulatory_panel(
         loa_frac, loa_pct, citation = get_ptrs(sub_expert_id, development_phase)
         calibrated_loa_pct  = loa_pct
         calibrated_citation = citation
-    except Exception:
-        pass  # Fall back to Haiku estimate if ptrs_tables unavailable
+    except Exception as e:
+        logger.debug("ptrs_tables unavailable, falling back to Haiku estimate: %s", e)
 
     domain_hint = _regulatory_hint(sub_expert_id)
     _sid = (sub_expert_id or "").lower()
@@ -453,8 +453,8 @@ async def _run_commercial_panel(
     try:
         from app.services.deal_comps import format_deal_comps_for_prompt
         deal_comp_block = format_deal_comps_for_prompt(sub_expert_id, development_phase)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("deal_comps unavailable, proceeding without deal comparables: %s", e)
     system = (
         "You are a biotech market access and commercialization analyst.\n"
         + (f"Domain context: {domain_hint}\n" if domain_hint else "")
