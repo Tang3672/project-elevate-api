@@ -117,10 +117,13 @@ _PLAN_LIMITS = {
 
 async def _enforce_quota(current_user):
     """Server-side quota gate (BEFORE calling Claude). Raises HTTPException(402)
-    if over limit. Frontend checks are UX only; this is the real gate."""
+    if over limit. Also atomically consumes one quota slot so that concurrent
+    requests cannot both pass the gate before either increments the counter
+    (TOCTOU race fix: check and increment are now a single SQL UPDATE).
+    Frontend checks are UX only; this is the real gate."""
     try:
         if current_user and current_user.get("email") not in _DEV_EMAILS:
-            from app.db.user_repository import get_user_by_id
+            from app.db.user_repository import get_user_by_id, try_consume_free_report_atomic
             user = await get_user_by_id(current_user["id"])
             if user:
                 sub_status = user.get("subscription_status", "none")
@@ -143,12 +146,19 @@ async def _enforce_quota(current_user):
                 if on_waitlist and used < 10:
                     limit = 10
 
-                if limit is not None and used >= limit:
-                    raise HTTPException(status_code=402, detail={
-                        "error": "quota_exceeded",
-                        "message": f"You've used all {limit} analyses on your plan. Upgrade to continue.",
-                        "used": used, "limit": limit,
-                    })
+                if limit is not None:
+                    # Atomically consume a quota slot.  The UPDATE's WHERE clause
+                    # (`free_reports_used < limit`) ensures that only one of N
+                    # concurrent requests gets the last slot — eliminating TOCTOU.
+                    allowed = await try_consume_free_report_atomic(
+                        current_user["id"], limit
+                    )
+                    if not allowed:
+                        raise HTTPException(status_code=402, detail={
+                            "error": "quota_exceeded",
+                            "message": f"You've used all {limit} analyses on your plan. Upgrade to continue.",
+                            "used": used, "limit": limit,
+                        })
     except HTTPException:
         raise
     except Exception as quota_e:
@@ -156,15 +166,10 @@ async def _enforce_quota(current_user):
 
 
 async def _increment_usage(current_user):
-    try:
-        if current_user and current_user.get("email") not in _DEV_EMAILS:
-            from app.db.user_repository import get_user_by_id, increment_free_report_count
-            user = await get_user_by_id(current_user["id"])
-            status = user.get("subscription_status", "none") if user else "none"
-            if status not in ("active", "trialing"):
-                await increment_free_report_count(current_user["id"])
-    except Exception as inc_e:
-        logger.warning(f"Failed to increment report count: {inc_e}")
+    # Usage is now consumed atomically inside _enforce_quota.
+    # This stub is retained so that call-sites that still reference it
+    # don't raise NameError during the transition period; it is a no-op.
+    pass
 
 
 def _idea_from_payload(payload: "PIReportRequest") -> str:

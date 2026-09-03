@@ -405,6 +405,27 @@ async def increment_free_report_count(user_id: int):
             user_id
         )
 
+
+async def try_consume_free_report_atomic(user_id: int, limit: int) -> bool:
+    """
+    Atomically check quota and consume one slot in a single SQL statement.
+    Returns True if the slot was consumed (allowed), False if quota is exhausted.
+
+    The WHERE clause `free_reports_used < $2` acts as the atomic guard —
+    two concurrent requests racing at limit-1 will both attempt the UPDATE,
+    but only one will match the WHERE condition and return a row.  The other
+    gets no row back and is correctly rejected, eliminating the TOCTOU race
+    that existed when check and increment were separate round-trips.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        result = await conn.fetchrow(
+            "UPDATE users SET free_reports_used = free_reports_used + 1 "
+            "WHERE id = $1 AND free_reports_used < $2 RETURNING id",
+            user_id, limit,
+        )
+    return result is not None
+
 async def get_free_reports_used(user_id: int) -> int:
     """Get how many free reports a user has used."""
     pool = await get_pool()
