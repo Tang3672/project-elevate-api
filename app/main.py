@@ -89,6 +89,9 @@ async def _init_background():
     _JWT_DEFAULT = "project-elevate-dev-secret-change-in-production"
     if settings.JWT_SECRET == _JWT_DEFAULT:
         _log.warning("⚠️  JWT_SECRET is the default dev value — all tokens are forgeable. Set JWT_SECRET in production.")
+    # BUG-31a: short JWT secrets (< 32 chars) are trivially brute-forced; warn loudly in any env
+    elif len(settings.JWT_SECRET) < 32:
+        _log.warning("⚠️  JWT_SECRET is only %d characters — use at least 32 random characters to prevent brute-force forgery.", len(settings.JWT_SECRET))
     try:
         await init_db()
         await ensure_demand_signals_table()

@@ -366,7 +366,8 @@ async def submit_feedback(
             recommendation_id=req.recommendation_id, notes=req.notes,
             outcome_date=req.outcome_date, institution_id=req.institution_id)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.warning("submit_feedback validation error: %s", e)
+        raise HTTPException(status_code=400, detail="Invalid feedback — check 'user_action' and 'outcome' values")
 
 
 @router.get("/outcomes")
@@ -468,7 +469,8 @@ async def review_update(
                                    assigned_reviewer=req.assigned_reviewer,
                                    next_action=req.next_action)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.warning("review_update validation error: %s", e)
+        raise HTTPException(status_code=400, detail="Invalid review status value")
 
 
 @router.get("/examples")
@@ -1232,7 +1234,7 @@ async def classify_product_endpoint(
         }
     except Exception as exc:
         logger.error("classify_product_endpoint failed: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Product classification failed")
 
 
 @router.post("/clarify")
@@ -1743,7 +1745,8 @@ async def analyze_experimental_data(
             "generated_at": datetime.now(timezone.utc).isoformat() + "Z",
         }
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.warning("analyze_dataset validation error: %s", e)
+        raise HTTPException(status_code=400, detail="Invalid dataset format — ensure CSV has at least one numeric data column")
     except Exception as e:
         logger.error("Dataset analysis failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Dataset analysis failed")
@@ -2633,9 +2636,11 @@ async def market_model_override(
         logger.warning("Market model assertion failed for report %s: %s", report_id, e)
         raise HTTPException(status_code=422, detail="Invalid model state")
     except PermissionError as e:
-        raise HTTPException(status_code=403, detail=str(e))
+        logger.warning("market_model_set_override permission denied for report %s: %s", report_id, e)
+        raise HTTPException(status_code=403, detail="This market model node is not editable")
     except KeyError as e:
-        raise HTTPException(status_code=400, detail=f"Unknown node: {e}")
+        logger.warning("market_model_set_override unknown node in report %s: %s", report_id, e)
+        raise HTTPException(status_code=400, detail="Unknown market model node")
 
     await store.save(new_m)
 
@@ -2691,7 +2696,8 @@ async def market_model_add_gate(
     try:
         new_m = old_m.with_gate(body.target_node_id, gate)
     except (ValueError, KeyError) as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.warning("market_model_add_gate error for report %s: %s", report_id, e)
+        raise HTTPException(status_code=400, detail="Invalid gate configuration — check target node")
 
     await store.save(new_m)
 
@@ -2720,7 +2726,8 @@ async def market_model_remove_gate(
     try:
         new_m = old_m.without_gate(gate_id)
     except (ValueError, KeyError) as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.warning("market_model_remove_gate error for report %s gate %s: %s", report_id, gate_id, e)
+        raise HTTPException(status_code=400, detail="Gate not found or invalid operation")
     except Exception as e:
         # BUG-30c: bare Exception catch was leaking internal error text to the client.
         # Log it server-side and return a generic message.
@@ -2925,8 +2932,8 @@ async def parse_assumption(
     try:
         result = await _parse_assumption_nl(body.text, body.state, body.ops)
     except Exception as exc:
-        logger.error("assumption parse failed: %s", exc)
-        raise HTTPException(status_code=502, detail=f"LLM parse error: {exc}")
+        logger.error("assumption parse failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=502, detail="Assumption parsing failed — try rephrasing your input")
 
     _DERIVED = {"tam", "sam", "som"}
     for _op in result.get("ops", []):
@@ -3097,8 +3104,8 @@ async def regenerate_section(
         resp.raise_for_status()
         raw = resp.json()["content"][0]["text"].strip().strip('"')
     except Exception as exc:
-        logger.error("regenerate_section failed: %s", exc)
-        raise HTTPException(status_code=502, detail=str(exc))
+        logger.error("regenerate_section failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=502, detail="Section regeneration failed — please try again")
 
     # Validate: no numeric market literals should remain after stripping {{tokens}}.
     # If the LLM wrote "$527K" or "1,666 labs" instead of {{som}}/{{buyer_population}},
@@ -3146,8 +3153,8 @@ async def regenerate_section(
         except HTTPException:
             raise
         except Exception as _exc2:
-            logger.error("regenerate_section retry failed: %s", _exc2)
-            raise HTTPException(status_code=502, detail=str(_exc2))
+            logger.error("regenerate_section retry failed: %s", _exc2, exc_info=True)
+            raise HTTPException(status_code=502, detail="Section regeneration retry failed — please try again")
 
     # Replace {{key}} placeholders with formatted + data-node-tagged spans
     FMT = {
