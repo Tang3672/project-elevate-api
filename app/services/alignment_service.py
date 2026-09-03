@@ -1,7 +1,8 @@
 import asyncio
-import os
 
-ENGINE_BUILD_SHA: str = os.environ.get("RAILWAY_GIT_COMMIT_SHA", "dev")[:8]
+from app.core.config import settings
+
+ENGINE_BUILD_SHA: str = (settings.RAILWAY_GIT_COMMIT_SHA or "dev")[:8]
 """
 PI Alignment Service v2
 =======================

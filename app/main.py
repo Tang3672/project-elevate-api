@@ -143,9 +143,8 @@ async def _init_background():
     # Railway sets RAILWAY_REPLICA_ID on each instance; when it is absent the app
     # runs on a single instance (scheduler always runs).  On multi-replica deploys
     # set SCHEDULER_PRIMARY=true on exactly one service/instance via Railway env vars.
-    import os as _os
-    _replica_id  = _os.environ.get("RAILWAY_REPLICA_ID", "")
-    _is_primary  = (not _replica_id) or (_os.environ.get("SCHEDULER_PRIMARY", "").lower() == "true")
+    _replica_id  = settings.RAILWAY_REPLICA_ID
+    _is_primary  = (not _replica_id) or (settings.SCHEDULER_PRIMARY.lower() == "true")
 
     # Start the ingestion scheduler if enabled
     if settings.ENABLE_SCHEDULER and _is_primary:
@@ -234,7 +233,7 @@ async def health_check():
 
 @app.get("/version")
 async def get_version():
-    import subprocess, os
+    import subprocess
     try:
         commit = subprocess.check_output(
             ["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL
@@ -243,8 +242,8 @@ async def get_version():
             ["git", "rev-parse", "--abbrev-ref", "HEAD"], stderr=subprocess.DEVNULL
         ).decode().strip()
     except Exception:
-        commit = os.getenv("RAILWAY_GIT_COMMIT_SHA", "unknown")
-        branch = os.getenv("RAILWAY_GIT_BRANCH", "unknown")
+        commit = settings.RAILWAY_GIT_COMMIT_SHA or "unknown"
+        branch = settings.RAILWAY_GIT_BRANCH or "unknown"
     return {"commit": commit, "branch": branch}
 
 

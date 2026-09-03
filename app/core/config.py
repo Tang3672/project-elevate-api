@@ -59,6 +59,12 @@ class Settings(BaseSettings):
     # CORS extra origins (comma-separated)
     ALLOWED_ORIGINS: str = ""
 
+    # Railway deployment metadata (read-only; injected by the platform)
+    RAILWAY_GIT_COMMIT_SHA: str = ""
+    RAILWAY_GIT_BRANCH:     str = ""
+    RAILWAY_REPLICA_ID:     str = ""
+    SCHEDULER_PRIMARY:      str = ""
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

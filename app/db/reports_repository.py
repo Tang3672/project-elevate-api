@@ -289,6 +289,14 @@ async def list_review_queue(institution_id: Optional[str] = None, status: str = 
     Callers MUST supply either institution_id or caller_user_id so the query is
     always scoped — never returns the full cross-institution table.
     """
+    # Guard: refuse to run unscoped — both being None would dump rows from every
+    # institution (up to the limit cap), violating the per-owner isolation guarantee.
+    if not institution_id and caller_user_id is None:
+        logger.error(
+            "list_review_queue: called without any owner scope "
+            "(institution_id=%r, caller_user_id=None); returning empty to prevent "
+            "cross-institution data exposure.", institution_id)
+        return []
     try:
         from app.db.database import get_pool
         pool = await get_pool()
@@ -417,4 +425,4 @@ async def eval_metrics(institution_id: Optional[str] = None) -> dict:
             }
     except Exception as e:
         logger.warning("eval_metrics failed: %s", e)
-        return {"report_count": 0, "error": str(e)}
+        return {"report_count": 0, "error": "metrics unavailable"}

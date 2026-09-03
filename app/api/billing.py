@@ -147,6 +147,12 @@ async def stripe_webhook(request: Request):
         elif event_type == "customer.subscription.deleted":
             await _handle_subscription_deleted(data)
 
+        else:
+            # Log unhandled event types so they surface in monitoring — silently
+            # returning 200 is correct (Stripe must not retry), but a log entry
+            # is essential for detecting events we should start handling.
+            logger.info("Stripe webhook: unhandled event type %r — acknowledging without action", event_type)
+
     except Exception as e:
         logger.error(f"Webhook processing error for {event_type}: {e}")
         # Return 200 so Stripe doesn't retry — log and investigate separately
