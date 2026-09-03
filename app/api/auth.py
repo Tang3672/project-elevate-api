@@ -152,8 +152,7 @@ async def login(payload: LoginRequest):
     if not await _loop.run_in_executor(None, verify_password, payload.password, user['password_hash']):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     # Block unverified accounts — dev emails bypass verification for local testing (BUG-10: deduplicated)
-    _DEV_EMAILS = {"test@projectelevate.io", "ijw91021@gmail.com", "admin@projectelevate.io",
-                   "oneonesie100@gmail.com", "lizpeek11@gmail.com", "peek@wustl.edu"}
+    _DEV_EMAILS = {"test@projectelevate.io", "admin@projectelevate.io"}
     if not user.get('email_verified', False) and user.get('email') not in _DEV_EMAILS:
         raise HTTPException(
             status_code=403,

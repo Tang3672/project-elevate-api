@@ -22,9 +22,7 @@ logger = logging.getLogger(__name__)
 
 DEV_EMAILS = {
     "test@medlevate.io",
-    "ijw91021@gmail.com",
     "admin@medlevate.io",
-    "oneonesie100@gmail.com",
 }
 
 # Paths that consume a report quota slot

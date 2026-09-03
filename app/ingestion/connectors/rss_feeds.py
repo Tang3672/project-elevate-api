@@ -168,10 +168,10 @@ async def load_rss_signals(disease_names: list[str] | None = None) -> dict[str, 
                             (mondo_id, disease_label, source_name, source_code, commercial_safe,
                              metric, value, unit, location, year)
                         VALUES ($1,$2,'rss_feeds','multi_feed',TRUE,
-                                'rss_recent_mention_count',$3,'mentions','Global',2026)
+                                'rss_recent_mention_count',$3,'mentions','Global',$4)
                         ON CONFLICT (mondo_id, source_name, metric, location, year, age_group, sex)
                         DO UPDATE SET value=EXCLUDED.value, fetched_at=NOW()
-                    """, mondo_id, disease, float(len(matched)))
+                    """, mondo_id, disease, float(len(matched)), datetime.now().year)
             except Exception as e:
                 logger.warning("RSS DB store failed for %s: %s", disease, e)
 

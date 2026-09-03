@@ -22,6 +22,7 @@ requests and cache results for 24h.
 import asyncio
 import logging
 import time
+from datetime import datetime
 from typing import Optional
 
 import requests
@@ -181,10 +182,10 @@ async def load_gdelt_signals(disease_names: list[str] | None = None) -> dict[str
                             INSERT INTO disease_burden
                                 (mondo_id, disease_label, source_name, source_code, commercial_safe,
                                  metric, value, unit, location, year)
-                            VALUES ($1,$2,'gdelt','gdelt',TRUE,$3,$4,$5,'Global',2026)
+                            VALUES ($1,$2,'gdelt','gdelt',TRUE,$3,$4,$5,'Global',$6)
                             ON CONFLICT (mondo_id, source_name, metric, location, year, age_group, sex)
                             DO UPDATE SET value=EXCLUDED.value, fetched_at=NOW()
-                        """, mondo_id, disease, metric, value, unit)
+                        """, mondo_id, disease, metric, value, unit, datetime.now().year)
             except Exception as e:
                 logger.warning("GDELT DB store failed for %s: %s", disease, e)
 

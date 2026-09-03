@@ -104,9 +104,7 @@ async def check_alignment(payload: AlignmentRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-_DEV_EMAILS = {"test@projectelevate.io", "ijw91021@gmail.com",
-               "admin@projectelevate.io", "oneonesie100@gmail.com",
-               "lizpeek11@gmail.com", "peek@wustl.edu"}
+_DEV_EMAILS = {"test@projectelevate.io", "admin@projectelevate.io"}
 _PLAN_LIMITS = {
     "basic":        5,    # Explorer $49
     "starter":      20,   # Innovator $149
