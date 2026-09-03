@@ -3,7 +3,7 @@ CDC Real-Time Surveillance Connectors (Fixed v2)
 """
 import logging
 from typing import AsyncIterator, List
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from app.ingestion.connectors.base import BaseConnector
 from app.models.demand_signal import (
     DemandSignal, SignalSource, SignalType, GeographicScope
@@ -21,7 +21,7 @@ class CDCWastewaterConnector(BaseConnector):
     batch_size = 50
 
     async def fetch(self) -> AsyncIterator[List[DemandSignal]]:
-        cutoff = (datetime.utcnow() - timedelta(days=45)).strftime("%Y-%m-%dT00:00:00")
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=45)).strftime("%Y-%m-%dT00:00:00")
         data = None
         for dataset_id in NWSS_DATASET_IDS:
             try:
@@ -73,7 +73,7 @@ class CDCWastewaterConnector(BaseConnector):
             if detect_val < 1.0:
                 return None
 
-            date_end = (row.get("date_end") or "")[:10] or datetime.utcnow().strftime("%Y-%m-%d")
+            date_end = (row.get("date_end") or "")[:10] or datetime.now(timezone.utc).strftime("%Y-%m-%d")
             pct_val = float(row.get("percentile") or 50)
             ptc_val = float(row.get("ptc_15d") or row.get("pct_15d") or 0)
 
@@ -82,7 +82,7 @@ class CDCWastewaterConnector(BaseConnector):
 
             trend = "increasing" if ptc_val > 5 else "decreasing" if ptc_val < -5 else "stable"
             severity = "high" if pct_val > 75 else "elevated" if pct_val > 50 else "moderate"
-            year = int(date_end[:4]) if date_end else datetime.utcnow().year
+            year = int(date_end[:4]) if date_end else datetime.now(timezone.utc).year
 
             description = (
                 f"CDC NWSS wastewater surveillance for {state} ({date_end}): "
@@ -146,7 +146,7 @@ class CDCFluViewConnector(BaseConnector):
             yield signals[i:i + self.batch_size]
 
     async def _fetch_delphi(self):
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         week = now.isocalendar()[1]
         year = now.year
         epiweeks = f"{year}{week:02d}-{year}{min(week+3,52):02d}"
@@ -198,7 +198,7 @@ class CDCFluViewConnector(BaseConnector):
                     magnitude=ili_val,
                     magnitude_unit="percent of outpatient visits with ILI",
                     national_average=2.5,
-                    data_year=int(epiweek[:4]) if epiweek else datetime.utcnow().year,
+                    data_year=int(epiweek[:4]) if epiweek else datetime.now(timezone.utc).year,
                     data_period=week_str,
                     data_freshness_days=7,
                     source_url="https://www.cdc.gov/fluview/",
@@ -218,7 +218,7 @@ class CDCFluViewConnector(BaseConnector):
         )
         return [DemandSignal(
             source=SignalSource.CDC_FLUVIEW,
-            source_record_id=f"fluview_fallback_{datetime.utcnow().year}",
+            source_record_id=f"fluview_fallback_{datetime.now(timezone.utc).year}",
             signal_type=SignalType.SURVEILLANCE_ALERT,
             title="Respiratory Illness Surveillance: National monitoring active",
             description=description,
@@ -226,7 +226,7 @@ class CDCFluViewConnector(BaseConnector):
             innovation_category_hint="HARDWARE",
             keywords=["influenza","ILI","respiratory","national"],
             geographic_scope=GeographicScope.NATIONAL,
-            data_year=datetime.utcnow().year,
+            data_year=datetime.now(timezone.utc).year,
             data_freshness_days=7,
             source_url="https://www.cdc.gov/fluview/",
             confidence_score=0.7,

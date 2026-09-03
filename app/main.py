@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api import needs
@@ -15,10 +16,27 @@ from app.db.database import init_db
 from app.db.demand_repository import ensure_demand_signals_table
 from app.core.config import settings
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Startup and shutdown lifecycle for the FastAPI application."""
+    # ── Startup ────────────────────────────────────────────────────────────────
+    import asyncio as _asyncio
+    _asyncio.ensure_future(_init_background())
+    yield
+    # ── Shutdown ───────────────────────────────────────────────────────────────
+    if settings.ENABLE_SCHEDULER:
+        from app.scheduler.ingestion_scheduler import shutdown_scheduler
+        shutdown_scheduler()
+    # BUG-62: _tracker_scheduler was never shut down — process hung on container restart
+    if _tracker_scheduler.running:
+        _tracker_scheduler.shutdown(wait=False)
+
+
 app = FastAPI(
     title="Medlevate API",
     description="Medical market intelligence for tech transfer offices, health innovators, and researchers",
-    version="0.2.0"
+    version="0.2.0",
+    lifespan=lifespan,
 )
 
 # CORS — restricted to the Netlify frontends (prod + staging + preview deploys) and
@@ -63,16 +81,6 @@ async def _unhandled_exception_handler(request: _Request, exc: Exception):
         "detail": "An unexpected error occurred. Please try again.",
         "error": "internal_error",
     })
-
-@app.on_event("startup")
-async def startup():
-    import asyncio as _asyncio
-    # Fire all initialization in the background so uvicorn starts serving
-    # the /health endpoint immediately — Railway's 30s window is too tight
-    # for 8 sequential DB schema calls on a cold-start DB connection.
-    # BUG-26: use ensure_future so the task is attached to the running loop.
-    _asyncio.ensure_future(_init_background())
-
 
 async def _init_background():
     import logging, asyncio as _asyncio
@@ -140,15 +148,6 @@ async def _init_background():
     except Exception as _sched_err:
         _log.error("Weekly tracker scheduler failed to start: %s", _sched_err)
 
-
-@app.on_event("shutdown")
-async def shutdown():
-    if settings.ENABLE_SCHEDULER:
-        from app.scheduler.ingestion_scheduler import shutdown_scheduler
-        shutdown_scheduler()
-    # BUG-62: _tracker_scheduler was never shut down — process hung on container restart
-    if _tracker_scheduler.running:
-        _tracker_scheduler.shutdown(wait=False)
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 # Step 1: hospital need submissions
