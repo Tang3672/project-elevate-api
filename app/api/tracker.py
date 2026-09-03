@@ -2,7 +2,6 @@
 Tracker API endpoints
 """
 import logging
-import traceback
 from fastapi import APIRouter, Depends, HTTPException
 from app.api.auth import get_current_user
 from app.api.admin_auth import require_admin_key
@@ -193,7 +192,8 @@ async def test_full_retention(current_user: dict = Depends(get_current_user)):
         return results
 
     except Exception as e:
-        return {"error": str(e), "traceback": traceback.format_exc()}
+        logger.error("test-full-retention failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error during retention test")
 
 
 @router.get("/competitive-intel")

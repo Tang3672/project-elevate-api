@@ -97,12 +97,17 @@ async def update_report(job_id: str, report: dict) -> None:
         logger.error("report_jobs.update_report failed for %s: %s", job_id, e)
 
 
+_JOB_TIMEOUT_MINUTES = 15  # jobs stuck in 'running' longer than this are considered crashed
+
+
 async def get_job(job_id: str) -> dict | None:
     from app.db.database import get_pool
+    from datetime import datetime, timezone, timedelta
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT status, report, error, owner_id FROM report_jobs WHERE job_id=$1", job_id)
+            "SELECT status, report, error, owner_id, created_at FROM report_jobs WHERE job_id=$1",
+            job_id)
     if not row:
         return None
     report = row["report"]
@@ -111,5 +116,21 @@ async def get_job(job_id: str) -> dict | None:
             report = json.loads(report)
         except (ValueError, TypeError):
             report = None
-    return {"status": row["status"], "report": report, "error": row["error"],
+    status = row["status"]
+    # Guard against jobs stuck in 'running' when the worker was killed with SIGKILL
+    # (asyncio.CancelledError would normally call set_error, but SIGKILL skips it).
+    if status == "running":
+        created_at = row["created_at"]
+        if created_at is not None:
+            # Make timezone-aware for comparison
+            if created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=timezone.utc)
+            age = datetime.now(timezone.utc) - created_at
+            if age > timedelta(minutes=_JOB_TIMEOUT_MINUTES):
+                status = "error"
+                report = None
+                error = "Report generation timed out (server restart likely). Please try again."
+                return {"status": status, "report": report, "error": error,
+                        "owner_id": row["owner_id"]}
+    return {"status": status, "report": report, "error": row["error"],
             "owner_id": row["owner_id"]}

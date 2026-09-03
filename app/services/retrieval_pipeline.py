@@ -635,7 +635,8 @@ def _fetch_tier0(
                     quality_score=compute_quality("seer_preloaded", "stage_distribution", seer, disease_name, 2024),
                     tier=0,
                 ))
-        except Exception: pass
+        except Exception as _e:
+            logger.debug("Tier 0 seer_preloaded fetch skipped (non-fatal): %s", _e)
 
     # Reactome pathways (pre-loaded) — H-15: skip for non-clinical archetypes
     if subcategory_id not in _NON_CLINICAL_ARCHETYPES:
@@ -650,7 +651,8 @@ def _fetch_tier0(
                     quality_score=compute_quality("reactome", "pathway_biology", pathways, disease_name, 2024),
                     tier=0,
                 ))
-        except Exception: pass
+        except Exception as _e:
+            logger.debug("Tier 0 reactome fetch skipped (non-fatal): %s", _e)
 
     # PTRS back-validation (pre-loaded)
     try:
@@ -664,7 +666,8 @@ def _fetch_tier0(
                 quality_score=0.90,
                 tier=0,
             ))
-    except Exception: pass
+    except Exception as _e:
+        logger.debug("Tier 0 ptrs_validation fetch skipped (non-fatal): %s", _e)
 
     # Buyer counts (pre-loaded)
     try:
@@ -678,7 +681,8 @@ def _fetch_tier0(
                 quality_score=0.95,
                 tier=0,
             ))
-    except Exception: pass
+    except Exception as _e:
+        logger.debug("Tier 0 buyer_counts fetch skipped (non-fatal): %s", _e)
 
     # ICER pre-loaded
     try:
@@ -692,7 +696,8 @@ def _fetch_tier0(
                 quality_score=0.90,
                 tier=0,
             ))
-    except Exception: pass
+    except Exception as _e:
+        logger.debug("Tier 0 icer fetch skipped (non-fatal): %s", _e)
 
     # OECD global multiplier (pre-loaded)
     try:
@@ -705,7 +710,8 @@ def _fetch_tier0(
             quality_score=0.90,
             tier=0,
         ))
-    except Exception: pass
+    except Exception as _e:
+        logger.debug("Tier 0 oecd fetch skipped (non-fatal): %s", _e)
 
     # AHRQ MEPS realized TAM factor (pre-loaded)
     try:
@@ -719,7 +725,8 @@ def _fetch_tier0(
                 quality_score=0.95,
                 tier=0,
             ))
-    except Exception: pass
+    except Exception as _e:
+        logger.debug("Tier 0 ahrq_meps fetch skipped (non-fatal): %s", _e)
 
     # Patent cliff (pre-loaded)
     try:
@@ -733,7 +740,8 @@ def _fetch_tier0(
                 quality_score=0.80,
                 tier=0,
             ))
-    except Exception: pass
+    except Exception as _e:
+        logger.debug("Tier 0 cms_analogues fetch skipped (non-fatal): %s", _e)
 
     # ClinVar, Orphanet, regulatory precedents — H-15: skip for non-clinical archetypes (D-01)
     if subcategory_id not in _NON_CLINICAL_ARCHETYPES:
@@ -748,7 +756,8 @@ def _fetch_tier0(
                     quality_score=compute_quality("clinvar", "gene_variant_data", clinvar_data, disease_name, 2024),
                     tier=0,
                 ))
-        except Exception: pass
+        except Exception as _e:
+            logger.debug("Tier 0 clinvar fetch skipped (non-fatal): %s", _e)
 
         try:
             from app.ingestion.connectors.orphanet import get_rare_disease_prevalence
@@ -761,7 +770,8 @@ def _fetch_tier0(
                     quality_score=compute_quality("orphanet", "prevalence_incidence", orphan_data, disease_name, 2024),
                     tier=0,
                 ))
-        except Exception: pass
+        except Exception as _e:
+            logger.debug("Tier 0 orphanet fetch skipped (non-fatal): %s", _e)
 
         try:
             from app.services.chapter_data_service import get_regulatory_precedents
@@ -774,7 +784,8 @@ def _fetch_tier0(
                     quality_score=1.0,
                     tier=0,
                 ))
-        except Exception: pass
+        except Exception as _e:
+            logger.debug("Tier 0 regulatory_precedents fetch skipped (non-fatal): %s", _e)
 
     # CDMRP + DoD funding opportunities (pre-loaded)
     try:
@@ -788,7 +799,8 @@ def _fetch_tier0(
                 quality_score=0.85,
                 tier=0,
             ))
-    except Exception: pass
+    except Exception as _e:
+        logger.debug("Tier 0 cdmrp fetch skipped (non-fatal): %s", _e)
 
     logger.debug("Tier 0: %d facts retrieved (0ms)", len(facts))
     return facts

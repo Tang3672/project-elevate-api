@@ -530,6 +530,9 @@ async def run_tracker_for_user(user_id: int):
         return []
     results = []
     for wl in watchlists:
-        result = await process_watchlist(wl)
-        results.append(result)
+        try:
+            result = await process_watchlist(wl)
+            results.append(result)
+        except Exception as e:
+            logger.error("Failed to process watchlist %s for user %s: %s", wl.get("watchlist_id"), user_id, e)
     return results
