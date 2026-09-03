@@ -78,7 +78,10 @@ async def classify_need(raw_text: str) -> ClassifiedNeed:
     )
 
     raw_json = response.choices[0].message.content
-    data = json.loads(raw_json)
+    try:
+        data = json.loads(raw_json)
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise ValueError(f"classify_need: LLM returned non-JSON content: {exc}") from exc
 
     # Normalize category to enum (fallback to UNCATEGORIZED if unexpected value)
     category_str = data.get("category", "UNCATEGORIZED").upper()

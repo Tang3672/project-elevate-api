@@ -194,6 +194,12 @@ async def save_report(
             """,
             user_id, name, product_type, idea, pathogen, json.dumps(report_data)
         )
+        _raw = row['report_data']
+        try:
+            _report_data = json.loads(_raw) if isinstance(_raw, str) else dict(_raw)
+        except (json.JSONDecodeError, TypeError):
+            logger.warning("save_report: failed to decode report_data, using empty dict")
+            _report_data = {}
         return SavedReport(
             report_id    = row['id'],
             user_id      = row['user_id'],
@@ -201,7 +207,7 @@ async def save_report(
             product_type = row['product_type'],
             idea         = row['idea'],
             pathogen     = row['pathogen'],
-            report_data  = json.loads(row['report_data']) if isinstance(row['report_data'], str) else dict(row['report_data']),
+            report_data  = _report_data,
             created_at   = row['created_at'],
         )
 
@@ -243,6 +249,12 @@ async def get_report_by_id(report_id: int, user_id: int) -> Optional[SavedReport
         )
         if not row:
             return None
+        _raw = row['report_data']
+        try:
+            _report_data = json.loads(_raw) if isinstance(_raw, str) else dict(_raw)
+        except (json.JSONDecodeError, TypeError):
+            logger.warning("get_report_by_id: failed to decode report_data for id=%s, using empty dict", report_id)
+            _report_data = {}
         return SavedReport(
             report_id    = row['id'],
             user_id      = row['user_id'],
@@ -250,7 +262,7 @@ async def get_report_by_id(report_id: int, user_id: int) -> Optional[SavedReport
             product_type = row['product_type'],
             idea         = row['idea'],
             pathogen     = row['pathogen'],
-            report_data  = json.loads(row['report_data']) if isinstance(row['report_data'], str) else dict(row['report_data']),
+            report_data  = _report_data,
             created_at   = row['created_at'],
         )
 
