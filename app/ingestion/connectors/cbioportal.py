@@ -32,6 +32,7 @@ GENIE (Genomics Evidence Neoplasia Information Exchange):
 Rate limit: No documented limit; be polite (<1 req/sec)
 """
 
+import asyncio
 import logging
 from typing import Optional
 import requests
@@ -256,8 +257,11 @@ async def get_live_mutation_frequency(
             "studyId": cancer_study_id,
             "hugoGeneSymbol": gene_symbol,
         }
+        import functools
         import requests as _req
-        r = _req.get(url, params=params, timeout=_TIMEOUT)
+        r = await asyncio.to_thread(
+            functools.partial(_req.get, url, params=params, timeout=_TIMEOUT)
+        )
         r.raise_for_status()
         mutations = r.json()
 
@@ -272,7 +276,9 @@ async def get_live_mutation_frequency(
 
         # Get total sample count for this study
         sample_url = f"{CBIOPORTAL_API}/studies/{cancer_study_id}/sample-count"
-        sr = _req.get(sample_url, timeout=_TIMEOUT)
+        sr = await asyncio.to_thread(
+            functools.partial(_req.get, sample_url, timeout=_TIMEOUT)
+        )
         total_samples = sr.json() if sr.ok else len(mutations) * 5  # rough estimate
 
         top_variants = sorted(aa_changes.items(), key=lambda x: -x[1])[:5]
