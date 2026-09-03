@@ -30,7 +30,6 @@ Note: Direct SEER API requires registration. We use:
 
 import logging
 from typing import Optional
-import requests
 
 logger = logging.getLogger(__name__)
 

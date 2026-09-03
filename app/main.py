@@ -227,29 +227,24 @@ async def health_check():
         _log.warning("health check signal stats query failed: %s", _e)
         signal_stats = {"total_signals": None, "last_ingested_at": None}
 
+    # Strip per-source breakdown to avoid enumerating internal connector names
+    # to unauthenticated callers. Only surface aggregate counts.
+    safe_signals = {
+        "total_signals": signal_stats.get("total_signals"),
+        "last_ingested_at": signal_stats.get("last_ingested_at"),
+    }
     return {
         "status": "ok",
-        "service": "medlevate",
         "version": "0.2.0",
-        "scheduler_enabled": settings.ENABLE_SCHEDULER,
-        "signals": signal_stats,
+        "signals": safe_signals,
     }
 
 
-@app.get("/version")
-async def get_version():
-    import subprocess
-    try:
-        commit = subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL
-        ).decode().strip()
-        branch = subprocess.check_output(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"], stderr=subprocess.DEVNULL
-        ).decode().strip()
-    except Exception:
-        commit = settings.RAILWAY_GIT_COMMIT_SHA or "unknown"
-        branch = settings.RAILWAY_GIT_BRANCH or "unknown"
-    return {"commit": commit, "branch": branch}
+# NOTE: /version endpoint removed — it exposed full git commit SHA and branch
+# name to unauthenticated callers (information disclosure / attacker
+# fingerprinting) and used a blocking subprocess.check_output call inside
+# an async def (event-loop stall). Version is available via the OpenAPI
+# /openapi.json spec for authenticated API consumers.
 
 
 

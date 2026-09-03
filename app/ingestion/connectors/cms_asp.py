@@ -36,7 +36,6 @@ import logging
 import io
 import zipfile
 from typing import Optional
-import requests
 
 logger = logging.getLogger(__name__)
 
