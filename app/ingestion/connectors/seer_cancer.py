@@ -194,7 +194,11 @@ def get_cancer_incidence(cancer_type: str) -> Optional[dict]:
         "glioblastoma": "Glioblastoma Multiforme",
         "gbm": "Glioblastoma Multiforme",
         "myeloma": "Multiple Myeloma",
-        "dlbcl": "Multiple Myeloma",   # hematology fallback
+        # "dlbcl" alias intentionally omitted: DLBCL (Diffuse Large B-Cell
+        # Lymphoma) is a distinct cancer from Multiple Myeloma — different
+        # incidence, survival, biomarkers.  No DLBCL entry exists in
+        # _SEER_CANCER_STATS yet; get_cancer_incidence() returns None so the
+        # caller can handle it gracefully rather than receiving myeloma data.
         "ovarian": "Ovarian Cancer",
         "parp": "Ovarian Cancer",       # PARP inhibitors primarily ovarian
         "hrd": "Ovarian Cancer",

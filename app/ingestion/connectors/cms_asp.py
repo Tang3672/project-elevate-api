@@ -78,7 +78,6 @@ _PART_B_DRUG_MAP: dict[str, dict] = {
     # Immunology IV infusions
     "J0129": {"name": "Abatacept (Orencia IV)", "ta": "immunology", "route": "IV", "mg_per_unit": 1},
     "J0717": {"name": "Certolizumab (Cimzia)", "ta": "immunology", "route": "subq", "mg_per_unit": 1},
-    "J2182": {"name": "Ranibizumab (Lucentis)", "ta": "ophthalmology", "route": "inj", "mg_per_unit": 1},
     # Hematology
     "J9176": {"name": "Emicizumab (Hemlibra)", "ta": "hematology", "route": "subq", "mg_per_unit": 1},
     "J1444": {"name": "Fitusiran (Alhemo)", "ta": "hematology", "route": "subq", "mg_per_unit": 1},
