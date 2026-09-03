@@ -21,7 +21,12 @@ logger = logging.getLogger(__name__)
 # ── Config ────────────────────────────────────────────────────────────────────
 JWT_SECRET      = getattr(settings, 'JWT_SECRET', 'project-elevate-secret-key-change-in-production')
 JWT_ALGORITHM   = "HS256"
-JWT_EXPIRE_DAYS = 30
+# BUG-77: 30-day access-token lifetime with no revocation path — a stolen token
+# remains valid for a month.  Reduced to 7 days: still generous for a research
+# SaaS (PIs typically open the app multiple times a week), cuts the breach window
+# by 4×, and requires no server-side blocklist.  Proper refresh-token rotation
+# should be added in a future sprint to allow even shorter access-token lifetimes.
+JWT_EXPIRE_DAYS = 7
 
 GOOGLE_TOKEN_INFO_URL = "https://oauth2.googleapis.com/tokeninfo"
 
