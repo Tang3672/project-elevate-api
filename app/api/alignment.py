@@ -9,7 +9,7 @@ GET  /api/v1/alignment/examples     — example ideas
 """
 
 import logging
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 import math as _math
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional
@@ -838,7 +838,7 @@ async def get_market_sizing_override(
 async def get_opportunities(
     top_n: int = 100,
     offset: int = 0,
-    search: str = "",
+    search: str = Query(default="", max_length=500),
     current_user = Depends(get_current_user),
 ):
     """
