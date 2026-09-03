@@ -24,6 +24,7 @@ from __future__ import annotations
 import logging
 import math
 import time
+from datetime import date
 from typing import Optional
 import requests
 
@@ -219,7 +220,7 @@ _PATENT_EXPIRY: dict[str, dict] = {
 def get_patent_cliff_analysis(
     competitor_drugs: list[str],
     forecast_horizon_years: int = 7,
-    current_year: int = 2026,
+    current_year: Optional[int] = None,
 ) -> dict:
     """
     Analyze patent expiry timing for key competitors.
@@ -229,6 +230,8 @@ def get_patent_cliff_analysis(
 
     Source: FDA Orange Book (US public domain) + SEC 10-K (US public domain)
     """
+    if current_year is None:
+        current_year = date.today().year
     cliffs = []
     for drug in competitor_drugs:
         data = _PATENT_EXPIRY.get(drug.upper())

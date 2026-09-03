@@ -409,7 +409,7 @@ def _is_non_clinical_product(sub_expert_id: str) -> bool:
 
 _OPENALEX_URL  = "https://api.openalex.org/works"
 _CROSSREF_URL  = "https://api.crossref.org/works"
-_CONTACT_EMAIL = "oneonesie100@gmail.com"   # required by OpenAlex polite pool
+_CONTACT_EMAIL = "contact@projectelevate.io"   # required by OpenAlex polite pool
 
 
 def _openalex_result_to_meta(w: dict, query_title: str) -> "dict | None":

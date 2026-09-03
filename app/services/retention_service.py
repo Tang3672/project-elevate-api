@@ -57,10 +57,11 @@ async def check_report_staleness(saved_report: dict) -> dict:
         return {"staleness_score": 0, "outdated_claims": [], "recalculate": False}
 
     # Run 3 targeted searches
+    _cur_year = datetime.now(timezone.utc).year
     searches = [
-        f"{condition} FDA approval new drug device 2026",
-        f"{condition} epidemiology prevalence incidence updated 2026 site:cdc.gov OR site:who.int",
-        f"{condition} market size TAM pharmaceutical 2026",
+        f"{condition} FDA approval new drug device {_cur_year}",
+        f"{condition} epidemiology prevalence incidence updated {_cur_year} site:cdc.gov OR site:who.int",
+        f"{condition} market size TAM pharmaceutical {_cur_year}",
     ]
 
     results = []
@@ -371,12 +372,13 @@ async def track_competitor_milestones(condition: str, product_desc: str) -> List
     Search for competitor milestones in the same indication.
     Returns list of significant events: approvals, Phase 3 readouts, failures, BTDs.
     """
+    _cur_year = datetime.now(timezone.utc).year
     queries = [
-        f"{condition} FDA approval new drug 2026",
-        f"{condition} Phase 3 trial results readout 2026",
-        f"{condition} breakthrough therapy designation FDA 2026",
-        f"{condition} clinical trial failure discontinued 2026",
-        f"{condition} drug acquisition partnership deal 2026",
+        f"{condition} FDA approval new drug {_cur_year}",
+        f"{condition} Phase 3 trial results readout {_cur_year}",
+        f"{condition} breakthrough therapy designation FDA {_cur_year}",
+        f"{condition} clinical trial failure discontinued {_cur_year}",
+        f"{condition} drug acquisition partnership deal {_cur_year}",
     ]
 
     all_results = ""
@@ -469,10 +471,16 @@ async def compute_signal_delta(watchlist: dict, days_back: int = 30) -> dict:
     name     = watchlist.get("name", "")
     kw_str   = " ".join(keywords[:3]) if keywords else desc[:60]
 
+    _now          = datetime.now(timezone.utc)
+    _cur_month    = _now.strftime("%B %Y")                                           # e.g. "September 2026"
+    _prior_month  = (_now.replace(day=1) - timedelta(days=1)).strftime("%B")         # e.g. "August"
+    _cur_year     = _now.year
+    _month_range  = f"{_prior_month}-{_now.strftime('%B')} {_cur_year}"              # e.g. "August-September 2026"
+
     queries = [
-        f"{kw_str} news research update May 2026",
-        f"{kw_str} FDA approval clinical trial 2026",
-        f"{kw_str} new study publication April May 2026",
+        f"{kw_str} news research update {_cur_month}",
+        f"{kw_str} FDA approval clinical trial {_cur_year}",
+        f"{kw_str} new study publication {_month_range}",
     ]
 
     all_findings = []
@@ -498,7 +506,7 @@ async def compute_signal_delta(watchlist: dict, days_back: int = 30) -> dict:
                         "tools": [{"type": "web_search_20250305", "name": "web_search"}],
                         "messages": [{"role": "user", "content": (
                             f"Search: {query}\n\n"
-                            f"Find news or publications from the LAST 30 DAYS only (April-May 2026).\n"
+                            f"Find news or publications from the LAST 30 DAYS only ({_month_range}).\n"
                             f"Format each finding as: TITLE | DATE | KEY FINDING | URL\n"
                             f"If nothing recent found, say: No recent findings"
                         )}],

@@ -88,6 +88,7 @@ import logging
 import math
 import time
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -557,7 +558,7 @@ def _recency_score(year: Optional[int]) -> float:
     """Score recency: 2024=1.0, 2020=0.8, 2015=0.6, older=0.5."""
     if not year:
         return 0.75  # Unknown → slight penalty
-    current = 2026
+    current = date.today().year
     delta = current - year
     if delta <= 1:  return 1.00
     if delta <= 3:  return 0.92
