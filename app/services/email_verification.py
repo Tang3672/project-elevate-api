@@ -111,8 +111,10 @@ async def send_verification_email(email: str, name: str, token: str, base_url: s
     email_from = os.environ.get('EMAIL_FROM', '') or getattr(settings, 'EMAIL_FROM', '') or 'noreply@hudatabase.online'
 
     # BUG-73: SMTP host+username were logged at INFO level on every registration, leaking infra topology
+    # BUG-30a: do NOT log verify_url — it contains a single-use token; log output is visible to
+    #          anyone with infra access and must never carry bearer credentials.
     if not smtp_host or not smtp_user:
-        logger.warning(f"SMTP not configured — verification URL: {verify_url}")
+        logger.warning("SMTP not configured — skipping verification email send. Set SMTP_HOST/SMTP_USER.")
         return
 
     try:

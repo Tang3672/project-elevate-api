@@ -23,6 +23,10 @@ _HEADERS = {
     "Permissions-Policy": "geolocation=(), microphone=(), camera=()",
     "Cross-Origin-Resource-Policy": "same-site",
     "Cross-Origin-Opener-Policy": "same-origin",
+    # BUG-30b: missing Content-Security-Policy allowed injected scripts in HTML responses
+    # (PDF preview, report pages).  Restrict to same-origin; block object embeds and
+    # framing of external base URIs.
+    "Content-Security-Policy": "default-src 'self'; object-src 'none'; base-uri 'self'",
 }
 
 

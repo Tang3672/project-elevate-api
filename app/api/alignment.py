@@ -2628,7 +2628,10 @@ async def market_model_override(
             str(getattr(current_user, "id", "anon")),
         )
     except AssertionError as e:
-        raise HTTPException(status_code=422, detail=f"Invalid model state: {e}")
+        # BUG-30d: AssertionError text can contain internal code paths; log it server-side
+        # and return a generic message to the client.
+        logger.warning("Market model assertion failed for report %s: %s", report_id, e)
+        raise HTTPException(status_code=422, detail="Invalid model state")
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
     except KeyError as e:
@@ -2716,8 +2719,13 @@ async def market_model_remove_gate(
 
     try:
         new_m = old_m.without_gate(gate_id)
-    except Exception as e:
+    except (ValueError, KeyError) as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        # BUG-30c: bare Exception catch was leaking internal error text to the client.
+        # Log it server-side and return a generic message.
+        logger.error("Failed to remove gate %s from report %s: %s", gate_id, report_id, e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to remove gate")
 
     await store.save(new_m)
     return _build_override_response(old_m, new_m)
