@@ -245,6 +245,8 @@ class FiredHeuristic:
     som_adjustment: float
     note:           str
     source:         str
+    confidence:     str = "medium"   # "high" | "medium" | "low"
+    trigger:        str = ""          # keyword or pattern that fired this rule
 
     def to_dict(self) -> dict:
         return {
@@ -253,6 +255,8 @@ class FiredHeuristic:
             "som_adjustment": self.som_adjustment,
             "note":           self.note,
             "source":         self.source,
+            "confidence":     self.confidence,
+            "trigger":        self.trigger,
         }
 
 
@@ -400,7 +404,11 @@ HEURISTIC_LIBRARY: List[_HeuristicRule] = [
 ]
 
 
-def apply_heuristics(idea_text: str, product_type: str = "") -> List[FiredHeuristic]:
+def apply_heuristics(
+    idea_text: str,
+    product_type: str = "",
+    activations=None,   # accepted but unused — present so orchestrator can pass expert_acts without TypeError
+) -> List[FiredHeuristic]:
     """Return FiredHeuristic list for every rule that matches idea_text + product_type."""
     if not idea_text:
         return []
@@ -408,12 +416,18 @@ def apply_heuristics(idea_text: str, product_type: str = "") -> List[FiredHeuris
     fired: List[FiredHeuristic] = []
     for rule in HEURISTIC_LIBRARY:
         if rule.matches(idea_lower, product_type):
+            trigger = next(
+                (kw for kw in rule.keywords if kw in idea_lower),
+                rule.keywords[0] if rule.keywords else "",
+            )
             fired.append(FiredHeuristic(
                 rule_name=rule.name,
                 sam_adjustment=rule.sam_adjustment,
                 som_adjustment=rule.som_adjustment,
                 note=rule.note,
                 source=rule.source,
+                confidence=rule.confidence,
+                trigger=trigger,
             ))
     return fired
 
