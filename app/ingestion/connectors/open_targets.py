@@ -240,8 +240,8 @@ async def load_disease_targets(top_n: int = 10) -> dict[str, int]:
                 )
                 if row:
                     mondo_id = row["mondo_id"]
-            except Exception:
-                pass
+            except Exception as _e:
+                logger.debug("mondo_id lookup for %r failed: %s", disease, _e)
 
             for t in targets:
                 await _upsert_target(conn, disease, mondo_id, efo_id, t)
@@ -272,8 +272,8 @@ async def load_chembl_indications() -> dict[str, int]:
                 )
                 if row:
                     mondo_id = row["mondo_id"]
-            except Exception:
-                pass
+            except Exception as _e:
+                logger.debug("mondo_id lookup for %r failed: %s", disease, _e)
 
             for ind in indications:
                 try:
@@ -287,8 +287,8 @@ async def load_chembl_indications() -> dict[str, int]:
                         ind["chembl_id"], mondo_id, disease,
                         f"phase_{ind.get('max_phase') or 0}",
                     )
-                except Exception:
-                    pass
+                except Exception as _e:
+                    logger.debug("ChEMBL indication insert skipped: %s", _e)
 
             results[disease] = len(indications)
             logger.info("ChEMBL: %s → %d indications", disease, len(indications))

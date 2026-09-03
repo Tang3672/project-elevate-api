@@ -188,8 +188,8 @@ class OrchestratedResult:
                             f"(swing {_fm(t.swing_usd)})"
                         )
                 lines.append("")
-            except Exception:
-                pass  # MC block is optional; never crash format_for_prompt
+            except Exception as _e:
+                logger.debug("format_for_prompt: MC section skipped: %s", _e)
 
         # ── v6: Regulatory pathway ────────────────────────────────────────────
         rp = self.regulatory_pathway
@@ -207,8 +207,8 @@ class OrchestratedResult:
                 if reimb.risk_note:
                     lines.append(f"  {reimb.risk_note}")
                 lines.append("")
-            except Exception:
-                pass
+            except Exception as _e:
+                logger.debug("format_for_prompt: regulatory section skipped: %s", _e)
 
         # ── v6: Expert consensus & disagreement ───────────────────────────────
         ec = self.expert_consensus
@@ -225,8 +225,8 @@ class OrchestratedResult:
                         f"({len(ec.activated_experts)} expert lenses)"
                     )
                 lines.append("")
-            except Exception:
-                pass
+            except Exception as _e:
+                logger.debug("format_for_prompt: expert consensus section skipped: %s", _e)
 
         # ── v6: Heuristics ───────────────────────────────────────────────────
         fired = self.fired_heuristics
@@ -244,8 +244,8 @@ class OrchestratedResult:
                     lines.append(f"    Trigger: {h.trigger}")
                     lines.append(f"    {h.note[:180]}{'…' if len(h.note) > 180 else ''}")
                 lines.append("")
-            except Exception:
-                pass
+            except Exception as _e:
+                logger.debug("format_for_prompt: heuristics section skipped: %s", _e)
 
         lines.append(c.honesty_statement)
         lines.append("=== END MARKET SIZING ===")

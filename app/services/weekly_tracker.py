@@ -319,7 +319,8 @@ async def process_watchlist(watchlist: dict) -> dict:
                     watchlist["user_id"]
                 )
                 saved_reports = [dict(r) for r in rows]
-        except Exception:
+        except Exception as _e:
+            logger.warning("DB query for saved_reports failed: %s", _e)
             saved_reports = []
 
         retention_results = await run_retention_checks(watchlist, saved_reports)

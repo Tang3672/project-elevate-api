@@ -152,7 +152,8 @@ async def load_pubmed_signals(disease_names: list[str] | None = None) -> dict[st
     try:
         from app.db.database import get_pool
         pool = await get_pool()
-    except Exception:
+    except Exception as _pool_err:
+        logger.warning("PubMed: DB unavailable, running without persistence: %s", _pool_err)
         pool = None
 
     for disease in targets:

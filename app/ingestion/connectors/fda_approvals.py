@@ -246,8 +246,8 @@ async def load_fda_approvals(api_key: str = "") -> dict[str, int]:
                 )
                 if row:
                     mondo_id = row["mondo_id"]
-            except Exception:
-                pass
+            except Exception as _e:
+                logger.debug("mondo_id lookup for %r failed: %s", disease, _e)
 
             await _upsert_approval_burden(conn, disease, mondo_id, count, search_term)
 
@@ -294,8 +294,8 @@ async def bulk_load_drugs_at_fda() -> int:
                     [d["brand_name"]],
                 )
                 loaded += 1
-            except Exception:
-                pass
+            except Exception as _e:
+                logger.debug("Drugs@FDA: drug insert skipped: %s", _e)
 
     logger.info("Drugs@FDA: %d drugs loaded", loaded)
     return loaded

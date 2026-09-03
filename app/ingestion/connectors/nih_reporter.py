@@ -219,8 +219,8 @@ async def load_nih_funding(from_year: int = 2022) -> dict[str, dict]:
                 )
                 if row:
                     mondo_id = row["mondo_id"]
-            except Exception:
-                pass
+            except Exception as _e:
+                logger.debug("mondo_id lookup for %r failed: %s", disease, _e)
 
             await _upsert_funding_burden(conn, disease, mondo_id, total, funding)
 
@@ -251,8 +251,8 @@ async def get_nih_grant_count(disease_name: str, from_year: int = 2022) -> int:
             """, disease_name)
             if row:
                 return int(row["value"])
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.debug("grant count cache read failed, will fetch live: %s", _e)
 
     # Live fetch — BUG-70: offload blocking call to thread
     search_text = _DISEASE_SEARCH_TERMS.get(disease_name, disease_name)

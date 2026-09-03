@@ -153,7 +153,8 @@ async def load_gdelt_signals(disease_names: list[str] | None = None) -> dict[str
     try:
         from app.db.database import get_pool
         pool = await get_pool()
-    except Exception:
+    except Exception as _pool_err:
+        logger.warning("GDELT: DB unavailable, running without persistence: %s", _pool_err)
         pool = None
 
     for disease in targets:

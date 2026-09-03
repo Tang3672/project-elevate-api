@@ -114,7 +114,8 @@ async def load_patent_landscape(disease_names: list[str] | None = None) -> dict[
     try:
         from app.db.database import get_pool
         pool = await get_pool()
-    except Exception:
+    except Exception as _pool_err:
+        logger.warning("Patents: DB unavailable, running without persistence: %s", _pool_err)
         pool = None
 
     for disease in targets:

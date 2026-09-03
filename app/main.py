@@ -125,8 +125,8 @@ async def _init_background():
             async with pool.acquire() as conn:
                 from app.services.universe_expander import prescored_universe_table
                 await prescored_universe_table(conn)
-        except Exception:
-            pass
+        except Exception as _e:
+            _log.warning("prescored_universe_table failed (non-fatal): %s", _e)
         _log.info("DB initialization complete")
     except Exception as e:
         _log.error("DB initialization failed (non-fatal): %s", e)
@@ -198,7 +198,8 @@ async def health_check():
             "last_ingested_at": last_fetched.isoformat() if last_fetched else None,
             "sources": {r["source"]: r["count"] for r in rows},
         }
-    except Exception:
+    except Exception as _e:
+        _log.warning("health check signal stats query failed: %s", _e)
         signal_stats = {"total_signals": None, "last_ingested_at": None}
 
     return {

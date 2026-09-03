@@ -84,8 +84,8 @@ async def _get_commercial_safe_dalys(disease: str, ta: str) -> tuple[float | Non
                 val = float(row["value"])
                 _WHO_DALY_CACHE[disease] = val
                 return val, "who_gho"
-    except Exception:
-        pass  # DB not available in test environments
+    except Exception as _e:
+        _logging.getLogger(__name__).debug("DALY DB cache read failed for %r: %s", disease, _e)
 
     # 3. Live WHO GHO fetch (commercial-safe)
     try:
@@ -94,8 +94,8 @@ async def _get_commercial_safe_dalys(disease: str, ta: str) -> tuple[float | Non
         if val is not None:
             _WHO_DALY_CACHE[disease] = val
             return val, "who_gho"
-    except Exception:
-        pass
+    except Exception as _e:
+        _logging.getLogger(__name__).debug("WHO GHO live fetch failed for %r: %s", disease, _e)
 
     # 4. GBD fallback — R&D/prototyping only; log warning so it's visible
     gbd_val = _GBD_DISEASE_DALYS.get(disease) or _GBD_TA_DALYS.get(ta)
@@ -734,7 +734,8 @@ async def score_opportunity_v2(
             routing = soft_route(idea_text)
             _soft_weights = routing.weights
             _blend_note = routing.blend_note
-        except Exception:
+        except Exception as _e:
+            _logger.debug("soft_route failed, using hard profile: %s", _e)
             _soft_weights = None
 
     if _soft_weights:
@@ -747,7 +748,8 @@ async def score_opportunity_v2(
             w_inn  = blended["w_inn"]
             _unmet_boost  = blended["unmet_boost"]
             _ptrs_mult    = blended["ptrs_mult"]
-        except Exception:
+        except Exception as _e:
+            _logger.debug("blend_scoring_profile failed, using hard profile: %s", _e)
             # Fallback to hard profile
             profile = _get_scoring_profile(therapeutic_area, modality)
             w_opp, w_prob, w_val, w_inn = profile.w_opp, profile.w_prob, profile.w_val, profile.w_inn
@@ -989,8 +991,8 @@ async def _fetch_live_trial_count(disease: str, ta: str) -> int:
                 count = int(row["competitor_trial_count"])
                 _TRIAL_COUNT_CACHE[disease] = (count, now)
                 return count
-    except Exception:
-        pass   # DB unavailable in test environments — fall through to live API
+    except Exception as _e:
+        _logger.debug("trial count DB cache read failed for %r: %s", disease, _e)
 
     # L3: Live CT.gov API
     search_term = _CT_SEARCH_ALIASES.get(disease, disease)
@@ -1208,8 +1210,8 @@ async def run_discovery_engine_v2(top_n: int = 25, funding_pathway: str = "comme
             known_pop = get_disease_population(disease)
             if known_pop and known_pop > 0:
                 pop = known_pop
-        except Exception:
-            pass
+        except Exception as _e:
+            _logger.debug("get_disease_population failed for %r: %s", disease, _e)
         pop = pop or _PREVALENCE_DISEASE.get(disease) or _PREVALENCE_TA.get(ta) or _legacy_pop
         # ── Market Sizing: 5-stage engine (Bass + BIA + DoT + Gross-to-Net) ──────
         # 1. Try curated expert TAM first (tam_calculator.py)

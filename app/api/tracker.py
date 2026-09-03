@@ -89,7 +89,8 @@ async def test_full_retention(current_user: dict = Depends(get_current_user)):
                     "SELECT * FROM saved_reports WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1",
                     current_user["id"]
                 )
-        except Exception:
+        except Exception as _e:
+            logger.warning("DB query for watchlist/reports failed, using demo data: %s", _e)
             wl_rows = []
             report_rows = []
 
@@ -143,6 +144,7 @@ async def test_full_retention(current_user: dict = Depends(get_current_user)):
                 watchlist.get("keywords", [])
             )
         except Exception as e:
+            logger.warning("grant_deadlines check failed: %s", e)
             results["features"]["grant_deadlines"] = []
 
         # 3. Competitor milestones (Claude web search)
@@ -150,6 +152,7 @@ async def test_full_retention(current_user: dict = Depends(get_current_user)):
             desc = watchlist.get("product_description", "")[:100]
             results["features"]["competitor_milestones"] = await track_competitor_milestones(desc, desc)
         except Exception as e:
+            logger.warning("competitor_milestones check failed: %s", e)
             results["features"]["competitor_milestones"] = []
 
         # 3b. ClinicalTrials.gov + FDA live pipeline (moat wideners 2+3)
