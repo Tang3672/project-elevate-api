@@ -137,25 +137,40 @@ async def _init_background():
     except Exception as e:
         _log.error("DB initialization failed (non-fatal): %s", e)
 
+    # BUG-44b: On Railway multi-replica deployments every replica starts its own
+    # in-process APScheduler, causing all ingestion jobs and weekly-tracker emails
+    # to fire once per replica.  Guard: only run schedulers on the primary replica.
+    # Railway sets RAILWAY_REPLICA_ID on each instance; when it is absent the app
+    # runs on a single instance (scheduler always runs).  On multi-replica deploys
+    # set SCHEDULER_PRIMARY=true on exactly one service/instance via Railway env vars.
+    import os as _os
+    _replica_id  = _os.environ.get("RAILWAY_REPLICA_ID", "")
+    _is_primary  = (not _replica_id) or (_os.environ.get("SCHEDULER_PRIMARY", "").lower() == "true")
+
     # Start the ingestion scheduler if enabled
-    if settings.ENABLE_SCHEDULER:
+    if settings.ENABLE_SCHEDULER and _is_primary:
         from app.scheduler.ingestion_scheduler import init_scheduler
         init_scheduler()
+    elif settings.ENABLE_SCHEDULER and not _is_primary:
+        _log.info("Ingestion scheduler skipped on non-primary replica (RAILWAY_REPLICA_ID=%s)", _replica_id)
 
     # BUG-25: start tracker scheduler here (after DB init succeeds) instead of
     # a separate @app.on_event("startup") that fires unconditionally
-    try:
-        from app.services.weekly_tracker import run_weekly_tracker
-        import asyncio as _asyncio2
-        _tracker_scheduler.add_job(
-            lambda: _asyncio2.ensure_future(run_weekly_tracker()),
-            trigger="cron", day_of_week="mon", hour=8, minute=0,
-            id="weekly_tracker", replace_existing=True
-        )
-        _tracker_scheduler.start()
-        _log.info("Weekly tracker scheduler started")
-    except Exception as _sched_err:
-        _log.error("Weekly tracker scheduler failed to start: %s", _sched_err)
+    if _is_primary:
+        try:
+            from app.services.weekly_tracker import run_weekly_tracker
+            import asyncio as _asyncio2
+            _tracker_scheduler.add_job(
+                lambda: _asyncio2.ensure_future(run_weekly_tracker()),
+                trigger="cron", day_of_week="mon", hour=8, minute=0,
+                id="weekly_tracker", replace_existing=True
+            )
+            _tracker_scheduler.start()
+            _log.info("Weekly tracker scheduler started")
+        except Exception as _sched_err:
+            _log.error("Weekly tracker scheduler failed to start: %s", _sched_err)
+    else:
+        _log.info("Weekly tracker scheduler skipped on non-primary replica (RAILWAY_REPLICA_ID=%s)", _replica_id)
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────

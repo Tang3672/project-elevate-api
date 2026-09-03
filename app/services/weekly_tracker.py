@@ -26,7 +26,7 @@ from typing import List, Dict, Optional
 import httpx
 
 from app.core.config import settings
-from app.db.watchlist_repository import get_all_active_watchlists, create_alert
+from app.db.watchlist_repository import get_all_active_watchlists, create_alert, alert_already_exists
 from app.db.user_repository import get_user_by_id
 # Email sent inline via send_weekly_digest_email function below
 
@@ -372,17 +372,23 @@ async def process_watchlist(watchlist: dict) -> dict:
 
     body = "\n".join(body_parts)
 
-    # Save alert to DB
-    alert = await create_alert(
-        watchlist_id = wl_id,
-        user_id      = user_id,
-        title        = title,
-        body         = body,
-        severity     = severity,
-        source       = "weekly_tracker",
-        recalculation_needed = needs_recalc,
-        significance_score   = score,
-    )
+    # Save alert to DB — skip if an identical alert already exists this week
+    # (prevents duplicate alerts on scheduler restart or Railway multi-replica runs)
+    already_exists = await alert_already_exists(wl_id, title)
+    if already_exists:
+        logger.info("Skipping duplicate alert for watchlist %s: '%s'", wl_id, title[:60])
+        alert = None
+    else:
+        alert = await create_alert(
+            watchlist_id = wl_id,
+            user_id      = user_id,
+            title        = title,
+            body         = body,
+            severity     = severity,
+            source       = "weekly_tracker",
+            recalculation_needed = needs_recalc,
+            significance_score   = score,
+        )
 
     return {
         "watchlist_id":       wl_id,
