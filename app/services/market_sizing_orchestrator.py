@@ -222,7 +222,7 @@ class OrchestratedResult:
                     lines.append(
                         f"  SAM adj ×{ec.consensus_sam_multiplier:.2f}, "
                         f"SOM adj ×{ec.consensus_som_multiplier:.2f} "
-                        f"({len(ec.activated_experts)} expert lenses)"
+                        f"({len(self.expert_activations or [])} expert lenses)"
                     )
                 lines.append("")
             except Exception as _e:
