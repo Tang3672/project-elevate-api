@@ -103,6 +103,12 @@ async def init_user_tables():
                 created_at  TIMESTAMPTZ DEFAULT NOW()
             )
         """)
+        # Ensure case-insensitive UNIQUE constraint to prevent duplicate submissions
+        # and eliminate the TOCTOU race between SELECT + INSERT in the waitlist endpoint.
+        await conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS waitlist_email_ci_unique_idx
+            ON waitlist (lower(email))
+        """)
 
     logger.info("✅ User tables initialized")
 

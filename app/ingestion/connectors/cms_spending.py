@@ -122,7 +122,8 @@ async def load_cms_drug_spending(disease_names: list[str] | None = None) -> dict
     try:
         from app.db.database import get_pool
         pool = await get_pool()
-    except Exception:
+    except Exception as e:
+        logger.warning("CMS spending: DB pool unavailable, skipping persistence: %s", e)
         pool = None
 
     for disease in targets:

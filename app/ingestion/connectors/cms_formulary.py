@@ -176,8 +176,8 @@ def get_formulary_coverage(drug_name: str) -> Optional[dict]:
                 "source": "CMS Part D Formulary (US Public Domain) — data.cms.gov",
                 "url": "https://data.cms.gov/provider-summary-by-type-of-service/medicare-part-d-prescribers/",
             }
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("CMS formulary live API failed for %s: %s", drug_name, e)
 
     return None
 

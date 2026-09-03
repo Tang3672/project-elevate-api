@@ -410,14 +410,13 @@ async def submit_waitlist(body: dict):
 
     pool = await get_pool()
     async with pool.acquire() as conn:
-        # BUG-21: DDL moved to init_user_tables() — keep only the INSERT here
-        # Check for duplicate
-        existing = await conn.fetchrow("SELECT id FROM waitlist WHERE lower(email)=lower($1)", email)
-        if not existing:
-            await conn.execute("""
-                INSERT INTO waitlist (name, email, institution, role, plan, message)
-                VALUES ($1,$2,$3,$4,$5,$6)
-            """, name or None, email, institution or None, role or None, plan, message or None)
+        # Atomic upsert — ON CONFLICT on the case-insensitive unique index eliminates
+        # the TOCTOU race that a SELECT-then-INSERT pattern would have under concurrency.
+        await conn.execute("""
+            INSERT INTO waitlist (name, email, institution, role, plan, message)
+            VALUES ($1,$2,$3,$4,$5,$6)
+            ON CONFLICT (lower(email)) DO NOTHING
+        """, name or None, email, institution or None, role or None, plan, message or None)
 
     # Send notifications (always — even for duplicates so admin is aware)
     try:

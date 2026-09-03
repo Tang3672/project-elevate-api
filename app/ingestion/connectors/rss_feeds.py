@@ -140,7 +140,8 @@ async def load_rss_signals(disease_names: list[str] | None = None) -> dict[str, 
     try:
         from app.db.database import get_pool
         pool = await get_pool()
-    except Exception:
+    except Exception as e:
+        logger.warning("RSS signals: DB pool unavailable, skipping persistence: %s", e)
         pool = None
 
     for disease in targets:
