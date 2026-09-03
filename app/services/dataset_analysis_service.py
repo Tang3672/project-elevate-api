@@ -41,7 +41,6 @@ import csv
 import io
 import json
 import logging
-import os
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict
 
@@ -167,7 +166,7 @@ async def _haiku_interpret(
     data_type: str,
 ) -> dict:
     """Use Haiku to interpret statistics in biomedical context."""
-    api_key = os.getenv("ANTHROPIC_API_KEY") or settings.ANTHROPIC_API_KEY
+    api_key = settings.ANTHROPIC_API_KEY
     if not api_key:
         return {}
 

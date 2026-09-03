@@ -2838,11 +2838,11 @@ NOT a second stacking gate."""
 
 async def _parse_assumption_nl(text: str, state: dict, ops: list) -> dict:
     """Call Claude to parse NL text into market model operations."""
-    import os, json as _json
+    import json as _json
     import httpx
     from app.core.config import settings as _settings
 
-    api_key = os.getenv("ANTHROPIC_API_KEY") or _settings.ANTHROPIC_API_KEY
+    api_key = _settings.ANTHROPIC_API_KEY
     if not api_key:
         raise ValueError("ANTHROPIC_API_KEY not set")
 
@@ -3054,10 +3054,10 @@ async def regenerate_section(
     Uses Haiku to rewrite the prose; placeholders in the output are replaced with
     data-node-tagged spans so the numbers remain live after injection.
     """
-    import os, httpx
+    import httpx
     from app.core.config import settings as _settings
 
-    api_key = os.getenv("ANTHROPIC_API_KEY") or _settings.ANTHROPIC_API_KEY
+    api_key = _settings.ANTHROPIC_API_KEY
     if not api_key:
         raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY not configured")
 

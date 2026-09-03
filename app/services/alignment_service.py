@@ -3627,7 +3627,7 @@ def _enforce_market_consistency(report, deriv) -> None:
 
 async def _call_claude(context: str, system_prompt: str, max_tokens: int = 2000,
                        model: str = None) -> str:
-    anthropic_api_key = os.getenv("ANTHROPIC_API_KEY") or settings.ANTHROPIC_API_KEY
+    anthropic_api_key = settings.ANTHROPIC_API_KEY
     if not anthropic_api_key:
         raise ValueError("ANTHROPIC_API_KEY not set in Railway environment variables")
     async with httpx.AsyncClient(timeout=300.0) as client:

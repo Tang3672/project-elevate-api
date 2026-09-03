@@ -92,6 +92,13 @@ async def _init_background():
     # BUG-31a: short JWT secrets (< 32 chars) are trivially brute-forced; warn loudly in any env
     elif len(settings.JWT_SECRET) < 32:
         _log.warning("⚠️  JWT_SECRET is only %d characters — use at least 32 random characters to prevent brute-force forgery.", len(settings.JWT_SECRET))
+    # Warn if required API keys are missing — every report call will fail silently without these
+    if not settings.ANTHROPIC_API_KEY:
+        _log.warning("⚠️  ANTHROPIC_API_KEY is not set — all PI report and LLM calls will fail. Set this in Railway environment variables.")
+    if not settings.STRIPE_SECRET_KEY:
+        _log.warning("⚠️  STRIPE_SECRET_KEY is not set — billing and subscription endpoints will fail.")
+    if not settings.STRIPE_WEBHOOK_SECRET:
+        _log.warning("⚠️  STRIPE_WEBHOOK_SECRET is not set — Stripe webhook verification will fail and billing events will be silently dropped.")
     try:
         await init_db()
         await ensure_demand_signals_table()

@@ -17,7 +17,6 @@ Panels run in parallel inside the existing asyncio.gather — zero latency overh
 
 import json
 import logging
-import os
 import re
 from dataclasses import dataclass, field
 from typing import Optional, List
@@ -289,7 +288,7 @@ def panel_to_dict(panel: "ExpertPanelResult") -> dict:
 
 async def _haiku_call(system: str, user: str) -> dict:
     """Single Haiku call returning parsed JSON dict."""
-    api_key = os.getenv("ANTHROPIC_API_KEY") or settings.ANTHROPIC_API_KEY
+    api_key = settings.ANTHROPIC_API_KEY
     if not api_key:
         raise ValueError("ANTHROPIC_API_KEY not set")
     async with httpx.AsyncClient(timeout=12.0) as client:

@@ -13,7 +13,6 @@ Runs in parallel with main report generation.
 import asyncio
 import json
 import logging
-import os
 from typing import Dict, List, Optional
 import httpx
 
@@ -371,7 +370,7 @@ async def _score_comparator_relevance(
     Call Haiku to score functional substitutability between the focal product
     and a comparator on a 0–10 scale. Returns -1 on failure (caller treats as unknown).
     """
-    api_key = os.getenv("ANTHROPIC_API_KEY") or settings.ANTHROPIC_API_KEY
+    api_key = settings.ANTHROPIC_API_KEY
     if not api_key:
         return -1
     system = (
@@ -463,7 +462,7 @@ async def _extract_research_tool_comparators(
     """
     if not idea:
         return []
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    api_key = settings.ANTHROPIC_API_KEY
     if not api_key:
         return []
     prompt = (

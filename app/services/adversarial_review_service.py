@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from typing import Optional
 
 import httpx
@@ -123,7 +122,7 @@ async def run_adversarial_review(
         logger.info("S-06: no recommendations to review in report dict")
         return []
 
-    api_key = os.getenv("ANTHROPIC_API_KEY") or settings.ANTHROPIC_API_KEY
+    api_key = settings.ANTHROPIC_API_KEY
     if not api_key:
         logger.warning("S-06: ANTHROPIC_API_KEY not set — using fallback adversarial review")
         return _fallback_review(recommendations)
