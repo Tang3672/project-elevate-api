@@ -1302,7 +1302,11 @@ async def run_retrieval_pipeline(
     sources_called: list[str] = []
 
     # ── Tier 0: instant pre-loaded ────────────────────────────────────────────
-    tier0_facts = _fetch_tier0(disease_name, therapeutic_area, subcategory_id, idea)
+    # BUG-90: _fetch_tier0 is sync but calls get_disease_pathways() (Reactome) and
+    # get_rare_disease_prevalence() (Orphanet) which fall back to blocking requests.get()
+    # on cache misses. Offload to a thread so the event loop is never blocked.
+    tier0_facts = await asyncio.to_thread(
+        _fetch_tier0, disease_name, therapeutic_area, subcategory_id, idea)
     all_facts.extend(tier0_facts)
     sources_called.extend(set(f.source_id for f in tier0_facts))
 
