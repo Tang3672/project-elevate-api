@@ -30,6 +30,11 @@ async def lifespan(app: FastAPI):
     # BUG-62: _tracker_scheduler was never shut down — process hung on container restart
     if _tracker_scheduler.running:
         _tracker_scheduler.shutdown(wait=False)
+    # BUG-48A: asyncpg pool was never closed on shutdown, leaking connections on every
+    # container restart.  close_db() sets _pool=None so any stray coroutine that calls
+    # get_pool() after shutdown gets a fresh pool rather than a closed one.
+    from app.db.database import close_db
+    await close_db()
 
 
 app = FastAPI(

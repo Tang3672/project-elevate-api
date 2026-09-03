@@ -71,10 +71,20 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if path in ("/health", "/docs", "/openapi.json") or path.startswith("/static"):
             return await call_next(request)
 
-        # Get client IP (handle Railway's reverse proxy)
+        # Get client IP (handle Railway's reverse proxy).
+        # BUG-48B: the original code used split(",")[0] — the leftmost (first) value in
+        # X-Forwarded-For, which is fully client-controlled.  An attacker could send
+        # "X-Forwarded-For: fake-ip" on every request and cycle through millions of fake
+        # IPs, completely bypassing per-IP rate limiting.
+        #
+        # Fix: prefer X-Real-IP (Railway's edge sets this to the actual client IP and
+        # does not let the client override it), then fall back to the RIGHTMOST value in
+        # X-Forwarded-For (the IP appended by the last trusted proxy in the chain — the
+        # one the client cannot have injected), then request.client.host as last resort.
+        _xff = request.headers.get("x-forwarded-for", "")
         client_ip = (
-            request.headers.get("x-forwarded-for", "").split(",")[0].strip()
-            or request.headers.get("x-real-ip", "")
+            request.headers.get("x-real-ip", "").strip()
+            or (_xff.split(",")[-1].strip() if _xff else "")
             or (request.client.host if request.client else "unknown")
         )
 
