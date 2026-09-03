@@ -420,14 +420,13 @@ async def submit_waitlist(body: dict):
 
     # Send notifications (always — even for duplicates so admin is aware)
     try:
-        import os as _os
         from app.services.email_service import send_email
         from app.core.config import settings
-        # Admin notification address: use ADMIN_EMAIL env var, fall back to
+        # Admin notification address: prefer ADMIN_EMAIL setting, fall back to
         # EMAIL_FROM (the configured outbound sender), and never hardcode a
         # personal address in source.
         admin_email = (
-            _os.environ.get("ADMIN_EMAIL", "").strip()
+            settings.ADMIN_EMAIL.strip()
             or settings.EMAIL_FROM.strip()
             or settings.EMAIL_USER.strip()
         )

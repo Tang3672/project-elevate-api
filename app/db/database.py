@@ -1,5 +1,8 @@
+import logging
 import asyncpg
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 _pool = None
 
@@ -30,7 +33,7 @@ async def init_db():
         try:
             await conn.execute("CREATE EXTENSION IF NOT EXISTS vector;")
         except Exception as e:
-            print(f"⚠ pgvector not available: {e}")
+            logger.warning("pgvector not available: %s", e)
 
         # Hospital needs table
         await conn.execute("""
@@ -70,7 +73,7 @@ async def init_db():
             ON hospital_needs (department);
         """)
 
-        print("✅ Database initialized successfully")
+        logger.info("Database initialized successfully")
 
 async def close_db():
     global _pool

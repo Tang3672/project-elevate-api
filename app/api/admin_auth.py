@@ -9,10 +9,10 @@ Usage:
     from app.api.admin_auth import require_admin_key
     admin_router = APIRouter(dependencies=[Depends(require_admin_key)])
 """
-import os
 import hmac
 from fastapi import HTTPException, Header
 from typing import Optional
+from app.core.config import settings
 
 
 def require_admin_key(x_admin_key: Optional[str] = Header(default=None, alias="X-Admin-Key")) -> None:
@@ -21,7 +21,7 @@ def require_admin_key(x_admin_key: Optional[str] = Header(default=None, alias="X
     BUG-11: was a URL query param — leaked the key to server access logs and browser history.
     Clients: send header `X-Admin-Key: <key>` instead of `?key=<key>`.
     """
-    expected = os.environ.get("ADMIN_KEY", "")
+    expected = settings.ADMIN_KEY
     if not expected:
         raise HTTPException(status_code=503, detail="Admin key not configured on server")
     provided = x_admin_key or ""

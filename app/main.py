@@ -41,9 +41,8 @@ app = FastAPI(
 
 # CORS — restricted to the Netlify frontends (prod + staging + preview deploys) and
 # localhost for dev, instead of a wide-open "*". Extra origins (e.g. a future custom
-# domain) can be added via the ALLOWED_ORIGINS env var (comma-separated).
-import os as _os
-_extra_origins = [o.strip() for o in _os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()]
+# domain) can be added via the ALLOWED_ORIGINS setting (comma-separated).
+_extra_origins = [o.strip() for o in settings.ALLOWED_ORIGINS.split(",") if o.strip()]
 # "null" allows file:// local HTML (Origin: null) used during dev/staging.
 # allow_credentials=False: frontend uses Bearer tokens in headers, not cookies,
 # so CORS credentials mode is not needed — and Chrome rejects Allow-Origin:null

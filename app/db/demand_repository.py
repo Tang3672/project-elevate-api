@@ -6,10 +6,13 @@ Both tables feed the same pgvector index that inventor alignment searches.
 """
 
 import json
+import logging
 from typing import List, Optional, Tuple
 from datetime import datetime
 from app.db.database import get_pool
 from app.models.demand_signal import DemandSignal
+
+logger = logging.getLogger(__name__)
 
 
 async def ensure_demand_signals_table():
@@ -92,7 +95,7 @@ async def ensure_demand_signals_table():
                 ON demand_signals ({col});
             """)
 
-        print("✅ demand_signals table ready")
+        logger.info("demand_signals table ready")
 
 
 async def upsert_signal(signal: DemandSignal, embedding: List[float]) -> Optional[int]:
