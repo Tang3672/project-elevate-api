@@ -2,7 +2,7 @@
 Tracker API endpoints
 """
 import logging
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from app.api.auth import get_current_user
 from app.api.admin_auth import require_admin_key
 
@@ -201,7 +201,7 @@ async def test_full_retention(current_user: dict = Depends(get_current_user)):
 
 @router.get("/competitive-intel")
 async def get_competitive_intel(
-    condition: str = "carbapenem-resistant infections",
+    condition: str = Query(default="carbapenem-resistant infections", max_length=300),
     current_user: dict = Depends(get_current_user)
 ):
     """Get live FDA + ClinicalTrials competitive intelligence for a condition."""

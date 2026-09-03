@@ -75,7 +75,7 @@ async def get_need(need_id: int, current_user: dict = Depends(get_current_user))
 
 @router.post("/search", response_model=SimilarNeedsResponse)
 async def search_similar_needs(
-    query: str,
+    query: str = Query(..., min_length=1, max_length=2000),
     top_k: int = Query(default=10, ge=1, le=50),
     min_similarity: float = Query(default=0.6, ge=0.0, le=1.0),
     current_user: dict = Depends(get_current_user),
