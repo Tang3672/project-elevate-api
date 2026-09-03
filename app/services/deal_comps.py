@@ -417,6 +417,18 @@ def get_deal_comps(sub_expert_id: str) -> DealCompProfile:
     return DEAL_COMPS.get(alias, _DEFAULT_COMPS) if alias else _DEFAULT_COMPS
 
 
+def _fmt_m(val: float) -> str:
+    """Format a $M figure appropriately.
+
+    Values < $1M (common for research-tool / lab-infrastructure profiles where upfronts
+    are in the $10K–$500K range) would silently round to '$0M' with :.0f — instead
+    express them in $K.  Values ≥ $1M round to the nearest million.
+    """
+    if val < 1.0:
+        return f"${val * 1000:.0f}K"
+    return f"${val:.0f}M"
+
+
 def format_deal_comps_for_prompt(sub_expert_id: str, development_phase: str = "preclinical") -> str:
     """
     Format deal comparables as a concise block for injection into the commercial panel prompt.
@@ -434,8 +446,8 @@ def format_deal_comps_for_prompt(sub_expert_id: str, development_phase: str = "p
 
     return (
         f"DEAL COMPARABLES — {comp.therapeutic_area} ({development_phase}):\n"
-        f"  Upfront / Issue Fee: ${upfront[0]:.0f}M – ${upfront[1]:.0f}M\n"
-        f"  Total Milestones (biobucks): ${milestones[0]:.0f}M – ${milestones[1]:.0f}M\n"
+        f"  Upfront / Issue Fee: {_fmt_m(upfront[0])} – {_fmt_m(upfront[1])}\n"
+        f"  Total Milestones (biobucks): {_fmt_m(milestones[0])} – {_fmt_m(milestones[1])}\n"
         f"  Royalty — Academic licensor: {comp.royalty_academic_pct[0]:.0f}%–{comp.royalty_academic_pct[1]:.0f}%\n"
         f"  Royalty — Corporate licensor: {comp.royalty_corporate_pct[0]:.0f}%–{comp.royalty_corporate_pct[1]:.0f}%\n"
         f"  Example: {comp.example_deal}\n"

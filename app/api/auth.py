@@ -415,14 +415,25 @@ async def submit_waitlist(body: dict):
 
     # Send notifications (always — even for duplicates so admin is aware)
     try:
+        import os as _os
         from app.services.email_service import send_email
-        admin_email = "ijw91021@gmail.com"
-
-        # 1. Notify Isaac immediately
-        await send_email(
-            to=admin_email,
-            subject=f"🚀 Early access request — {name or email} ({plan} plan)",
-            body=f"""New early access request for Medlevate:
+        from app.core.config import settings
+        # Admin notification address: use ADMIN_EMAIL env var, fall back to
+        # EMAIL_FROM (the configured outbound sender), and never hardcode a
+        # personal address in source.
+        admin_email = (
+            _os.environ.get("ADMIN_EMAIL", "").strip()
+            or settings.EMAIL_FROM.strip()
+            or settings.EMAIL_USER.strip()
+        )
+        if not admin_email:
+            logger.warning("ADMIN_EMAIL not configured — skipping admin waitlist notification")
+        else:
+            # 1. Notify admin immediately
+            await send_email(
+                to=admin_email,
+                subject=f"Early access request — {name or email} ({plan} plan)",
+                body=f"""New early access request for Medlevate:
 
 Name:        {name or '(not provided)'}
 Email:       {email}
@@ -435,7 +446,7 @@ Message:     {message or '(none)'}
 Reply to this person: {email}
 ━━━━━━━━━━━━━━━━━━━━━━━━
 """,
-        )
+            )
 
         # 2. Send confirmation to the person who submitted
         if name:
@@ -452,7 +463,6 @@ In the meantime, you can create a free account and start exploring the platform:
 https://medlevate.com/app.html?register=1
 
 — The Medlevate Team
-ijw91021@gmail.com
 """,
             )
     except Exception as e:

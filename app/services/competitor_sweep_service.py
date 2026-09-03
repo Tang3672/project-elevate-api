@@ -31,6 +31,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field, asdict
+from datetime import date as _date
 from typing import Optional
 
 import requests
@@ -117,7 +118,7 @@ def _infer_advantages(prod: dict, context: dict) -> tuple[list[str], list[str], 
 
     # ── Approval vintage → exclusivity remaining ──────────────────────────────
     if yr:
-        years_on_market = 2026 - yr
+        years_on_market = _date.today().year - yr
         if years_on_market <= 2:
             advantages.append(f"Recently approved ({yr}) — full data exclusivity intact, no generics imminent")
             signal = f"Approved {yr} — company likely expanding label/indications and defending exclusivity aggressively"
@@ -444,7 +445,8 @@ def _analyse_white_space(
     all_routes  = {(c.route or "").upper() for c in competitors}
     all_stages  = {c.stage for c in competitors}
     n_approved  = sum(1 for c in competitors if c.stage == "approved")
-    n_pipeline  = len(competitors) - n_approved
+    # Exclude status_quo / diy sentinel rows — they are not real pipeline products
+    n_pipeline  = sum(1 for c in competitors if c.stage not in ("approved", "status_quo", "diy"))
 
     ta = therapeutic_area.lower()
 
@@ -729,7 +731,10 @@ def sweep_competitors(
     if not competitors:
         summary = f"No established competitors identified for {disease_name} — potential first-mover opportunity."
     elif structure == "monopoly":
-        c = competitors[0]
+        # BUG-FIX: competitors[0] is always the status_quo sentinel row — find the actual
+        # approved monopoly drug by filtering for stage=="approved".
+        _approved = [c for c in competitors if c.stage == "approved"]
+        c = _approved[0] if _approved else competitors[0]
         summary = (
             f"{disease_name} is currently a monopoly market dominated by {c.company} ({c.name}). "
             f"Entry requires clear differentiation on at least one dimension — route, safety, biomarker, or mechanism."
