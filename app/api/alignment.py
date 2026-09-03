@@ -115,11 +115,18 @@ async def check_alignment(payload: AlignmentRequest):
 
 _DEV_EMAILS = {"test@projectelevate.io", "admin@projectelevate.io"}
 _PLAN_LIMITS = {
-    "basic":        5,    # Explorer $49
-    "starter":      20,   # Innovator $149
-    "professional": None,  # Institution $799 — unlimited
+    # Current plan names (stored in users.plan_name)
+    "free":         3,    # Default unauthenticated/free tier — 3 analyses
+    "explorer":     5,    # Explorer $49
+    "innovator":    20,   # Innovator $149
+    "institution":  None, # Institution $799 — unlimited
+    "professional": None, # Alias for institution — unlimited
+    # Subscription-status keys (users.subscription_status) — active subscribers unlimited
     "active":       None,
     "trialing":     None,
+    # Legacy plan names kept for backward compat (pre-rename)
+    "basic":        5,
+    "starter":      20,
 }
 
 
@@ -135,7 +142,11 @@ async def _enforce_quota(current_user):
             user = await get_user_by_id(current_user["id"])
             if user:
                 sub_status = user.get("subscription_status", "none")
-                plan       = user.get("plan", "none")
+                # BUG-50: was user.get("plan", "none") — "plan" is not a DB column;
+                # the column is "plan_name".  Using the wrong key meant every
+                # non-waitlist free user resolved plan="none", which is absent from
+                # _PLAN_LIMITS, so limit=None and the quota gate was never applied.
+                plan       = user.get("plan_name", "free")
                 used       = user.get("free_reports_used", 0) or 0
                 limit      = _PLAN_LIMITS.get(plan) or _PLAN_LIMITS.get(sub_status)
 
