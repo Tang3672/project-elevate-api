@@ -355,6 +355,13 @@ async def change_password(request: Request, current_user: dict = Depends(get_cur
     current_pw = body.get("current_password", "")
     new_pw     = body.get("new_password", "")
 
+    # BUG-73: cap length before PBKDF2 to prevent authenticated CPU-exhaustion DoS.
+    # An authenticated user could send a 100MB string, forcing 100k PBKDF2 iterations
+    # on a huge input and pegging a CPU core.
+    _MAX_PW_LEN = 100
+    if len(current_pw) > _MAX_PW_LEN or len(new_pw) > _MAX_PW_LEN:
+        raise HTTPException(status_code=400, detail="Password must not exceed 100 characters")
+
     user = await get_user_by_id(current_user["id"])
     if not user or not user.get("password_hash"):
         raise HTTPException(status_code=400, detail="Cannot change password for OAuth accounts")

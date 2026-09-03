@@ -6,7 +6,16 @@ _pool = None
 async def get_pool():
     global _pool
     if _pool is None:
-        _pool = await asyncpg.create_pool(settings.DATABASE_URL)
+        # BUG-74: no command_timeout set — a hung query (long embedding search,
+        # network partition, etc.) holds a pool connection indefinitely, eventually
+        # exhausting the pool and hanging the whole app.  30 s is well above any
+        # legitimate query; adjust via env if a specific workload needs more time.
+        _pool = await asyncpg.create_pool(
+            settings.DATABASE_URL,
+            min_size=2,
+            max_size=10,
+            command_timeout=30,
+        )
     return _pool
 
 async def init_db():
