@@ -4,6 +4,7 @@ from app.api import needs
 from app.api.demand import admin_router, demand_router
 from app.api.alignment import router as alignment_router
 from app.api.auth import router as auth_router
+from app.api.pdf import router as pdf_router
 from app.api.watchlist import router as watchlist_router, admin_router as watchlist_admin_router
 from app.api.features import trial_router, portfolio_router, grant_router
 from app.api.billing import router as billing_router
@@ -156,6 +157,9 @@ app.include_router(admin_router,         prefix="/api/v1/admin",   tags=["admin"
 
 # Step 3: inventor alignment
 app.include_router(alignment_router,     prefix="/api/v1/alignment", tags=["alignment"])
+
+# P2: PDF / HTML report export
+app.include_router(pdf_router,           prefix="/api/v1",              tags=["pdf"])
 
 # Step 4: user accounts
 app.include_router(auth_router,          prefix="/api/v1/auth",        tags=["auth"])
