@@ -141,7 +141,7 @@ async def _enforce_quota(current_user):
             from app.db.user_repository import get_user_by_id, try_consume_free_report_atomic
             user = await get_user_by_id(current_user["id"])
             if user:
-                sub_status = user.get("subscription_status", "none")
+                sub_status = user.get("subscription_status") or "none"
                 # BUG-50: was user.get("plan", "none") — "plan" is not a DB column;
                 # the column is "plan_name".  Using the wrong key meant every
                 # non-waitlist free user resolved plan="none", which is absent from
@@ -2232,7 +2232,11 @@ async def list_market_sizing_overrides(report_id: str):
 
 
 @router.delete("/market-sizing/override")
-async def delete_market_sizing_override(report_id: str, segment_id: int):
+async def delete_market_sizing_override(
+    report_id: str,
+    segment_id: int,
+    current_user=Depends(get_current_user),  # BUG-52: was unauthenticated — any caller could delete any report's overrides
+):
     """Revert all custom assumptions for a segment (delete the saved override)."""
     import app.db.market_sizing_override_repository as _ovr_repo
     deleted = await _ovr_repo.delete_override(report_id, segment_id)

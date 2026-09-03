@@ -70,7 +70,7 @@ async def billing_status(current_user: dict = Depends(get_current_user)):
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    sub_status = user.get("subscription_status", "none")
+    sub_status = user.get("subscription_status") or "none"
     trial_ends = user.get("trial_ends_at")
     stripe_id  = user.get("stripe_customer_id")
 

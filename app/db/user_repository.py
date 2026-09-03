@@ -514,7 +514,7 @@ async def try_consume_report(user_id: int) -> dict:
     usage = await get_usage(user_id)
     plan       = usage["plan"]
     remaining  = usage["remaining"]
-    sub_status = (await get_user_by_id(user_id) or {}).get("subscription_status", "none")
+    sub_status = (await get_user_by_id(user_id) or {}).get("subscription_status") or "none"
 
     # Unlimited plan
     if remaining is None:

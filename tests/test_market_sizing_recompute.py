@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 import app.db.market_segment_repository as repo
 import app.db.market_sizing_override_repository as ovr_repo
 from app.api.alignment import router
+from app.api.auth import get_current_user
 
 
 STROKE_LVO = {
@@ -97,6 +98,8 @@ def client(monkeypatch):
 
     app = FastAPI()
     app.include_router(router, prefix="/api/v1/alignment")
+    # BUG-52: delete endpoint now requires auth — provide a test user for the fixture
+    app.dependency_overrides[get_current_user] = lambda: {"id": 1, "email": "test@test.com"}
     c = TestClient(app)
     c._override_store = store  # exposed for assertions
     return c
