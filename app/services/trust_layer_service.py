@@ -520,7 +520,7 @@ async def score_report_trust(report: dict) -> dict:
         logger.error("Trust layer scoring failed: %s", e)
         return {
             "available": False,
-            "error": str(e),
+            "error": "Trust scoring unavailable",
             "summary": "Trust scoring unavailable for this report.",
             "abstention_required": False,
             "human_review_recommended": False,

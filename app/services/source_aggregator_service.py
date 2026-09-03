@@ -35,7 +35,7 @@ import asyncio
 import logging
 import json
 from typing import Dict, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 import httpx
 from xml.etree import ElementTree as ET
 
@@ -408,7 +408,7 @@ async def get_industry_news(query: str, max_results: int = 5) -> List[Dict]:
     # Fallback: recent PubMed articles if web search returned nothing
     if not results:
         try:
-            _now = datetime.utcnow()
+            _now = datetime.now(timezone.utc)
             _min_year = str(_now.year - 2)
             _date_range = f"{_min_year}-{_now.year}"
             async with httpx.AsyncClient(timeout=TIMEOUT) as client:
