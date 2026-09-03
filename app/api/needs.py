@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, HTTPException, Query, Depends
 from typing import Optional
 
@@ -13,6 +15,7 @@ from app.db.needs_repository import (
 from app.api.auth import get_current_user
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.post("", response_model=NeedResponse, status_code=201)
@@ -21,12 +24,14 @@ async def submit_need(payload: NeedSubmissionRequest, current_user: dict = Depen
     try:
         classification = await classify_need(payload.raw_text)
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Classification failed: {str(e)}")
+        logger.error("classify_need failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=502, detail="Classification service temporarily unavailable")
 
     try:
         embedding = await embed_text(payload.raw_text)
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Embedding failed: {str(e)}")
+        logger.error("embed_text failed (submit_need): %s", e, exc_info=True)
+        raise HTTPException(status_code=502, detail="Embedding service temporarily unavailable")
 
     saved = await insert_need(
         raw_text=payload.raw_text,
@@ -78,7 +83,8 @@ async def search_similar_needs(
     try:
         query_embedding = await embed_text(query)
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Embedding failed: {str(e)}")
+        logger.error("embed_text failed (search_similar_needs): %s", e, exc_info=True)
+        raise HTTPException(status_code=502, detail="Embedding service temporarily unavailable")
 
     matches = await find_similar_needs(
         query_embedding=query_embedding,

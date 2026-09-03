@@ -98,7 +98,8 @@ async def check_alignment(payload: AlignmentRequest):
     try:
         return await generate_alignment_report(payload.idea)
     except ValueError as e:
-        raise HTTPException(status_code=503, detail=str(e))
+        logger.warning("check_alignment ValueError: %s", e)
+        raise HTTPException(status_code=503, detail="Alignment service temporarily unavailable")
     except Exception as e:
         logger.error(f"Alignment failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Alignment check failed")
@@ -191,7 +192,8 @@ async def get_pi_report(payload: PIReportRequest, current_user = Depends(get_cur
         await _increment_usage(current_user)
         return report
     except ValueError as e:
-        raise HTTPException(status_code=503, detail=str(e))
+        logger.warning("get_pi_report ValueError: %s", e)
+        raise HTTPException(status_code=503, detail="Report generation service temporarily unavailable")
     except Exception as e:
         logger.error(f"PI report failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Report generation failed")
