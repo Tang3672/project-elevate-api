@@ -205,7 +205,7 @@ async def get_pi_report(payload: PIReportRequest, current_user = Depends(get_cur
         raise HTTPException(status_code=500, detail="Report generation failed")
 
 
-@router.post("/pi-report/async")
+@router.post("/pi-report/async", status_code=202)
 async def get_pi_report_async(payload: PIReportRequest, current_user = Depends(get_current_user)):
     """Start report generation in the background; returns a job_id immediately so
     the client never holds a long request open. Poll /pi-report/status/{job_id}."""
@@ -687,7 +687,7 @@ async def get_market_sizing_derivation(body: dict):
         raise HTTPException(status_code=500, detail="Market sizing derivation failed")
 
 
-@router.post("/market-sizing-override")
+@router.post("/market-sizing-override", status_code=201)
 async def save_market_sizing_override(
     body: dict,
     current_user=Depends(get_optional_user),
