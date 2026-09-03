@@ -56,7 +56,26 @@ async def get_report_html(
         product_name=report.get("product_name", ""),
         institution=report.get("institution", ""),
     )
-    return HTMLResponse(content=html, status_code=200)
+    # BUG-34a: The global SecurityHeadersMiddleware sets
+    # `Content-Security-Policy: default-src 'self'` via setdefault, which blocks
+    # inline <style> blocks.  render_report_html() produces a self-contained HTML
+    # document with a ~10 KB inline stylesheet; without `style-src 'unsafe-inline'`
+    # every browser renders the report completely unstyled.
+    # This endpoint is authentication-gated and ownership-checked; all user content
+    # is HTML-escaped via _e() / html.escape() before embedding, so relaxing
+    # style-src is safe.  script-src is intentionally absent (no JS in the report).
+    return HTMLResponse(
+        content=html,
+        status_code=200,
+        headers={
+            "Content-Security-Policy": (
+                "default-src 'self'; "
+                "style-src 'unsafe-inline'; "
+                "object-src 'none'; "
+                "base-uri 'self'"
+            )
+        },
+    )
 
 
 @router.get("/{job_id}/pdf")
