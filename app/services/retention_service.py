@@ -145,6 +145,7 @@ Analyze if the report needs updating. Respond ONLY in JSON:
                     "messages": [{"role": "user", "content": analysis_prompt}],
                 }
             )
+            r.raise_for_status()
             text = r.json()["content"][0]["text"]
             match = re.search(r'\{.*\}', text, re.DOTALL)
             if match:
@@ -446,6 +447,7 @@ Respond ONLY in JSON array:
                     "messages": [{"role": "user", "content": extract_prompt}],
                 }
             )
+            r.raise_for_status()
             text = r.json()["content"][0]["text"]
             match = re.search(r'\[.*\]', text, re.DOTALL)
             if match:

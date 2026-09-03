@@ -494,6 +494,7 @@ Keep it under 800 words. Be directive and specific."""
                     "messages": [{"role": "user", "content": prompt}]
                 }
             )
+            r.raise_for_status()
             data = r.json()
             generated = data["content"][0]["text"].strip()
             logger.info(f"✅ Dynamic prompt generated for {sub_expert_id} / {disease_name}")

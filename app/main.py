@@ -127,15 +127,18 @@ async def _init_background():
 
     # BUG-25: start tracker scheduler here (after DB init succeeds) instead of
     # a separate @app.on_event("startup") that fires unconditionally
-    from app.services.weekly_tracker import run_weekly_tracker
-    import asyncio as _asyncio2
-    _tracker_scheduler.add_job(
-        lambda: _asyncio2.ensure_future(run_weekly_tracker()),
-        trigger="cron", day_of_week="mon", hour=8, minute=0,
-        id="weekly_tracker", replace_existing=True
-    )
-    _tracker_scheduler.start()
-    _log.info("Weekly tracker scheduler started")
+    try:
+        from app.services.weekly_tracker import run_weekly_tracker
+        import asyncio as _asyncio2
+        _tracker_scheduler.add_job(
+            lambda: _asyncio2.ensure_future(run_weekly_tracker()),
+            trigger="cron", day_of_week="mon", hour=8, minute=0,
+            id="weekly_tracker", replace_existing=True
+        )
+        _tracker_scheduler.start()
+        _log.info("Weekly tracker scheduler started")
+    except Exception as _sched_err:
+        _log.error("Weekly tracker scheduler failed to start: %s", _sched_err)
 
 
 @app.on_event("shutdown")
