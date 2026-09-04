@@ -1744,8 +1744,10 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
     try:
         if not isinstance(funding_intel, Exception) and funding_intel:
             funding_block = format_funding_intelligence(funding_intel, disease_name)
-            sbir_count = len(funding_intel.get("sbir_awards", []))
-            entrant_count = len(funding_intel.get("new_entrants", []))
+            # BUG-78a: dict.get("key", []) returns None (not []) when the key exists
+            # with a NULL value from the funding API; or [] guards against that.
+            sbir_count = len(funding_intel.get("sbir_awards") or [])
+            entrant_count = len(funding_intel.get("new_entrants") or [])
             logger.info("Funding intel: %d SBIR awards, %d new trial entrants", sbir_count, entrant_count)
     except Exception as _fi_e:
         logger.warning("Funding intelligence injection failed (non-fatal): %s", _fi_e)

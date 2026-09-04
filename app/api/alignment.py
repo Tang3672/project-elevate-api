@@ -2960,13 +2960,27 @@ Return the parsed ops JSON."""
 
 class _ParseBody(BaseModel):
     text: str = Field(..., min_length=1, max_length=2000)
+    # BUG-78b: state and ops are embedded verbatim in the Claude Haiku prompt;
+    # unbounded dicts/lists allow arbitrary prompt inflation (LLM cost DoS).
     state: dict = Field(default_factory=dict)
-    ops: list    = Field(default_factory=list)
+    ops: list    = Field(default_factory=list, max_length=50)
+
+    @field_validator("state")
+    @classmethod
+    def _cap_state(cls, v: dict) -> dict:
+        _ALLOWED = {"buyer_population", "spend_per_unit", "sam_rate", "som_rate",
+                    "tam", "sam", "som"}
+        # Strip unknown keys; cap at 20 total to prevent prompt inflation.
+        filtered = {k: val for k, val in v.items() if k in _ALLOWED}
+        if len(filtered) > 20:
+            filtered = dict(list(filtered.items())[:20])
+        return filtered
 
 
 class _ApplyBody(BaseModel):
     text: str = Field(default="")
-    ops:  list = Field(default_factory=list)
+    # BUG-78b: unbounded ops list → unbounded DB write loop.
+    ops:  list = Field(default_factory=list, max_length=50)
 
 
 _REGEN_SYSTEM_PROMPT = """You rewrite one paragraph of a market sizing report after the user
@@ -2991,9 +3005,18 @@ Rules:
 class _RegenBody(BaseModel):
     section:         str  = Field(default="")
     original_text:   str  = Field(default="", max_length=4000)
+    # BUG-78b: all three fields feed directly into the Claude Haiku prompt;
+    # unbounded dicts/lists allow arbitrary prompt inflation (LLM cost DoS).
     current_values:  dict = Field(default_factory=dict)
     baseline_values: dict = Field(default_factory=dict)
-    assumptions:     list = Field(default_factory=list)
+    assumptions:     list = Field(default_factory=list, max_length=50)
+
+    @field_validator("current_values", "baseline_values")
+    @classmethod
+    def _cap_market_values(cls, v: dict) -> dict:
+        _ALLOWED = {"tam", "sam", "som", "buyer_population", "spend_per_unit",
+                    "sam_rate", "som_rate"}
+        return {k: val for k, val in v.items() if k in _ALLOWED}
 
 
 @router.post("/reports/{report_id}/assumptions/parse")
