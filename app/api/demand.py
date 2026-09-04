@@ -20,6 +20,7 @@ from app.services.embedding_service import embed_text
 from app.ingestion.pipeline import build_connector_registry
 from app.scheduler.ingestion_scheduler import trigger_connector, trigger_full_pipeline
 from app.api.admin_auth import require_admin_key
+from app.api.auth import get_current_user
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +116,7 @@ async def search_demand_signals(
     source: Optional[str] = Query(default=None, description="Filter by source name"),
     signal_type: Optional[str] = Query(default=None),
     state: Optional[str] = Query(default=None, description="2-letter state code"),
+    current_user: dict = Depends(get_current_user),
 ):
     """
     Semantic search over the demand signals index.
@@ -147,7 +149,7 @@ async def search_demand_signals(
 
 
 @demand_router.get("/sources")
-async def list_sources():
+async def list_sources(current_user: dict = Depends(get_current_user)):
     """List all signal sources with record counts."""
     counts = await get_signal_counts_by_source()
     return {"sources": counts}
