@@ -243,7 +243,8 @@ async def _lookup_price(
                 WHERE (LOWER(disease_name) = LOWER($1) OR disease_name IS NULL)
                   AND LOWER(product_type) = LOWER($2)
                   AND price_type = $3
-                ORDER BY (disease_name IS NOT NULL) DESC, confidence ASC
+                ORDER BY (disease_name IS NOT NULL) DESC,
+                         CASE confidence WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END ASC
                 LIMIT 1
             """, disease_name, product_type, target_price_type)
 
