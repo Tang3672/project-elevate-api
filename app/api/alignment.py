@@ -2724,7 +2724,11 @@ async def market_model_override(
     except Exception as _oe_err:
         logger.warning("override_events logging failed (non-fatal): %s", _oe_err)
 
-    return _build_override_response(old_m, new_m)
+    try:
+        return _build_override_response(old_m, new_m)
+    except (ValueError, ZeroDivisionError) as e:
+        logger.warning("market_model_override formula error for report %s: %s", report_id, e)
+        raise HTTPException(status_code=422, detail=f"Market model formula error: {e}")
 
 
 @router.post("/market-model/{report_id}/gate")
@@ -2762,7 +2766,11 @@ async def market_model_add_gate(
 
     await store.save(new_m)
 
-    resp = _build_override_response(old_m, new_m)
+    try:
+        resp = _build_override_response(old_m, new_m)
+    except (ValueError, ZeroDivisionError) as e:
+        logger.warning("market_model_add_gate formula error for report %s: %s", report_id, e)
+        raise HTTPException(status_code=422, detail=f"Market model formula error: {e}")
     resp["gate_id"] = gate_id
     return resp
 
@@ -2796,7 +2804,11 @@ async def market_model_remove_gate(
         raise HTTPException(status_code=500, detail="Failed to remove gate")
 
     await store.save(new_m)
-    return _build_override_response(old_m, new_m)
+    try:
+        return _build_override_response(old_m, new_m)
+    except (ValueError, ZeroDivisionError) as e:
+        logger.warning("market_model_remove_gate formula error for report %s: %s", report_id, e)
+        raise HTTPException(status_code=422, detail=f"Market model formula error: {e}")
 
 
 @router.post("/market-model/{report_id}/reset")
@@ -2829,7 +2841,11 @@ async def market_model_reset(
         change_note="Reset to engine baseline (v1)",
     )
     await store.save(reset_m)
-    return _build_override_response(old_m, reset_m)
+    try:
+        return _build_override_response(old_m, reset_m)
+    except (ValueError, ZeroDivisionError) as e:
+        logger.warning("market_model_reset formula error for report %s: %s", report_id, e)
+        raise HTTPException(status_code=422, detail=f"Market model formula error: {e}")
 
 
 # ── market-model.js NL assumption endpoints ──────────────────────────────────
