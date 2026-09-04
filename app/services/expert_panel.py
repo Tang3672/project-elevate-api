@@ -558,12 +558,15 @@ async def run_expert_panel(
         )
         return result
 
-    clinical, regulatory, commercial = await asyncio.gather(
+    _results = await asyncio.gather(
         _run_clinical_panel(disease_name, idea),
         _run_regulatory_panel(disease_name, idea, sub_expert_id, product_type, development_phase),
         _run_commercial_panel(disease_name, idea, sub_expert_id, market_context, development_phase),
-        return_exceptions=False,
+        return_exceptions=True,
     )
+    clinical, regulatory, commercial = [
+        (None if isinstance(r, Exception) else r) for r in _results
+    ]
     errors = sum(1 for x in (clinical, regulatory, commercial) if x is None)
     result = ExpertPanelResult(
         clinical=clinical,
