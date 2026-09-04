@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import List
 
 from app.ingestion.connectors.reddit_scraper import (
-    RedditScraper, is_pain_point, extract_department_hint
+    RedditScraper, is_pain_point, extract_department_hint, TARGET_SUBREDDITS
 )
 from app.services.classification_service import classify_need
 from app.services.embedding_service import embed_text
@@ -34,7 +34,7 @@ async def run_reddit_ingestion(
 ):
     scraper = RedditScraper()
     result  = RedditIngestionResult(
-        subreddits_scraped=len(subreddits or [9]),
+        subreddits_scraped=len(subreddits or TARGET_SUBREDDITS),
         posts_fetched=0, pain_points_found=0,
         inserted=0, skipped_duplicate=0, errors=0)
 

@@ -121,8 +121,9 @@ async def find_similar_needs(
     Find the most semantically similar hospital needs using cosine similarity.
 
     min_similarity=0.6 means "at least moderately related".
-    Cosine distance in pgvector: 0=identical, 2=opposite.
-    So similarity = 1 - (cosine_distance / 2) maps to [0, 1].
+    pgvector <=> returns cosine distance in [0, 2]; similarity = 1 - distance.
+    (The old formula `1 - distance/2` was BUG-61 — it inflated scores by
+    mapping [0,2]→[0,1] instead of returning true cosine similarity.)
     """
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -130,9 +131,9 @@ async def find_similar_needs(
             """
             SELECT id, raw_text, department, category, subcategory,
                    urgency_score, patient_impact_score, keywords, created_at,
-                   1 - (embedding <=> $1::vector) / 2 AS similarity_score
+                   1 - (embedding <=> $1::vector) AS similarity_score
             FROM hospital_needs
-            WHERE 1 - (embedding <=> $1::vector) / 2 >= $2
+            WHERE 1 - (embedding <=> $1::vector) >= $2
             ORDER BY embedding <=> $1::vector
             LIMIT $3
             """,
