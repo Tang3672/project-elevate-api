@@ -21,7 +21,7 @@ _HEADERS = {
     "X-Frame-Options": "DENY",
     "Referrer-Policy": "strict-origin-when-cross-origin",
     "Permissions-Policy": "geolocation=(), microphone=(), camera=()",
-    "Cross-Origin-Resource-Policy": "same-site",
+    "Cross-Origin-Resource-Policy": "cross-origin",
     "Cross-Origin-Opener-Policy": "same-origin",
     # BUG-30b: missing Content-Security-Policy allowed injected scripts in HTML responses
     # (PDF preview, report pages).  Restrict to same-origin; block object embeds and
