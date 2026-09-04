@@ -150,7 +150,7 @@ def build_digest_email(
     if low_alerts:
         summary_line += f"{', ' if summary_line else ''}{len(low_alerts)} low priority"
 
-    html = f"""<!DOCTYPE html>
+    html_body = f"""<!DOCTYPE html>
 <html>
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
 <body style="margin:0;padding:0;background:#f4f6f9;font-family:'DM Sans',Arial,sans-serif">
@@ -224,7 +224,7 @@ def build_digest_email(
   </table>
 </body>
 </html>"""
-    return html
+    return html_body
 
 
 async def send_digest_email(
