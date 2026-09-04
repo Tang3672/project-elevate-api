@@ -171,7 +171,7 @@ def _walk_db_funnel(
         gate_type = gate.get("type", "rate")
         label = gate.get("label", step_name)
         source_id = gate.get("source_id", "unknown")
-        source_name = gate.get("source_id", "unknown")
+        source_name = gate.get("source_name", source_id)
         confidence = gate.get("confidence", "low")
         is_expert = False
 
