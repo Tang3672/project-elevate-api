@@ -332,6 +332,10 @@ def bass_cumulative(t: float, p: float, q: float) -> float:
     """F(t) = (1 − e^{−(p+q)t}) / (1 + (q/p)e^{−(p+q)t})"""
     if p + q <= 0 or t <= 0:
         return 0.0
+    if p <= 0:
+        # Degenerate pure-imitation limit (p→0): F(t) = 1 − e^{−qt}
+        # Avoids ZeroDivisionError in the (q/p) term when p=0, q>0.
+        return 1.0 - math.exp(-q * t)
     exp_t = math.exp(-(p + q) * t)
     return (1.0 - exp_t) / (1.0 + (q / p) * exp_t)
 
