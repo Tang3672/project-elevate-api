@@ -21,6 +21,7 @@ The model narrates this output — it must NOT re-compute these figures.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from dataclasses import dataclass, field
@@ -345,7 +346,8 @@ async def run(
     mc_result = None
     try:
         from app.services.monte_carlo_engine import simulate_from_patient_flow
-        mc_result = simulate_from_patient_flow(
+        mc_result = await asyncio.to_thread(
+            simulate_from_patient_flow,
             patient_flow_result=pf_result,
             net_price_usd=mon_result.net_price_usd,
             revenue_model=mon_result.revenue_model,
