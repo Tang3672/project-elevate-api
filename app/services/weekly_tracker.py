@@ -519,7 +519,18 @@ async def send_weekly_digest_email(user: dict, results: List[dict]):
 
     try:
         from app.services.email_service import send_email
-        await send_email(to=email, subject=subject, html=html)
+        await send_email(
+            to=email,
+            subject=subject,
+            body=(
+                f"Hi {name},\n\n"
+                "Your weekly Project Elevate intelligence digest is ready.\n\n"
+                f"{len(results)} watchlist(s) scanned. "
+                f"{len([r for r in results if r.get('recalculation_needed')])} may need recalculation.\n\n"
+                "Visit https://medlevate.com to view your full reports."
+            ),
+            html=html,
+        )
         logger.info(f"Weekly digest sent to {email}")
     except Exception as e:
         logger.error(f"Failed to send digest to {email}: {e}")
