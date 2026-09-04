@@ -44,6 +44,11 @@ from app.db.user_repository import (
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+# Module-level set that keeps a strong reference to fire-and-forget background
+# tasks so they are not garbage-collected before they complete (a documented
+# CPython hazard when asyncio.create_task() return values are discarded).
+_background_tasks: set = set()
+
 
 # ── Auth helpers ──────────────────────────────────────────────────────────────
 
@@ -261,15 +266,19 @@ async def create_report(
         report_data  = payload.report_data,
         pathogen     = payload.pathogen,
     )
-    # Async memory extraction — non-blocking, never fails the save
+    # Async memory extraction — non-blocking, never fails the save.
+    # The task reference is stored in _background_tasks so Python's GC cannot
+    # collect it before it finishes; the done-callback discards it afterwards.
     try:
         import asyncio
         from app.services.pi_memory_service import extract_and_store_memory
-        asyncio.create_task(extract_and_store_memory(
+        _task = asyncio.create_task(extract_and_store_memory(
             user_id     = current_user['id'],
             idea        = payload.idea,
             report_data = payload.report_data,
         ))
+        _background_tasks.add(_task)
+        _task.add_done_callback(_background_tasks.discard)
     except Exception:
         pass
     return saved
