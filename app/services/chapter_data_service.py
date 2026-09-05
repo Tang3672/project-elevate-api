@@ -753,7 +753,9 @@ async def get_strategic_intelligence(
     try:
         from app.ingestion.connectors.nice_hta import get_hta_payer_signal
         ta = subcategory_id.split("_")[0] if "_" in subcategory_id else subcategory_id
-        nice_signal = get_hta_payer_signal(ta, idea[:100])
+        # get_hta_payer_signal makes sync requests.get calls — offload to thread
+        # so the event loop is not blocked (same pattern as retrieval_pipeline.py BUG-9).
+        nice_signal = await asyncio.to_thread(get_hta_payer_signal, ta, idea[:100])
         if nice_signal.get("found"):
             intel["payer_signals"].append({
                 "source": "NICE Technology Appraisals (UK Open Government Licence v3.0)",
