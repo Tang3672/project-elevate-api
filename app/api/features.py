@@ -23,9 +23,9 @@ def _get_current_user():
 trial_router = APIRouter()
 
 class TrialSiteRequest(BaseModel):
-    idea:           str = Field(..., min_length=20)
-    disease_domain: str = Field(default="auto")
-    indication:     str = Field(..., min_length=5,
+    idea:           str = Field(..., min_length=20, max_length=2000)
+    disease_domain: str = Field(default="auto", max_length=200)
+    indication:     str = Field(..., min_length=5, max_length=500,
         description="Specific indication e.g. 'carbapenem-resistant infections in ICU patients'")
     num_sites:      int = Field(default=15, ge=5, le=20)
 

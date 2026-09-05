@@ -53,6 +53,12 @@ _EXPENSIVE_PATHS = {
     "/api/v1/alignment/clarify",
     "/api/v1/alignment/competitive-sweep",
     "/api/v1/alignment/market-sizing-derivation",
+    # BUG-86: these Claude-calling endpoints were added to features.py with auth
+    # (BUG-59) but not added here, so they received the general 120/min limit
+    # instead of the AI 8/min limit.
+    "/api/v1/trial-sites",
+    "/api/v1/portfolio/analyze",
+    "/api/v1/grant/generate",
 }
 
 
