@@ -191,12 +191,13 @@ async def cache_status():
         from app.services.opportunity_scorer_v2 import _TRIAL_COUNT_CACHE, _APPROVAL_COUNT_CACHE
         from app.services.universe_builder import get_universe
         universe_size = len(get_universe())
+        trial_cached = len(_TRIAL_COUNT_CACHE)
         return {
             "universe_size":        universe_size,
-            "trial_counts_cached":  len(_TRIAL_COUNT_CACHE),
+            "trial_counts_cached":  trial_cached,
             "approval_counts_cached": len(_APPROVAL_COUNT_CACHE),
-            "trial_coverage_pct":   round(len(_TRIAL_COUNT_CACHE) / universe_size * 100, 1),
-            "ready":                len(_TRIAL_COUNT_CACHE) >= universe_size * 0.9,
+            "trial_coverage_pct":   round(trial_cached / universe_size * 100, 1) if universe_size > 0 else 0.0,
+            "ready":                trial_cached >= universe_size * 0.9 if universe_size > 0 else False,
         }
     except Exception as e:
         logger.error("cache_status failed: %s", e, exc_info=True)

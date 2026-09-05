@@ -42,7 +42,7 @@ def selects(
     """
     if not cells:
         return False, 0.0
-    values = [float(c.get(param, 0.0)) for c in cells]
+    values = [float(c.get(param) or 0.0) for c in cells]
     if len(values) < 2:
         return False, 0.0
     total_var = statistics.pvariance(values)
@@ -51,8 +51,9 @@ def selects(
 
     groups: dict[str, list[float]] = {}
     for cell in cells:
-        key = str(cell.get(dim.id, "__missing__"))
-        groups.setdefault(key, []).append(float(cell.get(param, 0.0)))
+        raw_key = cell.get(dim.id)
+        key = "__missing__" if raw_key is None else str(raw_key)
+        groups.setdefault(key, []).append(float(cell.get(param) or 0.0))
     if len(groups) < 2:
         return False, 0.0
 
