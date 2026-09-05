@@ -58,7 +58,7 @@ async def check_staleness(
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT * FROM saved_reports WHERE id = $1 AND user_id = $2",
+            "SELECT * FROM pi_reports WHERE id = $1 AND user_id = $2",
             report_id, current_user["id"]
         )
     if not row:
@@ -82,11 +82,11 @@ async def test_full_retention(current_user: dict = Depends(get_current_user)):
         try:
             async with pool.acquire() as conn:
                 wl_rows = await conn.fetch(
-                    "SELECT * FROM watchlists WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1",
+                    "SELECT * FROM user_watchlists WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1",
                     current_user["id"]
                 )
                 report_rows = await conn.fetch(
-                    "SELECT * FROM saved_reports WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1",
+                    "SELECT * FROM pi_reports WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1",
                     current_user["id"]
                 )
         except Exception as _e:
