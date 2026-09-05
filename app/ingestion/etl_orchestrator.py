@@ -22,6 +22,10 @@ from app.db.database import get_pool
 
 logger = logging.getLogger(__name__)
 
+# Module-level set keeps strong references to background tasks so the GC
+# cannot collect them before they finish (CPython asyncio hazard).
+_background_tasks: set = set()
+
 
 async def _log_run(conn, source: str, job: str, status: str,
                    fetched: int = 0, upserted: int = 0,
@@ -140,7 +144,12 @@ async def run_weekly_etl(api_key_fda: str = "") -> dict:
     summary["disease_aggregate"] = ok
 
     # 15. Embed new publications (async — don't block weekly ETL)
-    asyncio.create_task(_embed_new_publications())
+    # Store reference in _background_tasks so the GC cannot collect the task
+    # before it finishes (asyncio.create_task without a kept reference is
+    # silently cancelled when the refcount drops to zero).
+    _task = asyncio.create_task(_embed_new_publications())
+    _background_tasks.add(_task)
+    _task.add_done_callback(_background_tasks.discard)
 
     logger.info("=== Weekly ETL done: %s ===", summary)
     return summary
