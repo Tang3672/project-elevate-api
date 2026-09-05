@@ -523,6 +523,6 @@ async def score_report_trust(report: dict) -> dict:
             "error": "Trust scoring unavailable",
             "summary": "Trust scoring unavailable for this report.",
             "abstention_required": False,
-            "human_review_recommended": False,
+            "human_review_recommended": True,
             "scored_at": datetime.now(timezone.utc).isoformat(),
         }
