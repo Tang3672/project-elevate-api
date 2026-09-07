@@ -503,10 +503,10 @@ def generate_timeline(
     # Extract durations from PIReport if available
     phase_durations: dict[str, int] = {}
     if pi_report and "regulatory_pathway" in pi_report:
-        trials = pi_report["regulatory_pathway"].get("clinical_trial_requirements", [])
+        trials = pi_report["regulatory_pathway"].get("clinical_trial_requirements") or []
         for t in trials:
-            phase = t.get("phase", "").lower().replace(" ", "")
-            dur_str = t.get("duration", "")
+            phase = (t.get("phase") or "").lower().replace(" ", "")
+            dur_str = t.get("duration") or ""
             # Parse "12-18 months" → midpoint
             nums = [int(x) for x in dur_str.split() if x.isdigit()]
             if nums:

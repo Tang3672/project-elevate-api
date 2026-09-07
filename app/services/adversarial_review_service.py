@@ -84,13 +84,13 @@ def _extract_recommendations(report_dict: dict, idea: str) -> list[str]:
     recs: list[str] = []
 
     # Primary: recommended_next_steps
-    for step in report_dict.get("recommended_next_steps", [])[:_MAX_RECOMMENDATIONS]:
+    for step in (report_dict.get("recommended_next_steps") or [])[:_MAX_RECOMMENDATIONS]:
         if isinstance(step, str) and step.strip():
             recs.append(step.strip())
 
     # Supplement with pricing strategy if present
     pricing = report_dict.get("pricing_model_analysis") or {}
-    for row in pricing.get("model_comparison", [])[:2]:
+    for row in (pricing.get("model_comparison") or [])[:2]:
         if isinstance(row, dict) and row.get("strategic_stance") == "Recommended":
             recs.append(f"Pricing: adopt {row.get('pricing_model', '')} model")
 
