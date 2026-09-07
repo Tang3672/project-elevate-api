@@ -84,18 +84,20 @@ async def classify_need(raw_text: str) -> ClassifiedNeed:
         raise ValueError(f"classify_need: LLM returned non-JSON content: {exc}") from exc
 
     # Normalize category to enum (fallback to UNCATEGORIZED if unexpected value)
-    category_str = data.get("category", "UNCATEGORIZED").upper()
+    # Use `or` fallback so a null LLM value doesn't bypass the default (dict.get returns
+    # None when the key exists with a null value, ignoring the default argument).
+    category_str = (data.get("category") or "UNCATEGORIZED").upper()
     try:
         category = InnovationCategory(category_str)
     except ValueError:
         category = InnovationCategory.UNCATEGORIZED
 
     return ClassifiedNeed(
-        department=data.get("department", "Unknown"),
+        department=data.get("department") or "Unknown",
         category=category,
-        subcategory=data.get("subcategory", "Unknown"),
-        urgency_score=int(data.get("urgency_score", 3)),
-        patient_impact_score=int(data.get("patient_impact_score", 3)),
-        keywords=data.get("keywords", []),
-        reasoning=data.get("reasoning", "")
+        subcategory=data.get("subcategory") or "Unknown",
+        urgency_score=int(data.get("urgency_score") or 3),
+        patient_impact_score=int(data.get("patient_impact_score") or 3),
+        keywords=data.get("keywords") or [],
+        reasoning=data.get("reasoning") or ""
     )
