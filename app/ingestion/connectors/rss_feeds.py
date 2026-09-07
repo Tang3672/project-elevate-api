@@ -16,6 +16,7 @@ We store items in the disease_burden table as 'rss_recent_mention_count'
 and also write raw items to raw_ingest for downstream RAG pipeline use.
 """
 
+import asyncio
 import logging
 import time
 import xml.etree.ElementTree as ET
@@ -125,11 +126,11 @@ async def load_rss_signals(disease_names: list[str] | None = None) -> dict[str, 
     # Fetch all feeds
     all_items: list[dict] = []
     for feed_name, url in RSS_FEEDS.items():
-        items = _parse_rss(url)
+        items = await asyncio.to_thread(_parse_rss, url)
         for item in items:
             item["feed"] = feed_name
         all_items.extend(items)
-        time.sleep(_DELAY)
+        await asyncio.sleep(_DELAY)
 
     logger.info("RSS: fetched %d total items from %d feeds", len(all_items), len(RSS_FEEDS))
 
@@ -139,7 +140,8 @@ async def load_rss_signals(disease_names: list[str] | None = None) -> dict[str, 
     try:
         from app.db.database import get_pool
         pool = await get_pool()
-    except Exception:
+    except Exception as e:
+        logger.warning("RSS signals: DB pool unavailable, skipping persistence: %s", e)
         pool = None
 
     for disease in targets:
@@ -167,10 +169,10 @@ async def load_rss_signals(disease_names: list[str] | None = None) -> dict[str, 
                             (mondo_id, disease_label, source_name, source_code, commercial_safe,
                              metric, value, unit, location, year)
                         VALUES ($1,$2,'rss_feeds','multi_feed',TRUE,
-                                'rss_recent_mention_count',$3,'mentions','Global',2026)
+                                'rss_recent_mention_count',$3,'mentions','Global',$4)
                         ON CONFLICT (mondo_id, source_name, metric, location, year, age_group, sex)
                         DO UPDATE SET value=EXCLUDED.value, fetched_at=NOW()
-                    """, mondo_id, disease, float(len(matched)))
+                    """, mondo_id, disease, float(len(matched)), datetime.now().year)
             except Exception as e:
                 logger.warning("RSS DB store failed for %s: %s", disease, e)
 

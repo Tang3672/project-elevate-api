@@ -395,7 +395,7 @@ Return ONLY valid JSON (no markdown, no explanation):
             parsed = json.loads(raw_text.strip())
             fraction = parsed.get("fraction")
             quote    = parsed.get("quote")
-            llm_conf = float(parsed.get("confidence", 0.0))
+            llm_conf = float(parsed.get("confidence") or 0.0)
 
             if fraction is None:
                 return None

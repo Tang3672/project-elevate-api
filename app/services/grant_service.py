@@ -196,7 +196,7 @@ def _build_grant_context(idea, expert, demand_signals, specific_aim=None) -> str
     if demand_signals:
         lines.append(f"FEDERAL DEMAND SIGNALS ({len(demand_signals)} matches):")
         for s in demand_signals[:10]:
-            mag  = f"{s.get('magnitude'):,.0f} {s.get('magnitude_unit','')}" if s.get('magnitude') else ""
+            mag  = f"{s.get('magnitude'):,.0f} {s.get('magnitude_unit') or ''}" if s.get('magnitude') else ""
             loc  = s.get('location_name') or s.get('state_code') or 'National'
             lines.append(f"- {s['title']} {mag} [{loc}, {s['source']}]")
 

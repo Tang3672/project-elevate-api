@@ -1,12 +1,28 @@
+import logging
 import asyncpg
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 _pool = None
 
 async def get_pool():
     global _pool
     if _pool is None:
-        _pool = await asyncpg.create_pool(settings.DATABASE_URL)
+        # BUG-74: no command_timeout set — a hung query (long embedding search,
+        # network partition, etc.) holds a pool connection indefinitely, eventually
+        # exhausting the pool and hanging the whole app.  30 s is well above any
+        # legitimate query; adjust via env if a specific workload needs more time.
+        _pool = await asyncpg.create_pool(
+            settings.DATABASE_URL,
+            min_size=2,
+            max_size=10,
+            command_timeout=30,
+            # Recycle idle connections every 5 minutes so stale connections
+            # (e.g., after a DB restart or network partition) are discarded
+            # before they are handed to the next request and fail mid-query.
+            max_inactive_connection_lifetime=300,
+        )
     return _pool
 
 async def init_db():
@@ -17,7 +33,7 @@ async def init_db():
         try:
             await conn.execute("CREATE EXTENSION IF NOT EXISTS vector;")
         except Exception as e:
-            print(f"⚠ pgvector not available: {e}")
+            logger.warning("pgvector not available: %s", e)
 
         # Hospital needs table
         await conn.execute("""
@@ -57,7 +73,7 @@ async def init_db():
             ON hospital_needs (department);
         """)
 
-        print("✅ Database initialized successfully")
+        logger.info("Database initialized successfully")
 
 async def close_db():
     global _pool

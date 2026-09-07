@@ -1,7 +1,8 @@
 import asyncio
-import os
 
-ENGINE_BUILD_SHA: str = os.environ.get("RAILWAY_GIT_COMMIT_SHA", "dev")[:8]
+from app.core.config import settings
+
+ENGINE_BUILD_SHA: str = (settings.RAILWAY_GIT_COMMIT_SHA or "dev")[:8]
 """
 PI Alignment Service v2
 =======================
@@ -23,7 +24,7 @@ source citations added.
 import json
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
@@ -434,7 +435,7 @@ async def generate_pi_report(
         "routing_method":     router_result.routing_method,
         "routing_confidence": round(router_result.confidence, 3),
         "domain":             _resolved_domain,
-        "generated_at":       datetime.utcnow().isoformat() + "Z",
+        "generated_at":       datetime.now(timezone.utc).isoformat() + "Z",
     }
 
     #  Generate with Expert context
@@ -1003,9 +1004,13 @@ async def generate_alignment_report(idea: str) -> AlignmentReport:
         query_embedding=idea_embedding, top_k=10, min_similarity=0.55)
     context       = _build_legacy_context(idea, demand_results, hospital_matches_raw)
     claude_resp   = await _call_claude(context, LEGACY_SYSTEM_PROMPT)
-    return _parse_legacy_response(
+    # Offload to thread — _parse_legacy_response calls filter_literature_citations
+    # which makes blocking httpx calls that would block the event loop.
+    return await asyncio.to_thread(
+        _parse_legacy_response,
         claude_resp, idea, demand_results, hospital_matches_raw,
-        total_signals, len(hospital_matches_raw))
+        total_signals, len(hospital_matches_raw),
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1677,14 +1682,22 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
         except Exception as e_pop:
             logger.debug("Population lookup failed: %s", e_pop)
 
-        deriv = generate_market_sizing_derivation(
-            idea=idea,
-            product_type=product_type,
-            disease_name=disease_name,
-            therapeutic_area=ta_for_deriv,
-            us_patient_population=us_pop,
-            sub_expert_id=sub_expert_id or "",   # H-07: research tools routed to buyer model
-            user_params=clarify_answers or {},
+        # generate_market_sizing_derivation is synchronous and may invoke a
+        # blocking requests.post() call (NIH RePORTER query) for research-tool
+        # archetypes.  Run it in a thread-pool executor so it never stalls the
+        # async event loop.
+        _deriv_loop = asyncio.get_event_loop()
+        deriv = await _deriv_loop.run_in_executor(
+            None,
+            lambda: generate_market_sizing_derivation(
+                idea=idea,
+                product_type=product_type,
+                disease_name=disease_name,
+                therapeutic_area=ta_for_deriv,
+                us_patient_population=us_pop,
+                sub_expert_id=sub_expert_id or "",   # H-07: research tools routed to buyer model
+                user_params=clarify_answers or {},
+            ),
         )
         market_derivation_text = format_derivation_for_prompt(deriv)
         logger.info("Market sizing derivation generated: TAM=%s SAM=%s", deriv.tam_fmt, deriv.sam_fmt)
@@ -1731,8 +1744,10 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
     try:
         if not isinstance(funding_intel, Exception) and funding_intel:
             funding_block = format_funding_intelligence(funding_intel, disease_name)
-            sbir_count = len(funding_intel.get("sbir_awards", []))
-            entrant_count = len(funding_intel.get("new_entrants", []))
+            # BUG-78a: dict.get("key", []) returns None (not []) when the key exists
+            # with a NULL value from the funding API; or [] guards against that.
+            sbir_count = len(funding_intel.get("sbir_awards") or [])
+            entrant_count = len(funding_intel.get("new_entrants") or [])
             logger.info("Funding intel: %d SBIR awards, %d new trial entrants", sbir_count, entrant_count)
     except Exception as _fi_e:
         logger.warning("Funding intelligence injection failed (non-fatal): %s", _fi_e)
@@ -1776,8 +1791,9 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
     kols: list = []   # H-06: initialise so it's always in scope for person verifier
     try:
         from app.ingestion.connectors.semantic_scholar import get_kol_network, get_disease_literature_signal
-        kols = get_kol_network(disease_name, limit=6)
-        lit_signal = get_disease_literature_signal(disease_name)
+        import asyncio as _asyncio
+        kols = await _asyncio.to_thread(get_kol_network, disease_name, 6)
+        lit_signal = await _asyncio.to_thread(get_disease_literature_signal, disease_name)
         if kols:
             kol_lines = [
                 "KEY OPINION LEADERS (by citation influence — Semantic Scholar):",
@@ -2094,7 +2110,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
     # "[date removed — update to future milestone]".
     try:
         import re as _re_r04
-        _now_r04 = datetime.utcnow()
+        _now_r04 = datetime.now(timezone.utc)
         _MONTH_NAMES = {
             "january":1,"february":2,"march":3,"april":4,"may":5,"june":6,
             "july":7,"august":8,"september":9,"october":10,"november":11,"december":12,
@@ -2156,7 +2172,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
     # R-04 scrubs past dates to an internal placeholder; this step converts that
     # placeholder to a real, actionable future deadline so users never see the marker.
     try:
-        _now_b06 = datetime.utcnow()
+        _now_b06 = datetime.now(timezone.utc)
         _steps_b06 = data.get("recommended_next_steps") or []
         if isinstance(_steps_b06, list):
             _resolved = [
@@ -2178,7 +2194,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
     # conservative enough to leave milestone/deadline dates untouched.
     try:
         import re as _re_b03
-        _now_b03 = datetime.utcnow()
+        _now_b03 = datetime.now(timezone.utc)
         # Matches: "Author et al. (Science December 2026)" or "Smith et al. (2027, Nature)"
         _CITE_RE = _re_b03.compile(
             r"\b\w[\w\s,\.&\-]+et al\.?\s*\(([^)]*\b(20\d{2})\b[^)]*)\)",
@@ -2238,9 +2254,14 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
     except Exception as _b03_e:
         logger.warning("B-03 future-citation scrub failed (non-fatal): %s", _b03_e)
 
-    # Parse into PIReport
-    report = _parse_expert_response(data, idea, product_type, expert, demand_results, hospital_matches_raw, total_signals,
-                                    product_name=product_name, institution=institution, sub_expert_id=sub_expert_id)
+    # Parse into PIReport — offload to thread because filter_literature_citations
+    # makes blocking httpx calls (resolve_pmid / resolve_via_openalex / resolve_via_crossref)
+    # that would block the event loop if called directly from async code.
+    report = await asyncio.to_thread(
+        _parse_expert_response, data, idea, product_type, expert,
+        demand_results, hospital_matches_raw, total_signals,
+        product_name, institution, sub_expert_id,
+    )
 
     # Fix 1 — make market sizing arithmetically self-consistent so the Math Verifier
     # can't flag rounding drift (LLMs round $99.45M->$99M inconsistently). Recompute
@@ -3094,6 +3115,10 @@ async def _generate_antibiotic_report(
         logger.warning("market_geography parse failed (non-fatal): %s", _geo_e)
         geography = None
 
+    # Offload blocking citation verification (httpx) to a thread
+    _lit_amr = await asyncio.to_thread(
+        _filter_lit, data.get("literature_citations") or [], idea, "drug_amr"
+    )
     return PIReport(
         product_type=ProductType.ANTIBIOTIC,
         idea_submitted=idea,
@@ -3107,7 +3132,7 @@ async def _generate_antibiotic_report(
         market_geography=geography,
         recommended_next_steps=data.get("recommended_next_steps") or [],
         strategic_playbook=data.get("strategic_playbook") or [],
-        literature_citations=_filter_lit(data.get("literature_citations") or [], idea, "drug_amr") or None,
+        literature_citations=_lit_amr or None,
         limitations=data.get("limitations"),
         signals_searched=total_signals,
         hospital_needs_searched=len(hospital_matches_raw),
@@ -3236,6 +3261,10 @@ async def _generate_generic_pi_report(
         logger.warning("market_geography parse failed (non-fatal): %s", _geo_e)
         geography = None
 
+    # Offload blocking citation verification (httpx) to a thread
+    _lit_generic = await asyncio.to_thread(
+        _filter_lit, data.get("literature_citations") or [], idea, ""
+    )
     return PIReport(
         product_type=product_type,
         idea_submitted=idea,
@@ -3248,7 +3277,7 @@ async def _generate_generic_pi_report(
         market_geography=geography,
         recommended_next_steps=data.get("recommended_next_steps") or [],
         strategic_playbook=data.get("strategic_playbook") or [],
-        literature_citations=_filter_lit(data.get("literature_citations") or [], idea, "") or None,
+        literature_citations=_lit_generic or None,
         limitations=data.get("limitations"),
         signals_searched=total_signals,
         hospital_needs_searched=len(hospital_matches_raw),
@@ -3601,7 +3630,7 @@ def _enforce_market_consistency(report, deriv) -> None:
 
 async def _call_claude(context: str, system_prompt: str, max_tokens: int = 2000,
                        model: str = None) -> str:
-    anthropic_api_key = os.getenv("ANTHROPIC_API_KEY") or settings.ANTHROPIC_API_KEY
+    anthropic_api_key = settings.ANTHROPIC_API_KEY
     if not anthropic_api_key:
         raise ValueError("ANTHROPIC_API_KEY not set in Railway environment variables")
     async with httpx.AsyncClient(timeout=300.0) as client:

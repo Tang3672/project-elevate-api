@@ -192,10 +192,10 @@ async def warm_discovery_cache(force_refresh: bool = False) -> dict:
     trial_results    = await asyncio.gather(*trial_tasks,    return_exceptions=True)
     approval_results = await asyncio.gather(*approval_tasks, return_exceptions=True)
 
-    new_trials    = {d: c for d, c in trial_results
-                     if not isinstance((d,c), Exception) and c is not None}
-    new_approvals = {d: c for d, c in approval_results
-                     if not isinstance((d,c), Exception) and c is not None}
+    new_trials    = {r[0]: r[1] for r in trial_results
+                     if not isinstance(r, BaseException) and r[1] is not None}
+    new_approvals = {r[0]: r[1] for r in approval_results
+                     if not isinstance(r, BaseException) and r[1] is not None}
 
     # Step 4: Merge and persist
     merged_trials    = {**db_trials,    **new_trials}

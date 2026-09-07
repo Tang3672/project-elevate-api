@@ -386,8 +386,8 @@ async def run_universe_expansion(max_pages: int = 30) -> dict:
                     s.get("opportunity", 0), s.get("probability", 0), s.get("value", 0),
                     approved, pop, notes,
                 )
-            except Exception:
-                pass
+            except Exception as _e:
+                logger.warning("universe_expander: DB upsert failed for %r: %s", disease, _e)
 
     return {
         "conditions_harvested": total_conditions,

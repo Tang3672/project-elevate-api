@@ -171,7 +171,7 @@ def _walk_db_funnel(
         gate_type = gate.get("type", "rate")
         label = gate.get("label", step_name)
         source_id = gate.get("source_id", "unknown")
-        source_name = gate.get("source_id", "unknown")
+        source_name = gate.get("source_name", source_id)
         confidence = gate.get("confidence", "low")
         is_expert = False
 
@@ -349,8 +349,6 @@ async def _fallback_cascade(
         eligible, *_ = apply_population_cascade(
             prevalent_patients=500000,   # rough starting population; cascade narrows by TA rates
             therapeutic_area=ta,
-            disease_name=disease_name,
-            initial_indication_only=True,
         )
         running = float(eligible)
     except Exception as e:

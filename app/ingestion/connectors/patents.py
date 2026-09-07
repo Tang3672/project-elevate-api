@@ -17,6 +17,7 @@ We store per-disease:
   patent_filing_trend   — grants 2023-2026 vs 2020-2022 (acceleration)
 """
 
+import asyncio
 import logging
 import time
 from typing import Optional
@@ -113,7 +114,8 @@ async def load_patent_landscape(disease_names: list[str] | None = None) -> dict[
     try:
         from app.db.database import get_pool
         pool = await get_pool()
-    except Exception:
+    except Exception as _pool_err:
+        logger.warning("Patents: DB unavailable, running without persistence: %s", _pool_err)
         pool = None
 
     for disease in targets:
@@ -121,8 +123,8 @@ async def load_patent_landscape(disease_names: list[str] | None = None) -> dict[
         if not query:
             continue
 
-        data = _search_patents(query)
-        time.sleep(_DELAY)
+        data = await asyncio.to_thread(_search_patents, query)
+        await asyncio.sleep(_DELAY)
         results[disease] = data
 
         if pool and data["count"] >= 0:

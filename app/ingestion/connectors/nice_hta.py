@@ -28,7 +28,6 @@ G-BA (Germany): German language, no REST API.
 
 import logging
 from typing import Optional
-import requests
 
 logger = logging.getLogger(__name__)
 

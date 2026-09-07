@@ -30,10 +30,11 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from typing import Optional
 
 import httpx
+
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -83,13 +84,13 @@ def _extract_recommendations(report_dict: dict, idea: str) -> list[str]:
     recs: list[str] = []
 
     # Primary: recommended_next_steps
-    for step in report_dict.get("recommended_next_steps", [])[:_MAX_RECOMMENDATIONS]:
+    for step in (report_dict.get("recommended_next_steps") or [])[:_MAX_RECOMMENDATIONS]:
         if isinstance(step, str) and step.strip():
             recs.append(step.strip())
 
     # Supplement with pricing strategy if present
     pricing = report_dict.get("pricing_model_analysis") or {}
-    for row in pricing.get("model_comparison", [])[:2]:
+    for row in (pricing.get("model_comparison") or [])[:2]:
         if isinstance(row, dict) and row.get("strategic_stance") == "Recommended":
             recs.append(f"Pricing: adopt {row.get('pricing_model', '')} model")
 
@@ -121,7 +122,7 @@ async def run_adversarial_review(
         logger.info("S-06: no recommendations to review in report dict")
         return []
 
-    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    api_key = settings.ANTHROPIC_API_KEY
     if not api_key:
         logger.warning("S-06: ANTHROPIC_API_KEY not set — using fallback adversarial review")
         return _fallback_review(recommendations)

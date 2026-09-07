@@ -19,8 +19,10 @@ Rate: API is free but rate-limits aggressively. We add 2s delay between
 requests and cache results for 24h.
 """
 
+import asyncio
 import logging
 import time
+from datetime import datetime
 from typing import Optional
 
 import requests
@@ -151,7 +153,8 @@ async def load_gdelt_signals(disease_names: list[str] | None = None) -> dict[str
     try:
         from app.db.database import get_pool
         pool = await get_pool()
-    except Exception:
+    except Exception as _pool_err:
+        logger.warning("GDELT: DB unavailable, running without persistence: %s", _pool_err)
         pool = None
 
     for disease in targets:
@@ -159,8 +162,8 @@ async def load_gdelt_signals(disease_names: list[str] | None = None) -> dict[str
         if not query:
             continue
 
-        data = _fetch_gdelt_volume(query)
-        time.sleep(_DELAY)
+        data = await asyncio.to_thread(_fetch_gdelt_volume, query)
+        await asyncio.sleep(_DELAY)
 
         results[disease] = data
 
@@ -180,10 +183,10 @@ async def load_gdelt_signals(disease_names: list[str] | None = None) -> dict[str
                             INSERT INTO disease_burden
                                 (mondo_id, disease_label, source_name, source_code, commercial_safe,
                                  metric, value, unit, location, year)
-                            VALUES ($1,$2,'gdelt','gdelt',TRUE,$3,$4,$5,'Global',2026)
+                            VALUES ($1,$2,'gdelt','gdelt',TRUE,$3,$4,$5,'Global',$6)
                             ON CONFLICT (mondo_id, source_name, metric, location, year, age_group, sex)
                             DO UPDATE SET value=EXCLUDED.value, fetched_at=NOW()
-                        """, mondo_id, disease, metric, value, unit)
+                        """, mondo_id, disease, metric, value, unit, datetime.now().year)
             except Exception as e:
                 logger.warning("GDELT DB store failed for %s: %s", disease, e)
 

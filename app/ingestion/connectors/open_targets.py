@@ -18,6 +18,7 @@ These feed the PI report mechanism section and give the scoring engine
 richer drug-target context for white-space analysis.
 """
 
+import asyncio
 import logging
 import time
 from typing import Optional
@@ -229,8 +230,8 @@ async def load_disease_targets(top_n: int = 10) -> dict[str, int]:
         await _ensure_target_table(conn)
 
         for disease, efo_id in _OT_DISEASE_IDS.items():
-            targets = _get_top_targets(efo_id, n=top_n)
-            time.sleep(_DELAY)
+            targets = await asyncio.to_thread(_get_top_targets, efo_id, top_n)
+            await asyncio.sleep(_DELAY)
 
             mondo_id = None
             try:
@@ -239,8 +240,8 @@ async def load_disease_targets(top_n: int = 10) -> dict[str, int]:
                 )
                 if row:
                     mondo_id = row["mondo_id"]
-            except Exception:
-                pass
+            except Exception as _e:
+                logger.debug("mondo_id lookup for %r failed: %s", disease, _e)
 
             for t in targets:
                 await _upsert_target(conn, disease, mondo_id, efo_id, t)
@@ -261,8 +262,8 @@ async def load_chembl_indications() -> dict[str, int]:
 
     async with pool.acquire() as conn:
         for disease, search_term in _CHEMBL_SEARCH_TERMS.items():
-            indications = _get_chembl_indications(search_term)
-            time.sleep(_DELAY)
+            indications = await asyncio.to_thread(_get_chembl_indications, search_term)
+            await asyncio.sleep(_DELAY)
 
             mondo_id = None
             try:
@@ -271,8 +272,8 @@ async def load_chembl_indications() -> dict[str, int]:
                 )
                 if row:
                     mondo_id = row["mondo_id"]
-            except Exception:
-                pass
+            except Exception as _e:
+                logger.debug("mondo_id lookup for %r failed: %s", disease, _e)
 
             for ind in indications:
                 try:
@@ -286,8 +287,8 @@ async def load_chembl_indications() -> dict[str, int]:
                         ind["chembl_id"], mondo_id, disease,
                         f"phase_{ind.get('max_phase') or 0}",
                     )
-                except Exception:
-                    pass
+                except Exception as _e:
+                    logger.debug("ChEMBL indication insert skipped: %s", _e)
 
             results[disease] = len(indications)
             logger.info("ChEMBL: %s → %d indications", disease, len(indications))

@@ -41,12 +41,13 @@ import csv
 import io
 import json
 import logging
-import os
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict
 
 import httpx
 import numpy as np
+
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -165,7 +166,7 @@ async def _haiku_interpret(
     data_type: str,
 ) -> dict:
     """Use Haiku to interpret statistics in biomedical context."""
-    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    api_key = settings.ANTHROPIC_API_KEY
     if not api_key:
         return {}
 
@@ -232,10 +233,10 @@ async def _fetch_benchmark_papers(query: str, n: int = 5) -> list[dict]:
             papers = []
             for pmid in pmids:
                 s = summaries.get(pmid, {})
-                title = s.get("title", "")
-                authors = s.get("authors", [{}])
+                title = s.get("title") or ""
+                authors = s.get("authors") or [{}]
                 first_author = authors[0].get("name", "?") if authors else "?"
-                year = s.get("pubdate", "")[:4]
+                year = (s.get("pubdate") or "")[:4]
                 papers.append({
                     "pmid": pmid,
                     "title": title[:100],

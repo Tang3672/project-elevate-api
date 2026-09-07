@@ -21,6 +21,7 @@ The model narrates this output — it must NOT re-compute these figures.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from dataclasses import dataclass, field
@@ -188,8 +189,8 @@ class OrchestratedResult:
                             f"(swing {_fm(t.swing_usd)})"
                         )
                 lines.append("")
-            except Exception:
-                pass  # MC block is optional; never crash format_for_prompt
+            except Exception as _e:
+                logger.debug("format_for_prompt: MC section skipped: %s", _e)
 
         # ── v6: Regulatory pathway ────────────────────────────────────────────
         rp = self.regulatory_pathway
@@ -207,8 +208,8 @@ class OrchestratedResult:
                 if reimb.risk_note:
                     lines.append(f"  {reimb.risk_note}")
                 lines.append("")
-            except Exception:
-                pass
+            except Exception as _e:
+                logger.debug("format_for_prompt: regulatory section skipped: %s", _e)
 
         # ── v6: Expert consensus & disagreement ───────────────────────────────
         ec = self.expert_consensus
@@ -222,11 +223,11 @@ class OrchestratedResult:
                     lines.append(
                         f"  SAM adj ×{ec.consensus_sam_multiplier:.2f}, "
                         f"SOM adj ×{ec.consensus_som_multiplier:.2f} "
-                        f"({len(ec.activated_experts)} expert lenses)"
+                        f"({len(self.expert_activations or [])} expert lenses)"
                     )
                 lines.append("")
-            except Exception:
-                pass
+            except Exception as _e:
+                logger.debug("format_for_prompt: expert consensus section skipped: %s", _e)
 
         # ── v6: Heuristics ───────────────────────────────────────────────────
         fired = self.fired_heuristics
@@ -244,8 +245,8 @@ class OrchestratedResult:
                     lines.append(f"    Trigger: {h.trigger}")
                     lines.append(f"    {h.note[:180]}{'…' if len(h.note) > 180 else ''}")
                 lines.append("")
-            except Exception:
-                pass
+            except Exception as _e:
+                logger.debug("format_for_prompt: heuristics section skipped: %s", _e)
 
         lines.append(c.honesty_statement)
         lines.append("=== END MARKET SIZING ===")
@@ -345,7 +346,8 @@ async def run(
     mc_result = None
     try:
         from app.services.monte_carlo_engine import simulate_from_patient_flow
-        mc_result = simulate_from_patient_flow(
+        mc_result = await asyncio.to_thread(
+            simulate_from_patient_flow,
             patient_flow_result=pf_result,
             net_price_usd=mon_result.net_price_usd,
             revenue_model=mon_result.revenue_model,

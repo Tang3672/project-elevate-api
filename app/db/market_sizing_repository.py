@@ -89,6 +89,13 @@ async def init_market_sizing_tables():
             "CREATE INDEX IF NOT EXISTS msr_disease_idx ON market_sizing_runs (disease_name)")
         await conn.execute(
             "CREATE INDEX IF NOT EXISTS msa_run_idx ON market_sizing_assumptions (run_id)")
+        # BUG-54a: market_sizing_scenarios and market_sizing_sources FK columns
+        # were missing indexes. Without these, DELETE CASCADE on market_sizing_runs
+        # forces a full sequential scan on both child tables.
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS mss_run_idx ON market_sizing_scenarios (run_id)")
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS msrc_run_idx ON market_sizing_sources (run_id)")
     logger.info("market_sizing_* provenance tables ready")
 
 

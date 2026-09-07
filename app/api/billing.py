@@ -59,7 +59,8 @@ async def create_checkout(
         )
         return {"checkout_url": checkout_url}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("Checkout session creation failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to create checkout session")
 
 
 @router.get("/billing/status")
@@ -69,7 +70,7 @@ async def billing_status(current_user: dict = Depends(get_current_user)):
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    sub_status = user.get("subscription_status", "none")
+    sub_status = user.get("subscription_status") or "none"
     trial_ends = user.get("trial_ends_at")
     stripe_id  = user.get("stripe_customer_id")
 
@@ -145,6 +146,12 @@ async def stripe_webhook(request: Request):
 
         elif event_type == "customer.subscription.deleted":
             await _handle_subscription_deleted(data)
+
+        else:
+            # Log unhandled event types so they surface in monitoring — silently
+            # returning 200 is correct (Stripe must not retry), but a log entry
+            # is essential for detecting events we should start handling.
+            logger.info("Stripe webhook: unhandled event type %r — acknowledging without action", event_type)
 
     except Exception as e:
         logger.error(f"Webhook processing error for {event_type}: {e}")
@@ -244,7 +251,16 @@ async def _handle_subscription_updated(sub: dict):
 
 
 async def _handle_subscription_deleted(sub: dict):
-    """Subscription cancelled/expired — mark as inactive."""
+    """Subscription cancelled/expired — mark as inactive and downgrade plan.
+
+    BUG-51-C: previously only set subscription_status='canceled' but left
+    plan_name unchanged (e.g., 'explorer').  _enforce_quota() derives the
+    quota limit from plan_name, so cancelled users retained their old plan
+    limit indefinitely — 5 reports for explorer, 20 for innovator — because
+    plan_name was never reset.  Reset plan_name to 'free' (the base unpaid
+    tier) so that after their period ends they are subject to the 3-report
+    free-tier limit, not their former paid plan's limit.
+    """
     customer_id = sub.get("customer")
     user_id = await _get_user_id_by_customer(customer_id)
     if not user_id:
@@ -253,7 +269,8 @@ async def _handle_subscription_deleted(sub: dict):
         user_id             = user_id,
         subscription_status = "canceled",
     )
-    logger.info(f"User {user_id} subscription canceled")
+    await update_user_plan(user_id, "free")
+    logger.info(f"User {user_id} subscription canceled — plan downgraded to free")
 
 
 async def _get_user_id_by_customer(customer_id: str) -> int | None:

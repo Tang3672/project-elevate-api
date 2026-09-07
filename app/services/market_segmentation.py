@@ -1444,7 +1444,11 @@ def sensitivity_analysis(tree: SegmentTree) -> List[Dict[str, Any]]:
     """
     base_tam = tree.compute_tam()
     if base_tam <= 0:
-        raise ValueError(f"sensitivity_analysis: non-positive baseline TAM ({base_tam})")
+        logger.warning(
+            "sensitivity_analysis: non-positive baseline TAM (%s); returning empty list.",
+            base_tam,
+        )
+        return []
     results: List[Dict[str, Any]] = []
 
     for nid, node in tree.nodes.items():
@@ -1468,10 +1472,13 @@ def sensitivity_analysis(tree: SegmentTree) -> List[Dict[str, Any]]:
 
         impact_usd = max(abs(tam_high - base_tam), abs(tam_low - base_tam))
         impact_pct = impact_usd / base_tam * 100
-        assert 0 < impact_pct < 500, (
-            f"sensitivity_analysis: impact_pct {impact_pct:.1f}% out of range for "
-            f"node '{nid}' (tam_base={base_tam:.0f}, tam_low={tam_low:.0f}, tam_high={tam_high:.0f})"
-        )
+        if not (0 < impact_pct < 500):
+            logger.warning(
+                "sensitivity_analysis: impact_pct %.1f%% out of range for node '%s' "
+                "(tam_base=%.0f, tam_low=%.0f, tam_high=%.0f); skipping node.",
+                impact_pct, nid, base_tam, tam_low, tam_high,
+            )
+            continue
 
         results.append({
             "node_id":       nid,

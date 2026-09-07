@@ -13,9 +13,10 @@ Runs in parallel with main report generation.
 import asyncio
 import json
 import logging
-import os
 from typing import Dict, List, Optional
 import httpx
+
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -285,15 +286,15 @@ async def get_competitor_trials(disease_name: str, sub_expert_id: str, max_resul
                 phase_str = ", ".join(phases) if phases else "N/A"
                 
                 intervention_names = [i.get("name", "") for i in interventions[:3]]
-                primary_outcome = outcomes[0].get("measure", "") if outcomes else ""
+                primary_outcome = (outcomes[0].get("measure") or "") if outcomes else ""
                 
                 results["trials"].append({
                     "nct_id": id_mod.get("nctId", ""),
-                    "title": id_mod.get("briefTitle", "")[:120],
+                    "title": (id_mod.get("briefTitle") or "")[:120],
                     "phase": phase_str,
                     "status": status_mod.get("overallStatus", ""),
                     "sponsor": sponsor_mod.get("leadSponsor", {}).get("name", ""),
-                    "enrollment": design_mod.get("enrollmentInfo", {}).get("count", "N/A"),
+                    "enrollment": design_mod.get("enrollmentInfo", {}).get("count") or "N/A",
                     "start_date": status_mod.get("startDateStruct", {}).get("date", ""),
                     "primary_completion": status_mod.get("primaryCompletionDateStruct", {}).get("date", ""),
                     "interventions": intervention_names,
@@ -349,7 +350,7 @@ async def get_fda_precedents(disease_name: str, sub_expert_id: str) -> Dict:
                             "brand_name": brand_names[0] if brand_names else "",
                             "approval_date": approval_sub.get("submission_status_date", ""),
                             "application_type": result.get("application_type", ""),
-                            "url": f"https://www.accessdata.fda.gov/scripts/cder/daf/index.cfm?event=overview.process&ApplNo={result.get('application_number','').replace('NDA','').replace('BLA','').replace('ANDA','')}",
+                            "url": f"https://www.accessdata.fda.gov/scripts/cder/daf/index.cfm?event=overview.process&ApplNo={(result.get('application_number') or '').replace('NDA','').replace('BLA','').replace('ANDA','')}",
                         })
     except Exception as e:
         logger.warning(f"FDA precedents fetch failed: {e}")
@@ -369,7 +370,7 @@ async def _score_comparator_relevance(
     Call Haiku to score functional substitutability between the focal product
     and a comparator on a 0–10 scale. Returns -1 on failure (caller treats as unknown).
     """
-    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    api_key = settings.ANTHROPIC_API_KEY
     if not api_key:
         return -1
     system = (
@@ -461,7 +462,7 @@ async def _extract_research_tool_comparators(
     """
     if not idea:
         return []
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    api_key = settings.ANTHROPIC_API_KEY
     if not api_key:
         return []
     prompt = (

@@ -16,6 +16,7 @@ We extract per-disease:
   top_preprints        — 5 most recent titles + DOIs (for RAG injection)
 """
 
+import asyncio
 import logging
 import time
 from datetime import date, timedelta
@@ -134,7 +135,8 @@ async def load_preprint_signals(disease_names: list[str] | None = None) -> dict[
     try:
         from app.db.database import get_pool
         pool = await get_pool()
-    except Exception:
+    except Exception as _pool_err:
+        logger.warning("bioRxiv: DB unavailable, running without persistence: %s", _pool_err)
         pool = None
 
     for disease in targets:
@@ -143,8 +145,8 @@ async def load_preprint_signals(disease_names: list[str] | None = None) -> dict[
             continue
 
         term, server = config
-        data = _fetch_preprints(term, server, days_back=90)
-        time.sleep(_DELAY)
+        data = await asyncio.to_thread(_fetch_preprints, term, server, 90)
+        await asyncio.sleep(_DELAY)
         results[disease] = data
 
         if pool and data["count"] >= 0:

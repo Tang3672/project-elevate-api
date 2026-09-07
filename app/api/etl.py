@@ -84,7 +84,8 @@ async def etl_status(limit: int = 20):
                 LIMIT $1
             """, limit)
             return {"runs": [dict(r) for r in rows]}
-        except Exception:
+        except Exception as e:
+            logger.debug("etl_run table not yet initialized: %s", e)
             return {"runs": [], "note": "etl_run table not yet initialized"}
 
 
@@ -104,7 +105,8 @@ async def disease_aggregate_snapshot(disease: str = None):
                 )
             return {"diseases": [dict(r) for r in rows], "count": len(rows)}
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            logger.error("disease_aggregate query failed: %s", e, exc_info=True)
+            raise HTTPException(status_code=500, detail="Failed to query disease aggregate")
 
 
 @router.post("/expand-universe/mondo")
@@ -166,6 +168,7 @@ async def universe_stats():
                 "top5":    [{"disease": r["disease_label"], "score": r["score"], "tier": r["tier"]} for r in top5],
             }
         except Exception as e:
+            logger.debug("disease_scored table not yet created or empty: %s", e)
             return {"total_diseases": 0, "note": "disease_scored table empty or not yet created", "error": str(e)}
 
 
@@ -188,15 +191,17 @@ async def cache_status():
         from app.services.opportunity_scorer_v2 import _TRIAL_COUNT_CACHE, _APPROVAL_COUNT_CACHE
         from app.services.universe_builder import get_universe
         universe_size = len(get_universe())
+        trial_cached = len(_TRIAL_COUNT_CACHE)
         return {
             "universe_size":        universe_size,
-            "trial_counts_cached":  len(_TRIAL_COUNT_CACHE),
+            "trial_counts_cached":  trial_cached,
             "approval_counts_cached": len(_APPROVAL_COUNT_CACHE),
-            "trial_coverage_pct":   round(len(_TRIAL_COUNT_CACHE) / universe_size * 100, 1),
-            "ready":                len(_TRIAL_COUNT_CACHE) >= universe_size * 0.9,
+            "trial_coverage_pct":   round(trial_cached / universe_size * 100, 1) if universe_size > 0 else 0.0,
+            "ready":                trial_cached >= universe_size * 0.9 if universe_size > 0 else False,
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("cache_status failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to retrieve cache status")
 
 
 @router.get("/signals")
@@ -227,7 +232,8 @@ async def signal_ingestion_status():
             ],
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("signals status failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to retrieve signal ingestion status")
 
 
 @router.post("/signals/run")
@@ -273,4 +279,5 @@ async def license_registry():
             "disclaimer": data["_meta"]["reminder"],
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("licenses endpoint failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to load license registry")

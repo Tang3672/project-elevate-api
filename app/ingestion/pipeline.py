@@ -13,7 +13,7 @@ Handles:
 import asyncio
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Type
 
 from app.ingestion.connectors.base import BaseConnector
@@ -78,7 +78,7 @@ class ConnectorResult:
 
 @dataclass
 class PipelineResult:
-    started_at: datetime = field(default_factory=datetime.utcnow)
+    started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     finished_at: datetime = None
     connector_results: List[ConnectorResult] = field(default_factory=list)
 
@@ -126,7 +126,7 @@ async def run_connector(connector: BaseConnector) -> ConnectorResult:
     Errors are caught per-batch so partial runs succeed.
     """
     result = ConnectorResult(connector_name=connector.source_name)
-    start = datetime.utcnow()
+    start = datetime.now(timezone.utc)
 
     try:
         async with connector:
@@ -173,7 +173,7 @@ async def run_connector(connector: BaseConnector) -> ConnectorResult:
         logger.error(f"{connector.source_name} connector failed: {e}", exc_info=True)
         result.error_message = str(e)
 
-    result.duration_seconds = (datetime.utcnow() - start).total_seconds()
+    result.duration_seconds = (datetime.now(timezone.utc) - start).total_seconds()
     return result
 
 
@@ -221,7 +221,7 @@ async def run_pipeline(
     tasks = [_run_with_sem(c) for c in connectors]
     connector_results = await asyncio.gather(*tasks, return_exceptions=False)
     result.connector_results = list(connector_results)
-    result.finished_at = datetime.utcnow()
+    result.finished_at = datetime.now(timezone.utc)
 
     logger.info("\n" + result.summary())
     return result
@@ -233,7 +233,7 @@ async def run_pipeline_cli(connector_filter: str = None):
     """Entry point for running from command line or scripts."""
     names = [connector_filter] if connector_filter else None
     result = await run_pipeline(connector_names=names)
-    print(result.summary())
+    logger.info(result.summary())
     return result
 
 

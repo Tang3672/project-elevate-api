@@ -13,12 +13,13 @@ Configure in .env:
   EMAIL_FROM=Project Elevate <alerts@projectelevate.io>
 """
 
+import html
 import smtplib
 import logging
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from typing import List
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.core.config import settings
 from app.models.watchlist import Alert
@@ -51,7 +52,7 @@ async def send_email(to: str, subject: str, body: str, html: str = "") -> bool:
     port     = int(getattr(settings, 'SMTP_PORT', 0) or getattr(settings, 'EMAIL_PORT', 587))
     user     = getattr(settings, 'SMTP_USER', '') or getattr(settings, 'EMAIL_USER', '')
     password = getattr(settings, 'SMTP_PASS', '') or getattr(settings, 'EMAIL_PASSWORD', '')
-    from_addr = getattr(settings, 'EMAIL_FROM', '') or "Project Elevate <projectelevatetest1@gmail.com>"
+    from_addr = getattr(settings, 'EMAIL_FROM', '') or "Project Elevate <contact@projectelevate.io>"
 
     if not host or not user or not password:
         logger.warning("Email not configured — cannot send '%s'. Set SMTP_HOST/SMTP_USER/SMTP_PASS in Railway.", subject)
@@ -111,23 +112,30 @@ def build_digest_email(
     medium_alerts = [a for a in alerts if a.severity == "medium"]
     low_alerts    = [a for a in alerts if a.severity == "low"]
 
-    name_display = user_name or user_email.split("@")[0]
+    name_display = html.escape(user_name or user_email.split("@")[0])
 
     rows_html = ""
     for alert in alerts[:20]:   # cap at 20 per email
         color = ALERT_COLORS.get(alert.severity, "#334767")
         icon  = "🔔"
-        link  = f'<a href="{alert.source_url}" style="color:#1A4FD6">View source →</a>' if alert.source_url else ""
+        # Escape user-controlled fields to prevent HTML injection from external data sources
+        safe_title    = html.escape(alert.title or "")
+        safe_body     = html.escape((alert.body or "")[:250])
+        safe_severity = html.escape(alert.severity.upper() if alert.severity else "")
+        # Sanitize source_url: only allow http(s) protocols to block javascript: injection
+        raw_url = alert.source_url or ""
+        safe_url = raw_url if raw_url.startswith(("https://", "http://")) else ""
+        link  = f'<a href="{html.escape(safe_url)}" style="color:#1A4FD6">View source →</a>' if safe_url else ""
         rows_html += f"""
         <tr>
           <td style="padding:12px 16px;border-bottom:1px solid #eef1f6;vertical-align:top">
             <div style="display:flex;align-items:flex-start;gap:10px">
               <span style="font-size:18px;flex-shrink:0">{icon}</span>
               <div>
-                <div style="font-weight:600;color:#0f1929;font-size:13px;margin-bottom:4px">{alert.title}</div>
-                <div style="color:#334767;font-size:12px;line-height:1.6;margin-bottom:6px">{alert.body[:250]}</div>
+                <div style="font-weight:600;color:#0f1929;font-size:13px;margin-bottom:4px">{safe_title}</div>
+                <div style="color:#334767;font-size:12px;line-height:1.6;margin-bottom:6px">{safe_body}</div>
                 <div style="display:flex;gap:12px;align-items:center">
-                  <span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:{color};background:{color}15;padding:2px 8px;border-radius:2px">{alert.severity.upper()}</span>
+                  <span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:{color};background:{color}15;padding:2px 8px;border-radius:2px">{safe_severity}</span>
                   <span style="font-size:10px;color:#7a92b0">{alert.created_at.strftime('%b %d, %Y')}</span>
                   {link}
                 </div>
@@ -142,7 +150,7 @@ def build_digest_email(
     if low_alerts:
         summary_line += f"{', ' if summary_line else ''}{len(low_alerts)} low priority"
 
-    html = f"""<!DOCTYPE html>
+    html_body = f"""<!DOCTYPE html>
 <html>
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
 <body style="margin:0;padding:0;background:#f4f6f9;font-family:'DM Sans',Arial,sans-serif">
@@ -216,7 +224,7 @@ def build_digest_email(
   </table>
 </body>
 </html>"""
-    return html
+    return html_body
 
 
 async def send_digest_email(
@@ -236,7 +244,7 @@ async def send_digest_email(
         logger.warning("Email not configured — skipping digest send. Add EMAIL_HOST/EMAIL_USER to .env")
         return False
 
-    week_of = datetime.utcnow().strftime("%B %d, %Y")
+    week_of = datetime.now(timezone.utc).strftime("%B %d, %Y")
     html    = build_digest_email(user_name, user_email, alerts, week_of)
     if not html:
         return False
@@ -246,7 +254,7 @@ async def send_digest_email(
     try:
         msg = MIMEMultipart("alternative")
         msg["Subject"] = subject
-        msg["From"]    = getattr(settings, 'EMAIL_FROM', "Project Elevate <projectelevatetest1@gmail.com>")
+        msg["From"]    = getattr(settings, 'EMAIL_FROM', "Project Elevate <contact@projectelevate.io>")
         msg["To"]      = user_email
 
         # Plain text fallback

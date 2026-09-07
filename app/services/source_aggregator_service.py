@@ -35,7 +35,7 @@ import asyncio
 import logging
 import json
 from typing import Dict, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 import httpx
 from xml.etree import ElementTree as ET
 
@@ -195,11 +195,9 @@ async def search_preprints(query: str, max_results: int = 3) -> List[Dict]:
     """Search bioRxiv and medRxiv for cutting-edge preprints."""
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-            # medRxiv API
-            r = await client.get(
-                "https://api.biorxiv.org/details/medrxiv/2024-01-01/2026-12-31/0/json",
-            )
-            # Use search via Europe PMC which indexes preprints
+            # Use Europe PMC which indexes preprints from bioRxiv and medRxiv
+            # (the direct biorxiv.org endpoint was previously fetched but its
+            # result was never used — removed to eliminate the dead HTTP call)
             r2 = await client.get(
                 "https://www.ebi.ac.uk/europepmc/webservices/rest/search",
                 params={
@@ -321,8 +319,9 @@ async def search_sec_filings(company_names: List[str]) -> List[Dict]:
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:
             for company in company_names[:3]:
                 # Search EDGAR full-text search
+                _startdt = f"{datetime.now().year - 3}-01-01"
                 r = await client.get(
-                    "https://efts.sec.gov/LATEST/search-index?q=%22" + company.replace(" ", "+") + "%22&dateRange=custom&startdt=2023-01-01&forms=10-K",
+                    "https://efts.sec.gov/LATEST/search-index?q=%22" + company.replace(" ", "+") + f"%22&dateRange=custom&startdt={_startdt}&forms=10-K",
                 )
                 if r.status_code == 200:
                     hits = r.json().get("hits", {}).get("hits", [])
@@ -409,13 +408,16 @@ async def get_industry_news(query: str, max_results: int = 5) -> List[Dict]:
     # Fallback: recent PubMed articles if web search returned nothing
     if not results:
         try:
+            _now = datetime.now(timezone.utc)
+            _min_year = str(_now.year - 2)
+            _date_range = f"{_min_year}-{_now.year}"
             async with httpx.AsyncClient(timeout=TIMEOUT) as client:
                 r = await client.get(
                     "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",
                     params={
                         "db": "pubmed", "term": query + "[Title/Abstract]",
                         "retmax": max_results, "sort": "date",
-                        "datetype": "pdat", "mindate": "2024",
+                        "datetype": "pdat", "mindate": _min_year,
                         "retmode": "json",
                     }
                 )
@@ -426,7 +428,7 @@ async def get_industry_news(query: str, max_results: int = 5) -> List[Dict]:
                             "source": "PubMed Recent",
                             "title": f"Recent publication on {query} (PMID {pmid})",
                             "url": f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
-                            "date": "2024-2025",
+                            "date": _date_range,
                             "summary": "",
                             "type": "recent_publication",
                         })
@@ -456,7 +458,8 @@ async def get_global_burden_data(disease_query: str) -> List[Dict]:
                 "citation": "GBD 2021 Diseases and Injuries Collaborators. Lancet. 2024.",
                 "type": "epidemiology",
             }]
-    except Exception:
+    except Exception as e:
+        logger.warning("get_global_burden_data failed: %s", e)
         return []
 
 
@@ -508,7 +511,8 @@ async def aggregate_all_sources(
         "digital_health":      f"{disease_name} digital health software clinical evidence",
     }
     query = domain_query_map.get(sub_expert_id, disease_name)
-    news_query = f"{disease_name} FDA approval clinical trial 2024 2025"
+    _cur_yr = datetime.now().year
+    news_query = f"{disease_name} FDA approval clinical trial {_cur_yr - 1} {_cur_yr}"
     grant_query = f"{disease_name} treatment therapy"
 
     # Domain-specific drug name queries for pricing/market data
@@ -531,7 +535,7 @@ async def aggregate_all_sources(
         # Industry news - multiple queries
         get_industry_news(news_query, max_results=5),
         get_industry_news(f"{disease_name} market size revenue", max_results=3),
-        get_industry_news(f"{disease_name} FDA approval 2023 2024 2025", max_results=3),
+        get_industry_news(f"{disease_name} FDA approval {datetime.now().year - 2} {datetime.now().year - 1} {datetime.now().year}", max_results=3),
         # SEC filings for competitor intelligence
         search_sec_filings(drug_names[:3] if drug_names else [disease_name]),
         return_exceptions=True

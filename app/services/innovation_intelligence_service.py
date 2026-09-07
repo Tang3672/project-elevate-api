@@ -35,7 +35,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 from dataclasses import dataclass, field, asdict
 
@@ -163,19 +163,20 @@ def _sweep_gdelt_news(term: str, days: int = 90) -> Optional[IntelligenceSignal]
 
 
 def _sweep_recent_trials(disease_term: str, days: int = 90) -> list[IntelligenceSignal]:
-    """ClinicalTrials.gov — recent new trial registrations signal competitive heat."""
+    """ClinicalTrials.gov — active interventional trials signal competitive heat."""
     signals = []
     try:
         since = (date.today() - timedelta(days=days)).isoformat()
         r = requests.get(
             "https://clinicaltrials.gov/api/v2/studies",
             params={
-                "query.cond":           disease_term,
-                "filter.overallStatus": "RECRUITING,NOT_YET_RECRUITING",
-                "filter.studyType":     "INTERVENTIONAL",
-                "pageSize":             10,
-                "format":               "json",
-                "countTotal":           "true",
+                "query.cond":               disease_term,
+                "filter.overallStatus":     "RECRUITING,NOT_YET_RECRUITING",
+                "filter.studyType":         "INTERVENTIONAL",
+                "filter.lastUpdatePostDate": since,
+                "pageSize":                 10,
+                "format":                   "json",
+                "countTotal":               "true",
             },
             timeout=12,
         )
@@ -343,7 +344,7 @@ def _sweep_biorxiv_preprints(term: str, days: int = 90) -> Optional[Intelligence
                 f"medRxiv/bioRxiv API returned {count} relevant preprints for '{term}' "
                 f"posted in the last {days} days. Preprints are typically posted 6-12 months before "
                 f"peer-reviewed publication — this represents the very leading edge of what will appear in "
-                f"clinical journals by late 2026/2027. "
+                f"clinical journals by late {date.today().year}/{date.today().year + 1}. "
                 f"Top preprint: {relevant[0].get('title', 'N/A')[:80] if relevant else 'N/A'}"
             ),
             implication=(
@@ -547,7 +548,7 @@ def run_intelligence_sweep(
     result = InnovationIntelligence(
         idea_summary=idea[:150],
         disease_name=disease_name or medium_term,
-        sweep_timestamp=datetime.utcnow().isoformat() + "Z",
+        sweep_timestamp=datetime.now(timezone.utc).isoformat() + "Z",
     )
     sources_swept = []
 

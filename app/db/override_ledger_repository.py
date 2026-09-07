@@ -150,6 +150,13 @@ async def get_stats(
                 where += " AND step_label = $1"
                 params.append(step_label)
 
+            # Append HAVING and LIMIT values as bound parameters so no integer
+            # is ever interpolated into the SQL string.
+            having_idx = len(params) + 1
+            params.append(min_corrections)
+            limit_idx = len(params) + 1
+            params.append(limit)
+
             rows = await conn.fetch(f"""
                 SELECT
                     step_label,
@@ -162,9 +169,9 @@ async def get_stats(
                 FROM override_ledger
                 {where}
                 GROUP BY step_label, step_role
-                HAVING COUNT(*) >= {min_corrections}
+                HAVING COUNT(*) >= ${having_idx}
                 ORDER BY correction_count DESC
-                LIMIT {limit}
+                LIMIT ${limit_idx}
             """, *params)
             return [dict(r) for r in rows]
     except Exception as exc:

@@ -15,8 +15,12 @@ class RegisterRequest(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    email: str
-    password: str
+    email:    str = Field(..., min_length=5, max_length=200)
+    # BUG-73: no max_length — unauthenticated PBKDF2 CPU-exhaustion DoS.
+    # Any attacker could POST a 100MB password to /login and force 100k PBKDF2
+    # iterations against it before we even checked the hash.  Cap at 100 chars
+    # (matches RegisterRequest) so the input is bounded before hitting verify_password.
+    password: str = Field(..., min_length=1, max_length=100)
 
 
 class GoogleAuthRequest(BaseModel):

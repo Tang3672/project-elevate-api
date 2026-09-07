@@ -32,7 +32,6 @@ NOTE: MEPS individual-level microdata requires a data use agreement (non-commerc
 
 import logging
 from typing import Optional
-import requests
 
 logger = logging.getLogger(__name__)
 MEPS_API = "https://api.meps.ahrq.gov/mepsweb"

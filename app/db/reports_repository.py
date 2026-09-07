@@ -17,7 +17,7 @@ All writes are best-effort and never raise into the report path.
 """
 
 import logging
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -280,10 +280,23 @@ def _invention_row(r) -> dict:
 
 
 async def list_review_queue(institution_id: Optional[str] = None, status: str = "",
-                            reviewer: str = "", limit: int = 200) -> list[dict]:
+                            reviewer: str = "", limit: int = 200,
+                            caller_user_id: Optional[int] = None) -> list[dict]:
     # BUG-14: cap limit so callers cannot pass limit=10000 and dump the full table
     """The TTO review queue: every invention disclosure with its triage scores,
-    workflow status, assigned reviewer, and next action."""
+    workflow status, assigned reviewer, and next action.
+
+    Callers MUST supply either institution_id or caller_user_id so the query is
+    always scoped — never returns the full cross-institution table.
+    """
+    # Guard: refuse to run unscoped — both being None would dump rows from every
+    # institution (up to the limit cap), violating the per-owner isolation guarantee.
+    if not institution_id and caller_user_id is None:
+        logger.error(
+            "list_review_queue: called without any owner scope "
+            "(institution_id=%r, caller_user_id=None); returning empty to prevent "
+            "cross-institution data exposure.", institution_id)
+        return []
     try:
         from app.db.database import get_pool
         pool = await get_pool()
@@ -294,6 +307,10 @@ async def list_review_queue(institution_id: Optional[str] = None, status: str = 
             args.append(reviewer); clauses.append(f"assigned_reviewer = ${len(args)}")
         if institution_id:
             args.append(institution_id); clauses.append(f"institution_id = ${len(args)}")
+        elif caller_user_id is not None:
+            # IDOR fix: fall back to scoping by the calling user's own reports when
+            # no institution is set — prevents unauthenticated full-table dumps.
+            args.append(caller_user_id); clauses.append(f"user_id = ${len(args)}")
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
         args.append(min(limit, 200))  # BUG-14: hard cap
         async with pool.acquire() as conn:
@@ -371,10 +388,27 @@ async def eval_metrics(institution_id: Optional[str] = None) -> dict:
                            AVG(CASE WHEN abstention_required THEN 1.0 ELSE 0.0 END) AS abstention_rate
                     FROM reports
                 """)
-            actions = await conn.fetch(
-                "SELECT user_action, COUNT(*) AS c FROM report_outcomes WHERE user_action IS NOT NULL GROUP BY user_action")
-            outcomes = await conn.fetch(
-                "SELECT outcome, COUNT(*) AS c FROM report_outcomes WHERE outcome IS NOT NULL GROUP BY outcome")
+            # BUG-XX: report_outcomes queries were not scoped by institution_id, causing
+            # cross-institution data leakage in action_counts and outcome_counts.
+            # Scope to matching report_ids when institution_id is provided.
+            if institution_id:
+                actions = await conn.fetch(
+                    "SELECT user_action, COUNT(*) AS c FROM report_outcomes "
+                    "WHERE user_action IS NOT NULL "
+                    "  AND report_id IN (SELECT report_id FROM reports WHERE institution_id = $1) "
+                    "GROUP BY user_action",
+                    institution_id)
+                outcomes = await conn.fetch(
+                    "SELECT outcome, COUNT(*) AS c FROM report_outcomes "
+                    "WHERE outcome IS NOT NULL "
+                    "  AND report_id IN (SELECT report_id FROM reports WHERE institution_id = $1) "
+                    "GROUP BY outcome",
+                    institution_id)
+            else:
+                actions = await conn.fetch(
+                    "SELECT user_action, COUNT(*) AS c FROM report_outcomes WHERE user_action IS NOT NULL GROUP BY user_action")
+                outcomes = await conn.fetch(
+                    "SELECT outcome, COUNT(*) AS c FROM report_outcomes WHERE outcome IS NOT NULL GROUP BY outcome")
             action_counts = {a["user_action"]: a["c"] for a in actions}
             total_actions = sum(action_counts.values()) or 0
             accepted = action_counts.get("accepted", 0)
@@ -387,8 +421,8 @@ async def eval_metrics(institution_id: Optional[str] = None) -> dict:
                 "recommendation_acceptance_rate": round(accepted / total_actions, 3) if total_actions else None,
                 "user_action_counts": action_counts,
                 "outcome_counts": {o["outcome"]: o["c"] for o in outcomes},
-                "generated_at": datetime.utcnow().isoformat(),
+                "generated_at": datetime.now(timezone.utc).isoformat(),
             }
     except Exception as e:
         logger.warning("eval_metrics failed: %s", e)
-        return {"report_count": 0, "error": str(e)}
+        return {"report_count": 0, "error": "metrics unavailable"}

@@ -2,8 +2,7 @@
 Tracker API endpoints
 """
 import logging
-import traceback
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from app.api.auth import get_current_user
 from app.api.admin_auth import require_admin_key
 
@@ -25,8 +24,8 @@ async def trigger_tracker(current_user: dict = Depends(get_current_user)):
             "results": results,
         }
     except Exception as e:
-        logger.error(f"Manual tracker run failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Manual tracker run failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Tracker run failed")
 
 
 @router.post("/tracker/run-all")
@@ -59,7 +58,7 @@ async def check_staleness(
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT * FROM saved_reports WHERE id = $1 AND user_id = $2",
+            "SELECT * FROM pi_reports WHERE id = $1 AND user_id = $2",
             report_id, current_user["id"]
         )
     if not row:
@@ -83,14 +82,15 @@ async def test_full_retention(current_user: dict = Depends(get_current_user)):
         try:
             async with pool.acquire() as conn:
                 wl_rows = await conn.fetch(
-                    "SELECT * FROM watchlists WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1",
+                    "SELECT * FROM user_watchlists WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1",
                     current_user["id"]
                 )
                 report_rows = await conn.fetch(
-                    "SELECT * FROM saved_reports WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1",
+                    "SELECT * FROM pi_reports WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1",
                     current_user["id"]
                 )
-        except Exception:
+        except Exception as _e:
+            logger.warning("DB query for watchlist/reports failed, using demo data: %s", _e)
             wl_rows = []
             report_rows = []
 
@@ -144,6 +144,7 @@ async def test_full_retention(current_user: dict = Depends(get_current_user)):
                 watchlist.get("keywords", [])
             )
         except Exception as e:
+            logger.warning("grant_deadlines check failed: %s", e)
             results["features"]["grant_deadlines"] = []
 
         # 3. Competitor milestones (Claude web search)
@@ -151,6 +152,7 @@ async def test_full_retention(current_user: dict = Depends(get_current_user)):
             desc = watchlist.get("product_description", "")[:100]
             results["features"]["competitor_milestones"] = await track_competitor_milestones(desc, desc)
         except Exception as e:
+            logger.warning("competitor_milestones check failed: %s", e)
             results["features"]["competitor_milestones"] = []
 
         # 3b. ClinicalTrials.gov + FDA live pipeline (moat wideners 2+3)
@@ -193,12 +195,13 @@ async def test_full_retention(current_user: dict = Depends(get_current_user)):
         return results
 
     except Exception as e:
-        return {"error": str(e), "traceback": traceback.format_exc()}
+        logger.error("test-full-retention failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error during retention test")
 
 
 @router.get("/competitive-intel")
 async def get_competitive_intel(
-    condition: str = "carbapenem-resistant infections",
+    condition: str = Query(default="carbapenem-resistant infections", max_length=300),
     current_user: dict = Depends(get_current_user)
 ):
     """Get live FDA + ClinicalTrials competitive intelligence for a condition."""

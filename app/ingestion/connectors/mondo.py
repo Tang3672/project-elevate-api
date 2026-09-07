@@ -180,11 +180,11 @@ async def load_mondo_for_diseases(disease_names: list[str]) -> dict[str, str]:
 
     async with pool.acquire() as conn:
         for name in disease_names:
-            # 1. Try exact match first
-            docs = _search_mondo(name, exact=True, rows=3)
+            # 1. Try exact match first — offload blocking requests.get to thread pool
+            docs = await asyncio.to_thread(_search_mondo, name, True, 3)
             if not docs:
                 # 2. Fall back to fuzzy search
-                docs = _search_mondo(name, exact=False, rows=5)
+                docs = await asyncio.to_thread(_search_mondo, name, False, 5)
             if not docs:
                 logger.warning("MONDO: no match for '%s'", name)
                 continue
@@ -193,8 +193,8 @@ async def load_mondo_for_diseases(disease_names: list[str]) -> dict[str, str]:
             best = next((d for d in docs if d.get("label", "").lower() == name.lower()), docs[0])
             iri  = best.get("iri") or f"http://purl.obolibrary.org/obo/{best['obo_id'].replace(':','_')}"
 
-            time.sleep(_DELAY)
-            term = _fetch_term_by_iri(iri)
+            await asyncio.sleep(_DELAY)
+            term = await asyncio.to_thread(_fetch_term_by_iri, iri)
             if not term:
                 continue
 
@@ -206,7 +206,7 @@ async def load_mondo_for_diseases(disease_names: list[str]) -> dict[str, str]:
                 resolved[name] = row["mondo_id"]
                 logger.info("MONDO loaded: %s → %s", name, row["mondo_id"])
 
-            time.sleep(_DELAY)
+            await asyncio.sleep(_DELAY)
 
     return resolved
 
@@ -223,13 +223,17 @@ async def bulk_load_mondo(page_size: int = 500, max_pages: int = 20) -> int:
     async with pool.acquire() as conn:
         for page in range(max_pages):
             try:
-                r = requests.get(
-                    f"{OLS4_BASE}/ontologies/mondo/terms",
-                    params={"size": page_size, "page": page},
-                    timeout=30,
-                )
-                r.raise_for_status()
-                data = r.json()
+                # Offload blocking requests.get to thread pool so the event loop stays free
+                def _do_fetch_page(_p=page, _ps=page_size):
+                    rr = requests.get(
+                        f"{OLS4_BASE}/ontologies/mondo/terms",
+                        params={"size": _ps, "page": _p},
+                        timeout=30,
+                    )
+                    rr.raise_for_status()
+                    return rr.json()
+
+                data = await asyncio.to_thread(_do_fetch_page)
                 terms = data.get("_embedded", {}).get("terms", [])
                 if not terms:
                     break
@@ -246,7 +250,7 @@ async def bulk_load_mondo(page_size: int = 500, max_pages: int = 20) -> int:
                     break
 
                 logger.info("MONDO bulk: page %d, %d terms loaded so far", page, total)
-                time.sleep(_DELAY)
+                await asyncio.sleep(_DELAY)
 
             except Exception as e:
                 logger.error("MONDO bulk page %d failed: %s", page, e)

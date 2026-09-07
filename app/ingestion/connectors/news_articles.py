@@ -18,6 +18,7 @@ ON CONFLICT DO NOTHING correctly skips already-stored articles while
 adding new ones every run.
 """
 
+import asyncio
 import hashlib
 import logging
 import time
@@ -133,7 +134,8 @@ class NewsArticleConnector(BaseConnector):
 
         for feed_name, url in RSS_FEEDS.items():
             category = _FEED_CATEGORY.get(feed_name, "drug")
-            articles = _parse_feed(url)
+            # BUG-A1: _parse_feed calls synchronous httpx.get() — wrap in to_thread
+            articles = await asyncio.to_thread(_parse_feed, url)
             logger.info("NewsArticleConnector: %s → %d articles", feed_name, len(articles))
 
             for art in articles:
@@ -168,7 +170,8 @@ class NewsArticleConnector(BaseConnector):
                     yield batch
                     batch = []
 
-            time.sleep(_DELAY)   # avoid hammering feeds
+            # BUG-A2: time.sleep() blocks the event loop in an async generator — use asyncio.sleep
+            await asyncio.sleep(_DELAY)   # avoid hammering feeds
 
         if batch:
             yield batch

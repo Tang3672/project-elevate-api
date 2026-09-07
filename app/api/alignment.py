@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 """
 Alignment API v2
 ================
@@ -9,8 +9,9 @@ GET  /api/v1/alignment/examples     — example ideas
 """
 
 import logging
-from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, HTTPException, Depends, Query
+import math as _math
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional
 
 from app.services.alignment_service import generate_alignment_report, generate_pi_report
@@ -72,21 +73,28 @@ class AlignmentRequest(BaseModel):
 class PIReportRequest(BaseModel):
     idea: str = Field(..., min_length=30, max_length=2000,
         description="Description of the product — what it does, who it's for, what it solves")
-    product_type: str = Field(default="other",
+    product_type: str = Field(default="other", max_length=60,
         description="antibiotic | medical_device | software | diagnostic | other")
-    funding_pathway: Optional[str] = Field(default="commercial",
+    funding_pathway: Optional[str] = Field(default="commercial", max_length=50,
         description="commercial | sbir | basic_science — controls report framing")
-    target_pathogen: Optional[str] = Field(default=None,
+    # BUG-74: target_pathogen was unbounded — _idea_from_payload() appends it to `idea`,
+    # so an attacker could bypass the idea max_length=2000 cap by sending a multi-MB
+    # target_pathogen value, inflating the LLM prompt and API cost.  Cap at 200 chars
+    # (sufficient for any pathogen name or resistance phenotype description).
+    target_pathogen: Optional[str] = Field(default=None, max_length=200,
         description="For antibiotics: primary target pathogen (e.g. MRSA, CRE, C. difficile)")
-    disease_domain: str = Field(default="auto",
+    disease_domain: str = Field(default="auto", max_length=100,
         description="auto | antibiotic_amr | oncology | cardiology | neurology_cns | metabolic_diabetes | mental_health")
-    tier1_category: str = Field(default="drug_small_molecule",
+    tier1_category: str = Field(default="drug_small_molecule", max_length=100,
         description="drug_small_molecule | biologic | gene_cell_therapy | medical_device | diagnostic | digital_health | vaccine_immunotherapy | other_platform")
-    product_name: Optional[str] = Field(default=None,
+    # BUG-74: product_name and institution were unbounded — product_name feeds into
+    # _sanitize_product_name() (word-by-word iteration) and render_report_html() CSS
+    # generation; institution is embedded in PDF HTML.  Cap both to sane maximums.
+    product_name: Optional[str] = Field(default=None, max_length=100,
         description="Short brand / working name (e.g. 'NeuroSense'). If omitted, derived from idea text.")
-    institution: Optional[str] = Field(default=None,
+    institution: Optional[str] = Field(default=None, max_length=200,
         description="Originating institution (e.g. 'University of Michigan', 'NIH NIBIB').")
-    domain: Optional[str] = Field(default=None,
+    domain: Optional[str] = Field(default=None, max_length=100,
         description="LIFE_SCIENCES_CLINICAL | LIFE_SCIENCES_RESEARCH | ENGINEERING_HARDWARE | SOFTWARE_INFRASTRUCTURE | ENERGY_CLIMATE | OTHER_DEEP_TECH. Auto-detected if omitted.")
     clarify_answers: Optional[dict] = Field(default=None,
         description="Structured answers from /clarify intake questions, keyed by binds_to field (e.g. 'seg.target_lab_count': '1,000-5,000 labs'). Used to override default market sizing parameters.")
@@ -98,34 +106,52 @@ async def check_alignment(payload: AlignmentRequest):
     try:
         return await generate_alignment_report(payload.idea)
     except ValueError as e:
-        raise HTTPException(status_code=503, detail=str(e))
+        logger.warning("check_alignment ValueError: %s", e)
+        raise HTTPException(status_code=503, detail="Alignment service temporarily unavailable")
     except Exception as e:
         logger.error(f"Alignment failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Alignment check failed")
 
 
-_DEV_EMAILS = {"test@projectelevate.io", "ijw91021@gmail.com",
-               "admin@projectelevate.io", "oneonesie100@gmail.com",
-               "lizpeek11@gmail.com", "peek@wustl.edu"}
+_DEV_EMAILS = {"test@projectelevate.io", "admin@projectelevate.io"}
 _PLAN_LIMITS = {
-    "basic":        5,    # Explorer $49
-    "starter":      20,   # Innovator $149
-    "professional": None,  # Institution $799 — unlimited
+    # Current plan names (stored in users.plan_name)
+    "free":         3,    # Default unauthenticated/free tier — 3 analyses
+    "explorer":     5,    # Explorer $49
+    "innovator":    20,   # Innovator $149
+    "institution":  None, # Institution $799 — unlimited
+    "professional": None, # Alias for institution — unlimited
+    # Subscription-status keys (users.subscription_status) — active subscribers unlimited
     "active":       None,
     "trialing":     None,
+    # Legacy plan names kept for backward compat (pre-rename)
+    "basic":        5,
+    "starter":      20,
 }
 
 
 async def _enforce_quota(current_user):
     """Server-side quota gate (BEFORE calling Claude). Raises HTTPException(402)
-    if over limit. Frontend checks are UX only; this is the real gate."""
+    if over limit. Also atomically consumes one quota slot so that concurrent
+    requests cannot both pass the gate before either increments the counter
+    (TOCTOU race fix: check and increment are now a single SQL UPDATE).
+    Frontend checks are UX only; this is the real gate."""
     try:
         if current_user and current_user.get("email") not in _DEV_EMAILS:
-            from app.db.user_repository import get_user_by_id
+            from app.db.user_repository import get_user_by_id, try_consume_free_report_atomic
             user = await get_user_by_id(current_user["id"])
             if user:
-                sub_status = user.get("subscription_status", "none")
-                plan       = user.get("plan", "none")
+                sub_status = user.get("subscription_status") or "none"
+                # BUG-50: was user.get("plan", "none") — "plan" is not a DB column;
+                # the column is "plan_name".  Using the wrong key meant every
+                # non-waitlist free user resolved plan="none", which is absent from
+                # _PLAN_LIMITS, so limit=None and the quota gate was never applied.
+                # BUG-51-A: user.get("plan_name", "free") returns None (not "free")
+                # when plan_name IS NULL in the DB — dict.get() only uses the default
+                # when the key is absent, not when the value is None.  With plan=None,
+                # _PLAN_LIMITS.get(None)=None and _PLAN_LIMITS.get(sub_status) is also
+                # likely None, giving limit=None and bypassing the quota gate entirely.
+                plan       = user.get("plan_name") or "free"
                 used       = user.get("free_reports_used", 0) or 0
                 limit      = _PLAN_LIMITS.get(plan) or _PLAN_LIMITS.get(sub_status)
 
@@ -144,12 +170,19 @@ async def _enforce_quota(current_user):
                 if on_waitlist and used < 10:
                     limit = 10
 
-                if limit is not None and used >= limit:
-                    raise HTTPException(status_code=402, detail={
-                        "error": "quota_exceeded",
-                        "message": f"You've used all {limit} analyses on your plan. Upgrade to continue.",
-                        "used": used, "limit": limit,
-                    })
+                if limit is not None:
+                    # Atomically consume a quota slot.  The UPDATE's WHERE clause
+                    # (`free_reports_used < limit`) ensures that only one of N
+                    # concurrent requests gets the last slot — eliminating TOCTOU.
+                    allowed = await try_consume_free_report_atomic(
+                        current_user["id"], limit
+                    )
+                    if not allowed:
+                        raise HTTPException(status_code=402, detail={
+                            "error": "quota_exceeded",
+                            "message": f"You've used all {limit} analyses on your plan. Upgrade to continue.",
+                            "used": used, "limit": limit,
+                        })
     except HTTPException:
         raise
     except Exception as quota_e:
@@ -157,15 +190,10 @@ async def _enforce_quota(current_user):
 
 
 async def _increment_usage(current_user):
-    try:
-        if current_user and current_user.get("email") not in _DEV_EMAILS:
-            from app.db.user_repository import get_user_by_id, increment_free_report_count
-            user = await get_user_by_id(current_user["id"])
-            status = user.get("subscription_status", "none") if user else "none"
-            if status not in ("active", "trialing"):
-                await increment_free_report_count(current_user["id"])
-    except Exception as inc_e:
-        logger.warning(f"Failed to increment report count: {inc_e}")
+    # Usage is now consumed atomically inside _enforce_quota.
+    # This stub is retained so that call-sites that still reference it
+    # don't raise NameError during the transition period; it is a no-op.
+    pass
 
 
 def _idea_from_payload(payload: "PIReportRequest") -> str:
@@ -193,20 +221,34 @@ async def get_pi_report(payload: PIReportRequest, current_user = Depends(get_cur
         await _increment_usage(current_user)
         return report
     except ValueError as e:
-        raise HTTPException(status_code=503, detail=str(e))
+        logger.warning("get_pi_report ValueError: %s", e)
+        raise HTTPException(status_code=503, detail="Report generation service temporarily unavailable")
     except Exception as e:
         logger.error(f"PI report failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Report generation failed")
 
 
-@router.post("/pi-report/async")
+@router.post("/pi-report/async", status_code=202)
 async def get_pi_report_async(payload: PIReportRequest, current_user = Depends(get_current_user)):
     """Start report generation in the background; returns a job_id immediately so
     the client never holds a long request open. Poll /pi-report/status/{job_id}."""
     await _enforce_quota(current_user)   # synchronous gate — 402 returns instantly
     import asyncio
-    from app.services.report_jobs import create_job, set_done, set_error, update_report
+    from app.services.report_jobs import create_job, set_done, set_error, update_report, count_running_jobs
+
+    # Concurrent-job cap: prevent a single user from saturating the server with
+    # many simultaneous LLM jobs.  2 in-flight jobs is enough for normal use.
+    _MAX_CONCURRENT_JOBS = 2
     _owner_id = str((current_user or {}).get("id", "")) or None
+    if _owner_id:
+        _running = await count_running_jobs(_owner_id)
+        if _running >= _MAX_CONCURRENT_JOBS:
+            raise HTTPException(
+                status_code=429,
+                detail=f"You already have {_running} report(s) in progress. "
+                       "Wait for them to finish before starting a new one.",
+            )
+
     job_id = await create_job(owner_id=_owner_id)
     idea = _idea_from_payload(payload)
     _user = current_user
@@ -335,7 +377,7 @@ class FeedbackRequest(BaseModel):
     institution_id:    Optional[str] = None
 
 
-@router.post("/feedback")
+@router.post("/feedback", status_code=201)
 async def submit_feedback(
     req: FeedbackRequest,
     current_user: dict = Depends(get_current_user),  # BUG-5
@@ -348,42 +390,73 @@ async def submit_feedback(
             recommendation_id=req.recommendation_id, notes=req.notes,
             outcome_date=req.outcome_date, institution_id=req.institution_id)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.warning("submit_feedback validation error: %s", e)
+        raise HTTPException(status_code=400, detail="Invalid feedback — check 'user_action' and 'outcome' values")
 
 
 @router.get("/outcomes")
 async def get_outcomes(
     report_id: str = "",
-    user_id: Optional[int] = None,  # BUG-17: was `int = None` — wrong annotation
     current_user: dict = Depends(get_current_user),  # BUG-5
 ):
+    # IDOR fix: ignore any caller-supplied user_id; always scope to the calling user's
+    # own outcomes so authenticated users cannot read other users' feedback records.
     from app.db.reports_repository import list_outcomes
-    return {"outcomes": await list_outcomes(report_id=report_id, user_id=user_id)}
+    return {"outcomes": await list_outcomes(report_id=report_id, user_id=current_user.get("id"))}
 
 
 @router.get("/eval-dashboard")
 async def get_eval_dashboard(
-    institution_id: Optional[str] = None,
     current_user: dict = Depends(get_current_user),  # BUG-5
 ):
-    """Internal evaluation metrics: trust, priority, abstention, acceptance, outcomes (P10)."""
+    """Internal evaluation metrics: trust, priority, abstention, acceptance, outcomes (P10).
+    Scoped to the calling user's institution; never accepts an external institution_id."""
     from app.db.reports_repository import eval_metrics
+    # IDOR fix: derive institution from the authenticated user's own record rather than
+    # accepting it as a query parameter (which any user could manipulate to see other
+    # institutions' aggregate metrics).
+    institution_id = current_user.get("institution") or None
     return await eval_metrics(institution_id=institution_id)
 
 
 # ── TTO review dashboard / workflow (Sprint 5) ──────────────────────────────────
 
+async def _check_report_ownership(report_id: str, current_user: dict) -> None:
+    """Verify the calling user owns the report or belongs to the same institution.
+    Raises HTTPException(403) if the check fails; HTTPException(404) if not found."""
+    from app.db.database import get_pool
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        raw = await conn.fetchrow(
+            "SELECT user_id, institution_id FROM reports WHERE report_id = $1", report_id
+        )
+    if not raw:
+        raise HTTPException(status_code=404, detail="Invention not found")
+    caller_id = current_user.get("id")
+    caller_institution = (current_user.get("institution") or "").strip()
+    report_institution = (raw.get("institution_id") or "").strip()
+    if raw["user_id"] != caller_id and not (caller_institution and caller_institution == report_institution):
+        raise HTTPException(status_code=403, detail="Not authorised to access this invention")
+
+
 @router.get("/review-queue")
 async def review_queue(
-    institution_id: Optional[str] = None,
     status: str = "",
     reviewer: str = "",
     current_user: dict = Depends(get_current_user),  # BUG-5
 ):
-    """The TTO review queue: inventions with triage scores, status, reviewer, next action."""
+    """The TTO review queue: inventions with triage scores, status, reviewer, next action.
+    Always scoped to the calling user's institution or their own reports — the institution_id
+    URL parameter has been removed to prevent IDOR (cross-institution data exposure)."""
     from app.db.reports_repository import list_review_queue
+    # IDOR fix: derive institution from the user record; fall back to user_id scoping
+    # when no institution is set so there is never an unfiltered full-table query.
+    institution_id = current_user.get("institution") or None
+    caller_id = current_user.get("id")
     return {"inventions": await list_review_queue(
-        institution_id=institution_id, status=status, reviewer=reviewer)}
+        institution_id=institution_id,
+        caller_user_id=None if institution_id else caller_id,
+        status=status, reviewer=reviewer)}
 
 
 @router.get("/invention/{report_id}")
@@ -391,6 +464,8 @@ async def invention_detail(
     report_id: str,
     current_user: dict = Depends(get_current_user),  # BUG-5
 ):
+    # IDOR fix: verify ownership before returning the full invention record.
+    await _check_report_ownership(report_id, current_user)
     from app.db.reports_repository import get_invention
     inv = await get_invention(report_id)
     if not inv:
@@ -410,13 +485,16 @@ async def review_update(
     req: ReviewUpdateRequest,
     current_user: dict = Depends(get_current_user),  # BUG-5
 ):
+    # IDOR fix: verify ownership before allowing any write to the report's review fields.
+    await _check_report_ownership(req.report_id, current_user)
     from app.db.reports_repository import update_review
     try:
         return await update_review(req.report_id, status=req.status,
                                    assigned_reviewer=req.assigned_reviewer,
                                    next_action=req.next_action)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.warning("review_update validation error: %s", e)
+        raise HTTPException(status_code=400, detail="Invalid review status value")
 
 
 @router.get("/examples")
@@ -613,17 +691,26 @@ async def get_market_sizing_derivation(body: dict):
         pop      = int(body.get("us_patient_population", 0))
         if not idea:
             raise HTTPException(status_code=400, detail="idea required")
-        deriv = generate_market_sizing_derivation(
-            idea=idea, product_type=pt, disease_name=disease,
-            therapeutic_area=ta, us_patient_population=pop,
+        # generate_market_sizing_derivation is synchronous and may invoke a
+        # blocking requests.post() call (NIH RePORTER query) for research-tool
+        # archetypes.  Run it in a thread-pool executor so it never stalls the
+        # async event loop.
+        import asyncio as _asyncio
+        _loop = _asyncio.get_event_loop()
+        deriv = await _loop.run_in_executor(
+            None,
+            lambda: generate_market_sizing_derivation(
+                idea=idea, product_type=pt, disease_name=disease,
+                therapeutic_area=ta, us_patient_population=pop,
+            ),
         )
         return asdict(deriv)
     except Exception as e:
         logger.error("Market sizing derivation failed: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Market sizing derivation failed")
 
 
-@router.post("/market-sizing-override")
+@router.post("/market-sizing-override", status_code=201)
 async def save_market_sizing_override(
     body: dict,
     current_user=Depends(get_optional_user),
@@ -634,6 +721,27 @@ async def save_market_sizing_override(
     if not report_id:
         raise HTTPException(status_code=400, detail="report_id required")
     user_id = (current_user or {}).get("id")
+
+    # BUG-51-D: IDOR — endpoint previously had no ownership check. Any caller
+    # (even unauthenticated) could save overrides for any report_id, which
+    # corrupts the global override ledger used as training data.
+    # Fix: if the job has an owner_id, only that user may save overrides.
+    try:
+        from app.services.report_jobs import get_job as _get_job
+        _job = await _get_job(str(report_id))
+        if _job:
+            _job_owner = _job.get("owner_id")
+            if _job_owner:
+                if not user_id or str(user_id) != _job_owner:
+                    raise HTTPException(
+                        status_code=403,
+                        detail="Not authorised to override this report",
+                    )
+    except HTTPException:
+        raise
+    except Exception as _oc_err:
+        logger.warning("market-sizing-override ownership check failed (non-fatal): %s", _oc_err)
+
     step_overrides = body.get("step_overrides", {})
     rationale      = body.get("rationale", "")
     row_id = await _repo.save_override(
@@ -730,7 +838,7 @@ async def get_market_sizing_override(
 async def get_opportunities(
     top_n: int = 100,
     offset: int = 0,
-    search: str = "",
+    search: str = Query(default="", max_length=500),
     current_user = Depends(get_current_user),
 ):
     """
@@ -821,7 +929,7 @@ async def get_opportunities(
                         o["rank"] = i
                     return {
                         "opportunities": all_opps[:top_n],
-                        "generated_at":  datetime.utcnow().isoformat(),
+                        "generated_at":  datetime.now(timezone.utc).isoformat(),
                         "algorithm":     f"Expert 309 + {extended_total:,} MONDO diseases",
                         "total_scored":  len(all_opps),
                         "universe_size": 309 + extended_total,
@@ -850,7 +958,7 @@ async def get_opportunities(
                     universe = len(curated_opps) + extended_total
                     return {
                         "opportunities": page,
-                        "generated_at":  datetime.utcnow().isoformat(),
+                        "generated_at":  datetime.now(timezone.utc).isoformat(),
                         "algorithm":     f"Expert {len(curated_opps)} curated + {extended_total:,} extended diseases",
                         "total_scored":  len(all_opps),
                         "universe_size": universe,
@@ -870,7 +978,7 @@ async def get_opportunities(
         o["rank"] = i
     return {
         "opportunities": page,
-        "generated_at":  datetime.utcnow().isoformat(),
+        "generated_at":  datetime.now(timezone.utc).isoformat(),
         "algorithm":     f"Expert {curated_size} curated diseases",
         "total_scored":  len(curated_opps[:top_n]),
         "universe_size": total_known,
@@ -961,7 +1069,8 @@ async def score_custom_opportunity(
         )
         return result
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("Opportunity scoring failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Opportunity scoring failed")
 
 
 
@@ -1170,7 +1279,7 @@ async def classify_product_endpoint(
         }
     except Exception as exc:
         logger.error("classify_product_endpoint failed: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Product classification failed")
 
 
 @router.post("/clarify")
@@ -1512,7 +1621,7 @@ Return ONLY a valid JSON array of 6 objects. No markdown, no explanation, no oth
                 return {"questions": _legacy, "pathway": pathway, "conditioned": True}
             except Exception:
                 pass
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Clarify question generation failed")
 
 
 # ── Non-Confidential Summary (NCS) generator ─────────────────────────────────
@@ -1603,17 +1712,21 @@ Return ONLY valid JSON with these exact fields:
         data["institution"]   = payload.institution or ""
         data["contact_name"]  = payload.contact_name or ""
         data["contact_email"] = payload.contact_email or ""
-        data["generated_at"]  = datetime.utcnow().isoformat() + "Z"
+        data["generated_at"]  = datetime.now(timezone.utc).isoformat() + "Z"
         return data
     except Exception as e:
         logger.error("NCS generation failed: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="NCS generation failed")
 
 
 # ── Dataset Analysis (Edison Scientific play) ─────────────────────────────────
 
 class DatasetAnalysisRequest(BaseModel):
-    csv_data:          str  = Field(..., description="CSV text with column headers in first row")
+    # BUG-74: csv_data had no Pydantic max_length — the runtime check at line ~1715
+    # catches oversized payloads, but only after Pydantic has already built the model.
+    # Adding max_length here gives a proper 422 with a descriptive error before model
+    # construction succeeds, and serves as defense-in-depth documentation.
+    csv_data:          str  = Field(..., max_length=50_000, description="CSV text with column headers in first row")
     disease_name:      str  = Field(..., min_length=3, max_length=200)
     research_question: str  = Field(
         default="What do these results mean for drug development?",
@@ -1678,13 +1791,14 @@ async def analyze_experimental_data(
                 for c in result.column_stats
             ],
             "formatted_analysis": result.formatted,
-            "generated_at": datetime.utcnow().isoformat() + "Z",
+            "generated_at": datetime.now(timezone.utc).isoformat() + "Z",
         }
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.warning("analyze_dataset validation error: %s", e)
+        raise HTTPException(status_code=400, detail="Invalid dataset format — ensure CSV has at least one numeric data column")
     except Exception as e:
         logger.error("Dataset analysis failed: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Dataset analysis failed")
 
 
 # ── Part E: Assumption Ledger endpoints ──────────────────────────────────────
@@ -2118,7 +2232,11 @@ async def list_market_sizing_overrides(report_id: str):
 
 
 @router.delete("/market-sizing/override")
-async def delete_market_sizing_override(report_id: str, segment_id: int):
+async def delete_market_sizing_override(
+    report_id: str,
+    segment_id: int,
+    current_user=Depends(get_current_user),  # BUG-52: was unauthenticated — any caller could delete any report's overrides
+):
     """Revert all custom assumptions for a segment (delete the saved override)."""
     import app.db.market_sizing_override_repository as _ovr_repo
     deleted = await _ovr_repo.delete_override(report_id, segment_id)
@@ -2428,10 +2546,18 @@ async def revert_market_model(
 
 class _OverrideRequest(BaseModel):
     node_id:   str   = Field(..., description="id of the node to override")
-    value:     float = Field(..., description="new scalar value")
+    value:     float = Field(..., ge=0, description="new scalar value (must be ≥ 0 and finite)")
     rationale: str   = Field(..., min_length=1, max_length=500,
                              description="required — stored in override_events")
     version:   Optional[int] = Field(default=None, description="base version; latest if omitted")
+
+    @field_validator("value")
+    @classmethod
+    def _value_must_be_finite(cls, v: float) -> float:
+        """Reject NaN and ±infinity — they bypass the SAM ≤ TAM invariant checks."""
+        if not _math.isfinite(v):
+            raise ValueError("value must be a finite number (not NaN or infinity)")
+        return v
 
 
 class _GateRequest(BaseModel):
@@ -2566,11 +2692,16 @@ async def market_model_override(
             str(getattr(current_user, "id", "anon")),
         )
     except AssertionError as e:
-        raise HTTPException(status_code=422, detail=f"Invalid model state: {e}")
+        # BUG-30d: AssertionError text can contain internal code paths; log it server-side
+        # and return a generic message to the client.
+        logger.warning("Market model assertion failed for report %s: %s", report_id, e)
+        raise HTTPException(status_code=422, detail="Invalid model state")
     except PermissionError as e:
-        raise HTTPException(status_code=403, detail=str(e))
+        logger.warning("market_model_set_override permission denied for report %s: %s", report_id, e)
+        raise HTTPException(status_code=403, detail="This market model node is not editable")
     except KeyError as e:
-        raise HTTPException(status_code=400, detail=f"Unknown node: {e}")
+        logger.warning("market_model_set_override unknown node in report %s: %s", report_id, e)
+        raise HTTPException(status_code=400, detail="Unknown market model node")
 
     await store.save(new_m)
 
@@ -2593,7 +2724,11 @@ async def market_model_override(
     except Exception as _oe_err:
         logger.warning("override_events logging failed (non-fatal): %s", _oe_err)
 
-    return _build_override_response(old_m, new_m)
+    try:
+        return _build_override_response(old_m, new_m)
+    except (ValueError, ZeroDivisionError) as e:
+        logger.warning("market_model_override formula error for report %s: %s", report_id, e)
+        raise HTTPException(status_code=422, detail=f"Market model formula error: {e}")
 
 
 @router.post("/market-model/{report_id}/gate")
@@ -2626,11 +2761,16 @@ async def market_model_add_gate(
     try:
         new_m = old_m.with_gate(body.target_node_id, gate)
     except (ValueError, KeyError) as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.warning("market_model_add_gate error for report %s: %s", report_id, e)
+        raise HTTPException(status_code=400, detail="Invalid gate configuration — check target node")
 
     await store.save(new_m)
 
-    resp = _build_override_response(old_m, new_m)
+    try:
+        resp = _build_override_response(old_m, new_m)
+    except (ValueError, ZeroDivisionError) as e:
+        logger.warning("market_model_add_gate formula error for report %s: %s", report_id, e)
+        raise HTTPException(status_code=422, detail=f"Market model formula error: {e}")
     resp["gate_id"] = gate_id
     return resp
 
@@ -2654,11 +2794,21 @@ async def market_model_remove_gate(
 
     try:
         new_m = old_m.without_gate(gate_id)
+    except (ValueError, KeyError) as e:
+        logger.warning("market_model_remove_gate error for report %s gate %s: %s", report_id, gate_id, e)
+        raise HTTPException(status_code=400, detail="Gate not found or invalid operation")
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        # BUG-30c: bare Exception catch was leaking internal error text to the client.
+        # Log it server-side and return a generic message.
+        logger.error("Failed to remove gate %s from report %s: %s", gate_id, report_id, e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to remove gate")
 
     await store.save(new_m)
-    return _build_override_response(old_m, new_m)
+    try:
+        return _build_override_response(old_m, new_m)
+    except (ValueError, ZeroDivisionError) as e:
+        logger.warning("market_model_remove_gate formula error for report %s: %s", report_id, e)
+        raise HTTPException(status_code=422, detail=f"Market model formula error: {e}")
 
 
 @router.post("/market-model/{report_id}/reset")
@@ -2691,7 +2841,11 @@ async def market_model_reset(
         change_note="Reset to engine baseline (v1)",
     )
     await store.save(reset_m)
-    return _build_override_response(old_m, reset_m)
+    try:
+        return _build_override_response(old_m, reset_m)
+    except (ValueError, ZeroDivisionError) as e:
+        logger.warning("market_model_reset formula error for report %s: %s", report_id, e)
+        raise HTTPException(status_code=422, detail=f"Market model formula error: {e}")
 
 
 # ── market-model.js NL assumption endpoints ──────────────────────────────────
@@ -2752,10 +2906,11 @@ NOT a second stacking gate."""
 
 async def _parse_assumption_nl(text: str, state: dict, ops: list) -> dict:
     """Call Claude to parse NL text into market model operations."""
-    import os, json as _json
+    import json as _json
     import httpx
+    from app.core.config import settings as _settings
 
-    api_key = os.getenv("ANTHROPIC_API_KEY")
+    api_key = _settings.ANTHROPIC_API_KEY
     if not api_key:
         raise ValueError("ANTHROPIC_API_KEY not set")
 
@@ -2805,13 +2960,27 @@ Return the parsed ops JSON."""
 
 class _ParseBody(BaseModel):
     text: str = Field(..., min_length=1, max_length=2000)
+    # BUG-78b: state and ops are embedded verbatim in the Claude Haiku prompt;
+    # unbounded dicts/lists allow arbitrary prompt inflation (LLM cost DoS).
     state: dict = Field(default_factory=dict)
-    ops: list    = Field(default_factory=list)
+    ops: list    = Field(default_factory=list, max_length=50)
+
+    @field_validator("state")
+    @classmethod
+    def _cap_state(cls, v: dict) -> dict:
+        _ALLOWED = {"buyer_population", "spend_per_unit", "sam_rate", "som_rate",
+                    "tam", "sam", "som"}
+        # Strip unknown keys; cap at 20 total to prevent prompt inflation.
+        filtered = {k: val for k, val in v.items() if k in _ALLOWED}
+        if len(filtered) > 20:
+            filtered = dict(list(filtered.items())[:20])
+        return filtered
 
 
 class _ApplyBody(BaseModel):
     text: str = Field(default="")
-    ops:  list = Field(default_factory=list)
+    # BUG-78b: unbounded ops list → unbounded DB write loop.
+    ops:  list = Field(default_factory=list, max_length=50)
 
 
 _REGEN_SYSTEM_PROMPT = """You rewrite one paragraph of a market sizing report after the user
@@ -2836,9 +3005,18 @@ Rules:
 class _RegenBody(BaseModel):
     section:         str  = Field(default="")
     original_text:   str  = Field(default="", max_length=4000)
+    # BUG-78b: all three fields feed directly into the Claude Haiku prompt;
+    # unbounded dicts/lists allow arbitrary prompt inflation (LLM cost DoS).
     current_values:  dict = Field(default_factory=dict)
     baseline_values: dict = Field(default_factory=dict)
-    assumptions:     list = Field(default_factory=list)
+    assumptions:     list = Field(default_factory=list, max_length=50)
+
+    @field_validator("current_values", "baseline_values")
+    @classmethod
+    def _cap_market_values(cls, v: dict) -> dict:
+        _ALLOWED = {"tam", "sam", "som", "buyer_population", "spend_per_unit",
+                    "sam_rate", "som_rate"}
+        return {k: val for k, val in v.items() if k in _ALLOWED}
 
 
 @router.post("/reports/{report_id}/assumptions/parse")
@@ -2855,8 +3033,8 @@ async def parse_assumption(
     try:
         result = await _parse_assumption_nl(body.text, body.state, body.ops)
     except Exception as exc:
-        logger.error("assumption parse failed: %s", exc)
-        raise HTTPException(status_code=502, detail=f"LLM parse error: {exc}")
+        logger.error("assumption parse failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=502, detail="Assumption parsing failed — try rephrasing your input")
 
     _DERIVED = {"tam", "sam", "som"}
     for _op in result.get("ops", []):
@@ -2967,9 +3145,10 @@ async def regenerate_section(
     Uses Haiku to rewrite the prose; placeholders in the output are replaced with
     data-node-tagged spans so the numbers remain live after injection.
     """
-    import os, httpx
+    import httpx
+    from app.core.config import settings as _settings
 
-    api_key = os.getenv("ANTHROPIC_API_KEY")
+    api_key = _settings.ANTHROPIC_API_KEY
     if not api_key:
         raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY not configured")
 
@@ -3027,8 +3206,8 @@ async def regenerate_section(
         resp.raise_for_status()
         raw = resp.json()["content"][0]["text"].strip().strip('"')
     except Exception as exc:
-        logger.error("regenerate_section failed: %s", exc)
-        raise HTTPException(status_code=502, detail=str(exc))
+        logger.error("regenerate_section failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=502, detail="Section regeneration failed — please try again")
 
     # Validate: no numeric market literals should remain after stripping {{tokens}}.
     # If the LLM wrote "$527K" or "1,666 labs" instead of {{som}}/{{buyer_population}},
@@ -3076,8 +3255,8 @@ async def regenerate_section(
         except HTTPException:
             raise
         except Exception as _exc2:
-            logger.error("regenerate_section retry failed: %s", _exc2)
-            raise HTTPException(status_code=502, detail=str(_exc2))
+            logger.error("regenerate_section retry failed: %s", _exc2, exc_info=True)
+            raise HTTPException(status_code=502, detail="Section regeneration retry failed — please try again")
 
     # Replace {{key}} placeholders with formatted + data-node-tagged spans
     FMT = {

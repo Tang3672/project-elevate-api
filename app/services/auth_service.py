@@ -21,7 +21,12 @@ logger = logging.getLogger(__name__)
 # ── Config ────────────────────────────────────────────────────────────────────
 JWT_SECRET      = getattr(settings, 'JWT_SECRET', 'project-elevate-secret-key-change-in-production')
 JWT_ALGORITHM   = "HS256"
-JWT_EXPIRE_DAYS = 30
+# BUG-77: 30-day access-token lifetime with no revocation path — a stolen token
+# remains valid for a month.  Reduced to 7 days: still generous for a research
+# SaaS (PIs typically open the app multiple times a week), cuts the breach window
+# by 4×, and requires no server-side blocklist.  Proper refresh-token rotation
+# should be added in a future sprint to allow even shorter access-token lifetimes.
+JWT_EXPIRE_DAYS = 7
 
 GOOGLE_TOKEN_INFO_URL = "https://oauth2.googleapis.com/tokeninfo"
 
@@ -121,9 +126,12 @@ async def verify_google_token(id_token: str) -> Optional[dict]:
                 logger.warning("Google token audience mismatch")
                 return None
             return {
-                'email': data.get('email'),
-                'name':  data.get('name'),
-                'sub':   data.get('sub'),   # Google's unique user ID
+                'email':          data.get('email'),
+                'name':           data.get('name'),
+                'sub':            data.get('sub'),   # Google's unique user ID
+                # Google tokeninfo returns email_verified as the STRING "true"/"false".
+                # Normalise to bool here so callers don't have to know the raw type.
+                'email_verified': data.get('email_verified') == 'true',
             }
     except Exception as e:
         logger.error(f"Google token verification error: {e}")

@@ -102,17 +102,19 @@ async def send_verification_email(email: str, name: str, token: str, base_url: s
     </div>
     """
 
-    # Resolve SMTP settings — handle both SMTP_HOST and EMAIL_HOST naming
-    import os
-    smtp_host = getattr(settings, 'SMTP_HOST', '') or os.environ.get('SMTP_HOST', '') or os.environ.get('EMAIL_HOST', '')
-    smtp_port = int(getattr(settings, 'SMTP_PORT', 0) or os.environ.get('SMTP_PORT', 587) or 587)
-    smtp_user = getattr(settings, 'SMTP_USER', '') or os.environ.get('SMTP_USER', '') or os.environ.get('EMAIL_USER', '')
-    smtp_pass = getattr(settings, 'SMTP_PASS', '') or os.environ.get('SMTP_PASS', '') or os.environ.get('EMAIL_PASSWORD', '')
-    email_from = os.environ.get('EMAIL_FROM', '') or getattr(settings, 'EMAIL_FROM', '') or 'noreply@hudatabase.online'
+    # Resolve SMTP settings from settings (config.py Railway workaround already
+    # copies env vars into settings, so os.environ fallbacks are not needed here).
+    smtp_host = settings.SMTP_HOST or settings.EMAIL_HOST
+    smtp_port = settings.SMTP_PORT or 587
+    smtp_user = settings.SMTP_USER or settings.EMAIL_USER
+    smtp_pass = settings.SMTP_PASS or settings.EMAIL_PASSWORD
+    email_from = settings.EMAIL_FROM or 'noreply@hudatabase.online'
 
     # BUG-73: SMTP host+username were logged at INFO level on every registration, leaking infra topology
+    # BUG-30a: do NOT log verify_url — it contains a single-use token; log output is visible to
+    #          anyone with infra access and must never carry bearer credentials.
     if not smtp_host or not smtp_user:
-        logger.warning(f"SMTP not configured — verification URL: {verify_url}")
+        logger.warning("SMTP not configured — skipping verification email send. Set SMTP_HOST/SMTP_USER.")
         return
 
     try:

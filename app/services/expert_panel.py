@@ -17,12 +17,13 @@ Panels run in parallel inside the existing asyncio.gather — zero latency overh
 
 import json
 import logging
-import os
 import re
 from dataclasses import dataclass, field
 from typing import Optional, List
 
 import httpx
+
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -287,7 +288,7 @@ def panel_to_dict(panel: "ExpertPanelResult") -> dict:
 
 async def _haiku_call(system: str, user: str) -> dict:
     """Single Haiku call returning parsed JSON dict."""
-    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    api_key = settings.ANTHROPIC_API_KEY
     if not api_key:
         raise ValueError("ANTHROPIC_API_KEY not set")
     async with httpx.AsyncClient(timeout=12.0) as client:
@@ -361,8 +362,8 @@ async def _run_regulatory_panel(
         loa_frac, loa_pct, citation = get_ptrs(sub_expert_id, development_phase)
         calibrated_loa_pct  = loa_pct
         calibrated_citation = citation
-    except Exception:
-        pass  # Fall back to Haiku estimate if ptrs_tables unavailable
+    except Exception as e:
+        logger.debug("ptrs_tables unavailable, falling back to Haiku estimate: %s", e)
 
     domain_hint = _regulatory_hint(sub_expert_id)
     _sid = (sub_expert_id or "").lower()
@@ -453,8 +454,8 @@ async def _run_commercial_panel(
     try:
         from app.services.deal_comps import format_deal_comps_for_prompt
         deal_comp_block = format_deal_comps_for_prompt(sub_expert_id, development_phase)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("deal_comps unavailable, proceeding without deal comparables: %s", e)
     system = (
         "You are a biotech market access and commercialization analyst.\n"
         + (f"Domain context: {domain_hint}\n" if domain_hint else "")
@@ -557,12 +558,15 @@ async def run_expert_panel(
         )
         return result
 
-    clinical, regulatory, commercial = await asyncio.gather(
+    _results = await asyncio.gather(
         _run_clinical_panel(disease_name, idea),
         _run_regulatory_panel(disease_name, idea, sub_expert_id, product_type, development_phase),
         _run_commercial_panel(disease_name, idea, sub_expert_id, market_context, development_phase),
-        return_exceptions=False,
+        return_exceptions=True,
     )
+    clinical, regulatory, commercial = [
+        (None if isinstance(r, Exception) else r) for r in _results
+    ]
     errors = sum(1 for x in (clinical, regulatory, commercial) if x is None)
     result = ExpertPanelResult(
         clinical=clinical,

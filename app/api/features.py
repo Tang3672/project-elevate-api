@@ -23,9 +23,9 @@ def _get_current_user():
 trial_router = APIRouter()
 
 class TrialSiteRequest(BaseModel):
-    idea:           str = Field(..., min_length=20)
-    disease_domain: str = Field(default="auto")
-    indication:     str = Field(..., min_length=5,
+    idea:           str = Field(..., min_length=20, max_length=2000)
+    disease_domain: str = Field(default="auto", max_length=200)
+    indication:     str = Field(..., min_length=5, max_length=500,
         description="Specific indication e.g. 'carbapenem-resistant infections in ICU patients'")
     num_sites:      int = Field(default=15, ge=5, le=20)
 
@@ -68,7 +68,7 @@ async def get_trial_sites(payload: TrialSiteRequest, current_user: dict = Depend
         }
     except Exception as e:
         logger.error(f"Trial site request failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Trial site analysis failed")
 
 
 # ── Portfolio ─────────────────────────────────────────────────────────────────
@@ -126,7 +126,7 @@ async def analyze_portfolio(payload: PortfolioRequest, current_user: dict = Depe
         }
     except Exception as e:
         logger.error(f"Portfolio analysis failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Portfolio analysis failed")
 
 
 # ── Grant Co-Pilot ────────────────────────────────────────────────────────────
@@ -173,4 +173,4 @@ async def generate_grant(payload: GrantRequest, current_user: dict = Depends(_ge
         }
     except Exception as e:
         logger.error(f"Grant generation failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Grant generation failed")

@@ -300,7 +300,7 @@ def format_funding_intelligence(data: dict, disease_name: str) -> str:
     ]
 
     # SBIR awards
-    sbir = data.get("sbir_awards", [])
+    sbir = data.get("sbir_awards") or []
     if sbir:
         lines.append("RECENT NIH SBIR/STTR AWARDS (direct competitors just received federal funding):")
         for a in sbir[:5]:
@@ -310,7 +310,7 @@ def format_funding_intelligence(data: dict, disease_name: str) -> str:
         lines.append("")
 
     # New trial entrants
-    entrants = data.get("new_entrants", [])
+    entrants = data.get("new_entrants") or []
     if entrants:
         lines.append("NEW COMPANIES ENTERING THIS SPACE (first trial registered in past year):")
         for e in entrants[:5]:
@@ -318,7 +318,7 @@ def format_funding_intelligence(data: dict, disease_name: str) -> str:
         lines.append("")
 
     # EDGAR fundraising signals
-    edgar = data.get("edgar_signals", [])
+    edgar = data.get("edgar_signals") or []
     if edgar:
         lines.append("RECENT FUNDRAISING (SEC 8-K filings — private placements in this space):")
         for s in edgar[:4]:
@@ -326,7 +326,7 @@ def format_funding_intelligence(data: dict, disease_name: str) -> str:
         lines.append("")
 
     # Preprint velocity
-    pre = data.get("preprints", {})
+    pre = data.get("preprints") or {}
     if pre:
         lines += [
             f"RESEARCH MOMENTUM (bioRxiv/medRxiv preprint velocity):",

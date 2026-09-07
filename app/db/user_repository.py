@@ -103,6 +103,12 @@ async def init_user_tables():
                 created_at  TIMESTAMPTZ DEFAULT NOW()
             )
         """)
+        # Ensure case-insensitive UNIQUE constraint to prevent duplicate submissions
+        # and eliminate the TOCTOU race between SELECT + INSERT in the waitlist endpoint.
+        await conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS waitlist_email_ci_unique_idx
+            ON waitlist (lower(email))
+        """)
 
     logger.info("✅ User tables initialized")
 
@@ -188,6 +194,12 @@ async def save_report(
             """,
             user_id, name, product_type, idea, pathogen, json.dumps(report_data)
         )
+        _raw = row['report_data']
+        try:
+            _report_data = json.loads(_raw) if isinstance(_raw, str) else dict(_raw)
+        except (json.JSONDecodeError, TypeError):
+            logger.warning("save_report: failed to decode report_data, using empty dict")
+            _report_data = {}
         return SavedReport(
             report_id    = row['id'],
             user_id      = row['user_id'],
@@ -195,7 +207,7 @@ async def save_report(
             product_type = row['product_type'],
             idea         = row['idea'],
             pathogen     = row['pathogen'],
-            report_data  = json.loads(row['report_data']) if isinstance(row['report_data'], str) else dict(row['report_data']),
+            report_data  = _report_data,
             created_at   = row['created_at'],
         )
 
@@ -237,6 +249,12 @@ async def get_report_by_id(report_id: int, user_id: int) -> Optional[SavedReport
         )
         if not row:
             return None
+        _raw = row['report_data']
+        try:
+            _report_data = json.loads(_raw) if isinstance(_raw, str) else dict(_raw)
+        except (json.JSONDecodeError, TypeError):
+            logger.warning("get_report_by_id: failed to decode report_data for id=%s, using empty dict", report_id)
+            _report_data = {}
         return SavedReport(
             report_id    = row['id'],
             user_id      = row['user_id'],
@@ -244,7 +262,7 @@ async def get_report_by_id(report_id: int, user_id: int) -> Optional[SavedReport
             product_type = row['product_type'],
             idea         = row['idea'],
             pathogen     = row['pathogen'],
-            report_data  = json.loads(row['report_data']) if isinstance(row['report_data'], str) else dict(row['report_data']),
+            report_data  = _report_data,
             created_at   = row['created_at'],
         )
 
@@ -405,6 +423,27 @@ async def increment_free_report_count(user_id: int):
             user_id
         )
 
+
+async def try_consume_free_report_atomic(user_id: int, limit: int) -> bool:
+    """
+    Atomically check quota and consume one slot in a single SQL statement.
+    Returns True if the slot was consumed (allowed), False if quota is exhausted.
+
+    The WHERE clause `free_reports_used < $2` acts as the atomic guard —
+    two concurrent requests racing at limit-1 will both attempt the UPDATE,
+    but only one will match the WHERE condition and return a row.  The other
+    gets no row back and is correctly rejected, eliminating the TOCTOU race
+    that existed when check and increment were separate round-trips.
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        result = await conn.fetchrow(
+            "UPDATE users SET free_reports_used = free_reports_used + 1 "
+            "WHERE id = $1 AND free_reports_used < $2 RETURNING id",
+            user_id, limit,
+        )
+    return result is not None
+
 async def get_free_reports_used(user_id: int) -> int:
     """Get how many free reports a user has used."""
     pool = await get_pool()
@@ -475,7 +514,7 @@ async def try_consume_report(user_id: int) -> dict:
     usage = await get_usage(user_id)
     plan       = usage["plan"]
     remaining  = usage["remaining"]
-    sub_status = (await get_user_by_id(user_id) or {}).get("subscription_status", "none")
+    sub_status = (await get_user_by_id(user_id) or {}).get("subscription_status") or "none"
 
     # Unlimited plan
     if remaining is None:
@@ -516,12 +555,22 @@ async def try_consume_report(user_id: int) -> dict:
 
 
 async def update_user_plan(user_id: int, plan_name: str):
-    """Set the plan name for a user (called from Stripe webhook)."""
+    """Set the plan name for a user (called from Stripe webhook).
+
+    BUG-51-B: previously only reset monthly_reports_used, not free_reports_used.
+    The actual quota gate in _enforce_quota() uses free_reports_used (a lifetime
+    counter).  Without resetting it on plan change, a user who exhausted the free
+    tier (3 reports) would upgrade to explorer (limit=5) and find only 2 slots
+    remaining — then be permanently blocked even after monthly billing resets,
+    because the monthly reset CTE only resets monthly_reports_used, not
+    free_reports_used.  Both counters must be zeroed on every plan transition.
+    """
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute(
             "UPDATE users SET plan_name = $1, "
             "monthly_reset_at = date_trunc('month', NOW()) + interval '1 month', "
-            "monthly_reports_used = 0 WHERE id = $2",
+            "monthly_reports_used = 0, "
+            "free_reports_used = 0 WHERE id = $2",
             plan_name, user_id
         )

@@ -88,7 +88,8 @@ class CensusSAHIEConnector(BaseConnector):
             )
             years = sorted(set(row[0] for row in data[1:]))
             return years[-1] if years else None
-        except Exception:
+        except Exception as e:
+            logger.warning("SAHIE year lookup failed, using 2023 fallback: %s", e)
             return "2023"  # known-good fallback
 
     async def _fetch_county_data(
@@ -121,7 +122,8 @@ class CensusSAHIEConnector(BaseConnector):
         # Build index
         try:
             idx = {h: i for i, h in enumerate(headers)}
-        except Exception:
+        except Exception as e:
+            logger.warning("SAHIE header parse failed (year=%s, income=%s): %s", year, income_cat, e)
             return
 
         income_label = self.INCOME_CATS.get(income_cat, "unknown income")

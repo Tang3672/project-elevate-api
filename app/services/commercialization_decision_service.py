@@ -110,7 +110,8 @@ def _market_score(som_usd: Optional[float]) -> float:
 def _whitespace_from_signal(signal: Optional[str]) -> float:
     # activity_signal is a full sentence ("OPEN — limited patent activity…");
     # extract just the first word so the lookup works regardless of the suffix.
-    first = (signal or "").strip().lower().split()[0].rstrip("—-") if signal else ""
+    parts = (signal or "").strip().lower().split()
+    first = parts[0].rstrip("—-") if parts else ""
     return {"open": 0.85, "active": 0.55, "crowded": 0.25}.get(first, NEUTRAL)
 
 

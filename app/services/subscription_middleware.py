@@ -22,9 +22,7 @@ logger = logging.getLogger(__name__)
 
 DEV_EMAILS = {
     "test@medlevate.io",
-    "ijw91021@gmail.com",
     "admin@medlevate.io",
-    "oneonesie100@gmail.com",
 }
 
 # Paths that consume a report quota slot
@@ -44,7 +42,7 @@ SUBSCRIPTION_PATHS = {
 
 
 def _is_active(user: dict) -> bool:
-    status    = user.get("subscription_status", "none")
+    status    = user.get("subscription_status") or "none"
     trial_end = user.get("trial_ends_at")
     if status == "active":
         return True

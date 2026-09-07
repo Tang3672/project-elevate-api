@@ -227,7 +227,8 @@ async def _get_openalex_publications(topic: str, sub_expert_id: str, max_results
             "sort":     "cited_by_count:desc",
         }
         t0 = time.monotonic()
-        r = httpx.get(_OPENALEX_URL, params=params, timeout=12.0)
+        # Offload blocking httpx.get to a thread so the event loop stays free
+        r = await asyncio.to_thread(httpx.get, _OPENALEX_URL, params=params, timeout=12.0)
         latency_ms = (time.monotonic() - t0) * 1000
         items = r.json().get("results", []) if r.status_code == 200 else []
         _log_fetch_pubmed(
@@ -409,7 +410,7 @@ def _is_non_clinical_product(sub_expert_id: str) -> bool:
 
 _OPENALEX_URL  = "https://api.openalex.org/works"
 _CROSSREF_URL  = "https://api.crossref.org/works"
-_CONTACT_EMAIL = "oneonesie100@gmail.com"   # required by OpenAlex polite pool
+_CONTACT_EMAIL = "contact@projectelevate.io"   # required by OpenAlex polite pool
 
 
 def _openalex_result_to_meta(w: dict, query_title: str) -> "dict | None":
@@ -887,8 +888,10 @@ def _build_pubmed_queries(disease_name: str, sub_expert_id: str) -> List[str]:
     default_query = f'"{disease}"[Title/Abstract] AND (clinical trial[pt] OR systematic review[pt] OR meta-analysis[pt])'
     primary_query = domain_filters.get(sub_expert_id, default_query)
 
-    # Always add a recency query for last 3 years
-    recency_query = f'"{disease}"[Title/Abstract] AND ("2023"[Date - Publication] : "2026"[Date - Publication])'
+    # Always add a recency query for last 3 years — computed dynamically so the
+    # window slides forward each year instead of hardcoding a stale upper bound.
+    _cur_year = time.localtime().tm_year
+    recency_query = f'"{disease}"[Title/Abstract] AND ("{_cur_year - 3}"[Date - Publication] : "{_cur_year}"[Date - Publication])'
 
     # Guidelines query
     guidelines_query = f'"{disease}"[Title/Abstract] AND (guideline[pt] OR practice guideline[pt] OR consensus[Title/Abstract])'

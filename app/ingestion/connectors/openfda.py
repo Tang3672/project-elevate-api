@@ -88,7 +88,8 @@ class FDADeviceEventsConnector(BaseConnector):
                     async for batch in self._process(results):
                         yield batch
                     return
-            except Exception:
+            except Exception as _e:
+                logger.debug("FDA device event type %r failed: %s", event_type, _e)
                 continue
         try:
             params = {"count": "device.generic_name.exact", "limit": "100"}
@@ -162,7 +163,8 @@ class FDARecallsConnector(BaseConnector):
                 data = await self._get_json(f"{FDA_BASE}/{noun}/enforcement.json", params)
                 if data.get("results"):
                     break
-            except Exception:
+            except Exception as _e:
+                logger.debug("FDA %s recall query failed: %s", noun, _e)
                 continue
         if not data or not data.get("results"):
             logger.warning(f"FDA {noun} recalls: no results")

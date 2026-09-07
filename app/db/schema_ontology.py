@@ -12,7 +12,11 @@ All raw API payloads land in JSONB `raw_*` staging tables first, then ETL
 normalizes into canonical tables via idempotent upserts.
 """
 
+import logging
+
 from app.db.database import get_pool
+
+logger = logging.getLogger(__name__)
 
 
 async def init_ontology_tables() -> None:
@@ -151,4 +155,4 @@ async def init_ontology_tables() -> None:
         """)
         await conn.execute("CREATE INDEX IF NOT EXISTS etl_source_idx ON etl_run (source_name, started_at DESC);")
 
-    print("✅ Ontology/canonical tables initialized")
+    logger.info("Ontology/canonical tables initialized")

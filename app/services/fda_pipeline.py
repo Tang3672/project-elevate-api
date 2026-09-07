@@ -206,14 +206,14 @@ async def get_competitor_trials(condition: str, phase: List[str] = None) -> Dict
                     outcomes       = proto.get("outcomesModule", {})
                     interventions  = proto.get("armsInterventionsModule", {})
 
-                    nct_id       = id_module.get("nctId", "")
-                    title        = id_module.get("briefTitle", "")
-                    status       = status_module.get("overallStatus", "")
-                    phase_val    = design_module.get("phases", ["Unknown"])
-                    sponsor      = sponsor_module.get("leadSponsor", {}).get("name", "Unknown")
-                    enrollment   = design_module.get("enrollmentInfo", {}).get("count", 0)
-                    completion   = status_module.get("primaryCompletionDateStruct", {}).get("date", "")
-                    primary_ep   = outcomes.get("primaryOutcomes", [{}])[0].get("measure", "") if outcomes.get("primaryOutcomes") else ""
+                    nct_id       = id_module.get("nctId") or ""
+                    title        = id_module.get("briefTitle") or ""
+                    status       = status_module.get("overallStatus") or ""
+                    phase_val    = design_module.get("phases") or ["Unknown"]
+                    sponsor      = (sponsor_module.get("leadSponsor") or {}).get("name", "Unknown")
+                    enrollment   = (design_module.get("enrollmentInfo") or {}).get("count", 0)
+                    completion   = (status_module.get("primaryCompletionDateStruct") or {}).get("date", "")
+                    primary_ep   = outcomes.get("primaryOutcomes", [{}])[0].get("measure") or "" if outcomes.get("primaryOutcomes") else ""
 
                     # Get intervention names
                     intervention_list = interventions.get("interventions", [])

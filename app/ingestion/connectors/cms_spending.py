@@ -20,6 +20,7 @@ Stores per-drug:
   cms_claim_count        — number of claims (utilization signal)
 """
 
+import asyncio
 import logging
 import time
 from typing import Optional
@@ -121,7 +122,8 @@ async def load_cms_drug_spending(disease_names: list[str] | None = None) -> dict
     try:
         from app.db.database import get_pool
         pool = await get_pool()
-    except Exception:
+    except Exception as e:
+        logger.warning("CMS spending: DB pool unavailable, skipping persistence: %s", e)
         pool = None
 
     for disease in targets:
@@ -131,8 +133,8 @@ async def load_cms_drug_spending(disease_names: list[str] | None = None) -> dict
 
         best: Optional[dict] = None
         for drug in drug_names[:3]:   # check top 3 drugs
-            data = _fetch_cms_drug_spend(drug)
-            time.sleep(_DELAY)
+            data = await asyncio.to_thread(_fetch_cms_drug_spend, drug)
+            await asyncio.sleep(_DELAY)
             if data and data["cms_annual_spend_usd"] > 0:
                 if best is None or data["cms_annual_spend_usd"] > best["cms_annual_spend_usd"]:
                     best = data

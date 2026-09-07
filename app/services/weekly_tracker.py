@@ -26,7 +26,7 @@ from typing import List, Dict, Optional
 import httpx
 
 from app.core.config import settings
-from app.db.watchlist_repository import get_all_active_watchlists, create_alert
+from app.db.watchlist_repository import get_all_active_watchlists, create_alert, alert_already_exists
 from app.db.user_repository import get_user_by_id
 # Email sent inline via send_weekly_digest_email function below
 
@@ -319,7 +319,8 @@ async def process_watchlist(watchlist: dict) -> dict:
                     watchlist["user_id"]
                 )
                 saved_reports = [dict(r) for r in rows]
-        except Exception:
+        except Exception as _e:
+            logger.warning("DB query for saved_reports failed: %s", _e)
             saved_reports = []
 
         retention_results = await run_retention_checks(watchlist, saved_reports)
@@ -371,17 +372,23 @@ async def process_watchlist(watchlist: dict) -> dict:
 
     body = "\n".join(body_parts)
 
-    # Save alert to DB
-    alert = await create_alert(
-        watchlist_id = wl_id,
-        user_id      = user_id,
-        title        = title,
-        body         = body,
-        severity     = severity,
-        source       = "weekly_tracker",
-        recalculation_needed = needs_recalc,
-        significance_score   = score,
-    )
+    # Save alert to DB — skip if an identical alert already exists this week
+    # (prevents duplicate alerts on scheduler restart or Railway multi-replica runs)
+    already_exists = await alert_already_exists(wl_id, title)
+    if already_exists:
+        logger.info("Skipping duplicate alert for watchlist %s: '%s'", wl_id, title[:60])
+        alert = None
+    else:
+        alert = await create_alert(
+            watchlist_id = wl_id,
+            user_id      = user_id,
+            title        = title,
+            body         = body,
+            severity     = severity,
+            source       = "weekly_tracker",
+            recalculation_needed = needs_recalc,
+            significance_score   = score,
+        )
 
     return {
         "watchlist_id":       wl_id,
@@ -512,7 +519,18 @@ async def send_weekly_digest_email(user: dict, results: List[dict]):
 
     try:
         from app.services.email_service import send_email
-        await send_email(to=email, subject=subject, html=html)
+        await send_email(
+            to=email,
+            subject=subject,
+            body=(
+                f"Hi {name},\n\n"
+                "Your weekly Project Elevate intelligence digest is ready.\n\n"
+                f"{len(results)} watchlist(s) scanned. "
+                f"{len([r for r in results if r.get('recalculation_needed')])} may need recalculation.\n\n"
+                "Visit https://medlevate.com to view your full reports."
+            ),
+            html=html,
+        )
         logger.info(f"Weekly digest sent to {email}")
     except Exception as e:
         logger.error(f"Failed to send digest to {email}: {e}")
@@ -530,6 +548,9 @@ async def run_tracker_for_user(user_id: int):
         return []
     results = []
     for wl in watchlists:
-        result = await process_watchlist(wl)
-        results.append(result)
+        try:
+            result = await process_watchlist(wl)
+            results.append(result)
+        except Exception as e:
+            logger.error("Failed to process watchlist %s for user %s: %s", wl.get("watchlist_id"), user_id, e)
     return results

@@ -26,7 +26,8 @@ logger = logging.getLogger(__name__)
 
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 HAIKU_MODEL       = "claude-haiku-4-5-20251001"
-SONNET_MODEL      = "claude-sonnet-5"
+# BUG-D: "claude-sonnet-5" is a non-existent model ID — corrected to match the rest of the codebase
+SONNET_MODEL      = "claude-sonnet-4-5-20251001"
 TIMEOUT           = 45.0
 
 
@@ -56,10 +57,11 @@ async def check_report_staleness(saved_report: dict) -> dict:
         return {"staleness_score": 0, "outdated_claims": [], "recalculate": False}
 
     # Run 3 targeted searches
+    _cur_year = datetime.now(timezone.utc).year
     searches = [
-        f"{condition} FDA approval new drug device 2026",
-        f"{condition} epidemiology prevalence incidence updated 2026 site:cdc.gov OR site:who.int",
-        f"{condition} market size TAM pharmaceutical 2026",
+        f"{condition} FDA approval new drug device {_cur_year}",
+        f"{condition} epidemiology prevalence incidence updated {_cur_year} site:cdc.gov OR site:who.int",
+        f"{condition} market size TAM pharmaceutical {_cur_year}",
     ]
 
     results = []
@@ -83,12 +85,15 @@ async def check_report_staleness(saved_report: dict) -> dict:
                         "messages": [{"role": "user", "content": f"Search: {q}\nExtract 3 key facts with dates and sources."}],
                     }
                 )
+                # BUG-E: missing raise_for_status — HTTP 4xx/5xx errors were silently swallowed
+                r.raise_for_status()
                 text = ""
                 for block in r.json().get("content", []):
                     if block.get("type") == "text":
                         text += block.get("text", "")
                 results.append(text)
         except Exception as e:
+            logger.warning("Staleness search %d failed: %s", i, e)
             results.append("")
 
     combined = "\n\n".join(results)
@@ -140,6 +145,7 @@ Analyze if the report needs updating. Respond ONLY in JSON:
                     "messages": [{"role": "user", "content": analysis_prompt}],
                 }
             )
+            r.raise_for_status()
             text = r.json()["content"][0]["text"]
             match = re.search(r'\{.*\}', text, re.DOTALL)
             if match:
@@ -367,12 +373,13 @@ async def track_competitor_milestones(condition: str, product_desc: str) -> List
     Search for competitor milestones in the same indication.
     Returns list of significant events: approvals, Phase 3 readouts, failures, BTDs.
     """
+    _cur_year = datetime.now(timezone.utc).year
     queries = [
-        f"{condition} FDA approval new drug 2026",
-        f"{condition} Phase 3 trial results readout 2026",
-        f"{condition} breakthrough therapy designation FDA 2026",
-        f"{condition} clinical trial failure discontinued 2026",
-        f"{condition} drug acquisition partnership deal 2026",
+        f"{condition} FDA approval new drug {_cur_year}",
+        f"{condition} Phase 3 trial results readout {_cur_year}",
+        f"{condition} breakthrough therapy designation FDA {_cur_year}",
+        f"{condition} clinical trial failure discontinued {_cur_year}",
+        f"{condition} drug acquisition partnership deal {_cur_year}",
     ]
 
     all_results = ""
@@ -396,6 +403,10 @@ async def track_competitor_milestones(condition: str, product_desc: str) -> List
                         "messages": [{"role": "user", "content": f"Search: {q}\nList recent events with dates. Format: EVENT | DATE | COMPANY | URL"}],
                     }
                 )
+                # BUG-E (same class as check_report_staleness): raise so that HTTP 4xx/5xx
+                # errors are caught by the except block and logged as warnings rather than
+                # silently producing empty results when the API returns an error body.
+                r.raise_for_status()
                 for block in r.json().get("content", []):
                     if block.get("type") == "text":
                         all_results += block.get("text", "") + "\n"
@@ -440,6 +451,7 @@ Respond ONLY in JSON array:
                     "messages": [{"role": "user", "content": extract_prompt}],
                 }
             )
+            r.raise_for_status()
             text = r.json()["content"][0]["text"]
             match = re.search(r'\[.*\]', text, re.DOTALL)
             if match:
@@ -465,10 +477,16 @@ async def compute_signal_delta(watchlist: dict, days_back: int = 30) -> dict:
     name     = watchlist.get("name", "")
     kw_str   = " ".join(keywords[:3]) if keywords else desc[:60]
 
+    _now          = datetime.now(timezone.utc)
+    _cur_month    = _now.strftime("%B %Y")                                           # e.g. "September 2026"
+    _prior_month  = (_now.replace(day=1) - timedelta(days=1)).strftime("%B")         # e.g. "August"
+    _cur_year     = _now.year
+    _month_range  = f"{_prior_month}-{_now.strftime('%B')} {_cur_year}"              # e.g. "August-September 2026"
+
     queries = [
-        f"{kw_str} news research update May 2026",
-        f"{kw_str} FDA approval clinical trial 2026",
-        f"{kw_str} new study publication April May 2026",
+        f"{kw_str} news research update {_cur_month}",
+        f"{kw_str} FDA approval clinical trial {_cur_year}",
+        f"{kw_str} new study publication {_month_range}",
     ]
 
     all_findings = []
@@ -494,12 +512,15 @@ async def compute_signal_delta(watchlist: dict, days_back: int = 30) -> dict:
                         "tools": [{"type": "web_search_20250305", "name": "web_search"}],
                         "messages": [{"role": "user", "content": (
                             f"Search: {query}\n\n"
-                            f"Find news or publications from the LAST 30 DAYS only (April-May 2026).\n"
+                            f"Find news or publications from the LAST 30 DAYS only ({_month_range}).\n"
                             f"Format each finding as: TITLE | DATE | KEY FINDING | URL\n"
                             f"If nothing recent found, say: No recent findings"
                         )}],
                     }
                 )
+                # BUG-E (same class as check_report_staleness): raise so that HTTP 4xx/5xx
+                # errors are caught by the except block and logged, not silently discarded.
+                r.raise_for_status()
                 text = ""
                 for block in r.json().get("content", []):
                     if block.get("type") == "text":

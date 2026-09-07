@@ -25,11 +25,12 @@ Why this beats just dumping papers into context:
 
 import json
 import logging
-import os
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict
 
 import httpx
+
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +109,7 @@ async def synthesize_literature(
         f"{papers_text}"
     )
 
-    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    api_key = settings.ANTHROPIC_API_KEY
     if not api_key:
         return None
 

@@ -88,6 +88,7 @@ import logging
 import math
 import time
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -557,7 +558,7 @@ def _recency_score(year: Optional[int]) -> float:
     """Score recency: 2024=1.0, 2020=0.8, 2015=0.6, older=0.5."""
     if not year:
         return 0.75  # Unknown → slight penalty
-    current = 2026
+    current = date.today().year
     delta = current - year
     if delta <= 1:  return 1.00
     if delta <= 3:  return 0.92
@@ -635,7 +636,8 @@ def _fetch_tier0(
                     quality_score=compute_quality("seer_preloaded", "stage_distribution", seer, disease_name, 2024),
                     tier=0,
                 ))
-        except Exception: pass
+        except Exception as _e:
+            logger.debug("Tier 0 seer_preloaded fetch skipped (non-fatal): %s", _e)
 
     # Reactome pathways (pre-loaded) — H-15: skip for non-clinical archetypes
     if subcategory_id not in _NON_CLINICAL_ARCHETYPES:
@@ -650,7 +652,8 @@ def _fetch_tier0(
                     quality_score=compute_quality("reactome", "pathway_biology", pathways, disease_name, 2024),
                     tier=0,
                 ))
-        except Exception: pass
+        except Exception as _e:
+            logger.debug("Tier 0 reactome fetch skipped (non-fatal): %s", _e)
 
     # PTRS back-validation (pre-loaded)
     try:
@@ -664,7 +667,8 @@ def _fetch_tier0(
                 quality_score=0.90,
                 tier=0,
             ))
-    except Exception: pass
+    except Exception as _e:
+        logger.debug("Tier 0 ptrs_validation fetch skipped (non-fatal): %s", _e)
 
     # Buyer counts (pre-loaded)
     try:
@@ -678,7 +682,8 @@ def _fetch_tier0(
                 quality_score=0.95,
                 tier=0,
             ))
-    except Exception: pass
+    except Exception as _e:
+        logger.debug("Tier 0 buyer_counts fetch skipped (non-fatal): %s", _e)
 
     # ICER pre-loaded
     try:
@@ -692,7 +697,8 @@ def _fetch_tier0(
                 quality_score=0.90,
                 tier=0,
             ))
-    except Exception: pass
+    except Exception as _e:
+        logger.debug("Tier 0 icer fetch skipped (non-fatal): %s", _e)
 
     # OECD global multiplier (pre-loaded)
     try:
@@ -705,7 +711,8 @@ def _fetch_tier0(
             quality_score=0.90,
             tier=0,
         ))
-    except Exception: pass
+    except Exception as _e:
+        logger.debug("Tier 0 oecd fetch skipped (non-fatal): %s", _e)
 
     # AHRQ MEPS realized TAM factor (pre-loaded)
     try:
@@ -719,7 +726,8 @@ def _fetch_tier0(
                 quality_score=0.95,
                 tier=0,
             ))
-    except Exception: pass
+    except Exception as _e:
+        logger.debug("Tier 0 ahrq_meps fetch skipped (non-fatal): %s", _e)
 
     # Patent cliff (pre-loaded)
     try:
@@ -733,7 +741,8 @@ def _fetch_tier0(
                 quality_score=0.80,
                 tier=0,
             ))
-    except Exception: pass
+    except Exception as _e:
+        logger.debug("Tier 0 cms_analogues fetch skipped (non-fatal): %s", _e)
 
     # ClinVar, Orphanet, regulatory precedents — H-15: skip for non-clinical archetypes (D-01)
     if subcategory_id not in _NON_CLINICAL_ARCHETYPES:
@@ -748,7 +757,8 @@ def _fetch_tier0(
                     quality_score=compute_quality("clinvar", "gene_variant_data", clinvar_data, disease_name, 2024),
                     tier=0,
                 ))
-        except Exception: pass
+        except Exception as _e:
+            logger.debug("Tier 0 clinvar fetch skipped (non-fatal): %s", _e)
 
         try:
             from app.ingestion.connectors.orphanet import get_rare_disease_prevalence
@@ -761,7 +771,8 @@ def _fetch_tier0(
                     quality_score=compute_quality("orphanet", "prevalence_incidence", orphan_data, disease_name, 2024),
                     tier=0,
                 ))
-        except Exception: pass
+        except Exception as _e:
+            logger.debug("Tier 0 orphanet fetch skipped (non-fatal): %s", _e)
 
         try:
             from app.services.chapter_data_service import get_regulatory_precedents
@@ -774,7 +785,8 @@ def _fetch_tier0(
                     quality_score=1.0,
                     tier=0,
                 ))
-        except Exception: pass
+        except Exception as _e:
+            logger.debug("Tier 0 regulatory_precedents fetch skipped (non-fatal): %s", _e)
 
     # CDMRP + DoD funding opportunities (pre-loaded)
     try:
@@ -788,7 +800,8 @@ def _fetch_tier0(
                 quality_score=0.85,
                 tier=0,
             ))
-    except Exception: pass
+    except Exception as _e:
+        logger.debug("Tier 0 cdmrp fetch skipped (non-fatal): %s", _e)
 
     logger.debug("Tier 0: %d facts retrieved (0ms)", len(facts))
     return facts
@@ -899,6 +912,7 @@ async def _fetch_source(
             from app.services.knowledge_retriever import _log_fetch, FetchLog
             _RT_EXPERTS = frozenset({"research_tool_non_clinical", "research_infrastructure_saas",
                                      "research_tool_agronomy"})
+            _nih_fy = date.today().year  # use current calendar year; NIH FY lags by ~3 months but same number
             if subcategory_id in _RT_EXPERTS:
                 # Research tools: search by product text, not disease_conditions.
                 # "disease_conditions" on a soil sensor returns NIH clinical grants —
@@ -911,7 +925,7 @@ async def _fetch_source(
                             "search_field": "all",
                             "search_text": _search_text,
                         },
-                        "fiscal_years": [2023, 2024, 2025],
+                        "fiscal_years": [_nih_fy - 2, _nih_fy - 1, _nih_fy],
                         "is_active": True,
                     },
                     "include_fields": ["ProjectNum", "ProjectTitle", "AwardAmount",
@@ -923,7 +937,7 @@ async def _fetch_source(
                 _nih_body = {
                     "criteria": {
                         "disease_conditions": [disease_name[:50]],
-                        "fiscal_years": [2024, 2025],
+                        "fiscal_years": [_nih_fy - 1, _nih_fy],
                         "is_active": True,  # L: skip expired grants
                     },
                     "limit": 3,
@@ -1302,7 +1316,11 @@ async def run_retrieval_pipeline(
     sources_called: list[str] = []
 
     # ── Tier 0: instant pre-loaded ────────────────────────────────────────────
-    tier0_facts = _fetch_tier0(disease_name, therapeutic_area, subcategory_id, idea)
+    # BUG-90: _fetch_tier0 is sync but calls get_disease_pathways() (Reactome) and
+    # get_rare_disease_prevalence() (Orphanet) which fall back to blocking requests.get()
+    # on cache misses. Offload to a thread so the event loop is never blocked.
+    tier0_facts = await asyncio.to_thread(
+        _fetch_tier0, disease_name, therapeutic_area, subcategory_id, idea)
     all_facts.extend(tier0_facts)
     sources_called.extend(set(f.source_id for f in tier0_facts))
 

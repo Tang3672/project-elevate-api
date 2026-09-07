@@ -34,7 +34,9 @@ async def _load_report(job_id: str, current_user: dict) -> dict:
     # BUG-58: verify ownership — job_id is guessable; unauthenticated access leaks
     # other users' confidential PI reports (market sizing, regulatory strategy, IP).
     owner_id = row.get("owner_id") or row.get("user_id")
-    if owner_id is not None and str(current_user["id"]) != str(owner_id):
+    # owner_id=None means no owner was recorded — deny access rather than silently
+    # allow any authenticated user to retrieve an ownerless report (IDOR bypass).
+    if owner_id is None or str(current_user["id"]) != str(owner_id):
         raise HTTPException(status_code=403, detail="Not authorised to access this report")
     if row.get("status") != "done":
         raise HTTPException(status_code=409, detail=f"Job {job_id!r} status={row.get('status')}")
@@ -56,7 +58,26 @@ async def get_report_html(
         product_name=report.get("product_name", ""),
         institution=report.get("institution", ""),
     )
-    return HTMLResponse(content=html, status_code=200)
+    # BUG-34a: The global SecurityHeadersMiddleware sets
+    # `Content-Security-Policy: default-src 'self'` via setdefault, which blocks
+    # inline <style> blocks.  render_report_html() produces a self-contained HTML
+    # document with a ~10 KB inline stylesheet; without `style-src 'unsafe-inline'`
+    # every browser renders the report completely unstyled.
+    # This endpoint is authentication-gated and ownership-checked; all user content
+    # is HTML-escaped via _e() / html.escape() before embedding, so relaxing
+    # style-src is safe.  script-src is intentionally absent (no JS in the report).
+    return HTMLResponse(
+        content=html,
+        status_code=200,
+        headers={
+            "Content-Security-Policy": (
+                "default-src 'self'; "
+                "style-src 'unsafe-inline'; "
+                "object-src 'none'; "
+                "base-uri 'self'"
+            )
+        },
+    )
 
 
 @router.get("/{job_id}/pdf")

@@ -23,6 +23,7 @@ License note on individual articles:
   Abstracts are generally fair use / covered by open access licensing.
 """
 
+import asyncio
 import logging
 import time
 from typing import Optional
@@ -50,7 +51,8 @@ def _reconstruct_abstract(inverted_index: Optional[dict]) -> Optional[str]:
             for pos in positions:
                 words[pos] = word
         return " ".join(words[i] for i in sorted(words))
-    except Exception:
+    except Exception as _e:
+        logger.debug("abstract reconstruction failed: %s", _e)
         return None
 
 
@@ -143,8 +145,8 @@ async def _ensure_publication_table(conn) -> None:
             ON publication USING hnsw (embedding vector_cosine_ops)
             WITH (m=16, ef_construction=64);
         """)
-    except Exception:
-        pass  # pgvector may not be available
+    except Exception as _e:
+        logger.debug("HNSW index creation skipped (pgvector may not be available): %s", _e)
 
 
 async def _upsert_publication(conn, work: dict,
@@ -248,7 +250,7 @@ async def load_publications(limit_per_disease: int = 50) -> dict[str, int]:
         await _ensure_publication_table(conn)
 
         for disease, query in _DISEASE_SEARCH_TERMS.items():
-            total, works = _get_top_works(query, limit=limit_per_disease)
+            total, works = await asyncio.to_thread(_get_top_works, query, limit_per_disease)
 
             mondo_id = None
             try:
@@ -257,8 +259,8 @@ async def load_publications(limit_per_disease: int = 50) -> dict[str, int]:
                 )
                 if row:
                     mondo_id = row["mondo_id"]
-            except Exception:
-                pass
+            except Exception as _e:
+                logger.debug("mondo_id lookup for %r failed: %s", disease, _e)
 
             for work in works:
                 await _upsert_publication(conn, work, disease, mondo_id)

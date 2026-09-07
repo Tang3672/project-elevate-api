@@ -53,6 +53,11 @@ class TestAdversarialFallback:
         """When ANTHROPIC_API_KEY is unset, run_adversarial_review returns []."""
         import os
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        # Also clear the cached settings value so the settings fallback path is
+        # also empty — the service now checks both os.getenv and settings.ANTHROPIC_API_KEY
+        # to handle the Railway trailing-space env-var-name bug.
+        from app.core.config import settings
+        monkeypatch.setattr(settings, "ANTHROPIC_API_KEY", "")
         from app.services import adversarial_review_service as svc
 
         fake_report = {

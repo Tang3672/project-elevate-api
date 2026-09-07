@@ -19,7 +19,7 @@ Alert types and severity:
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Tuple
 
 from app.db.database import get_pool
@@ -68,7 +68,7 @@ async def run_weekly_match() -> Dict:
     Returns a summary of alerts created.
     """
     logger.info("Starting weekly alert matching run...")
-    cutoff = datetime.utcnow() - timedelta(days=7)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=7)
 
     # Get all signals from the past 7 days
     new_signals = await _get_recent_signals(cutoff)
@@ -150,7 +150,7 @@ async def run_weekly_match() -> Dict:
         "watchlists_checked": len(watchlists),
         "alerts_created":   total_alerts,
         "duplicates_skipped": skipped,
-        "run_at":           datetime.utcnow().isoformat(),
+        "run_at":           datetime.now(timezone.utc).isoformat(),
     }
 
 
@@ -178,11 +178,21 @@ def _is_relevant(
         return True, f"Domain match: {', '.join(expert_matches[:3])}"
 
     # Pass 3: semantic similarity (if embedding available)
+    # The embedding column is fetched as text (::text cast) because asyncpg has no
+    # built-in codec for pgvector's 'vector' type.  Parse "[f1,f2,...]" → list here.
     if desc_embedding and signal.get('embedding'):
         try:
-            sim = _cosine_similarity(desc_embedding, signal['embedding'])
-            if sim >= MIN_SIMILARITY:
-                return True, f"Semantic similarity: {sim:.2f}"
+            raw_emb = signal['embedding']
+            if isinstance(raw_emb, str):
+                sig_embedding: List[float] = [
+                    float(x) for x in raw_emb.strip('[]').split(',') if x.strip()
+                ]
+            else:
+                sig_embedding = list(raw_emb)  # already decoded (future codec)
+            if sig_embedding:
+                sim = _cosine_similarity(desc_embedding, sig_embedding)
+                if sim >= MIN_SIMILARITY:
+                    return True, f"Semantic similarity: {sim:.2f}"
         except Exception:
             pass
 
@@ -209,7 +219,7 @@ def _build_alert_summary(signal: dict, match_reason: str, watchlist_name: str) -
     desc = signal.get('description', '')[:300]
     loc  = signal.get('location_name') or signal.get('state_code') or 'National'
     mag  = signal.get('magnitude')
-    unit = signal.get('magnitude_unit', '')
+    unit = signal.get('magnitude_unit') or ''
     mag_str = f" ({mag:,.0f} {unit})" if mag else ""
     return (
         f"Relevant to your watchlist '{watchlist_name}'. "
@@ -245,7 +255,8 @@ async def _get_recent_signals(since: datetime) -> List[dict]:
             """
             SELECT id, source, signal_type, title, description,
                    magnitude, magnitude_unit, location_name, state_code,
-                   geographic_scope, fetched_at
+                   geographic_scope, fetched_at,
+                   embedding::text AS embedding
             FROM demand_signals
             WHERE fetched_at >= $1
             ORDER BY fetched_at DESC

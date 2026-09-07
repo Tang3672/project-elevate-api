@@ -44,6 +44,11 @@ from app.db.user_repository import (
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+# Module-level set that keeps a strong reference to fire-and-forget background
+# tasks so they are not garbage-collected before they complete (a documented
+# CPython hazard when asyncio.create_task() return values are discarded).
+_background_tasks: set = set()
+
 
 # ── Auth helpers ──────────────────────────────────────────────────────────────
 
@@ -55,7 +60,11 @@ async def get_current_user(authorization: Optional[str] = Header(None)) -> dict:
     payload = verify_access_token(token)
     if not payload:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
-    user = await get_user_by_id(int(payload['sub']))
+    try:
+        user_id = int(payload['sub'])
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=401, detail="Invalid token subject")
+    user = await get_user_by_id(user_id)
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
     return user
@@ -71,7 +80,7 @@ async def get_optional_user(authorization: Optional[str] = Header(None)) -> Opti
 
 # ── Register ──────────────────────────────────────────────────────────────────
 
-@router.post("/register", response_model=AuthResponse)
+@router.post("/register", response_model=AuthResponse, status_code=201)
 async def register(payload: RegisterRequest, request: Request):
     """Create a new account with email + password."""
     # Password strength validation — check all rules, return all failures at once
@@ -152,8 +161,7 @@ async def login(payload: LoginRequest):
     if not await _loop.run_in_executor(None, verify_password, payload.password, user['password_hash']):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     # Block unverified accounts — dev emails bypass verification for local testing (BUG-10: deduplicated)
-    _DEV_EMAILS = {"test@projectelevate.io", "ijw91021@gmail.com", "admin@projectelevate.io",
-                   "oneonesie100@gmail.com", "lizpeek11@gmail.com", "peek@wustl.edu"}
+    _DEV_EMAILS = {"test@projectelevate.io", "admin@projectelevate.io"}
     if not user.get('email_verified', False) and user.get('email') not in _DEV_EMAILS:
         raise HTTPException(
             status_code=403,
@@ -191,6 +199,11 @@ async def google_auth(payload: GoogleAuthRequest):
     google_info = await verify_google_token(payload.token)
     if not google_info or not google_info.get('email'):
         raise HTTPException(status_code=401, detail="Invalid Google token")
+    # BUG-75: email_verified was never checked. The password /login path blocks
+    # unverified accounts; the Google OAuth path must enforce the same rule so
+    # a Google Workspace account with email_verified=false cannot bypass the gate.
+    if not google_info.get('email_verified', False):
+        raise HTTPException(status_code=401, detail="Google account email is not verified")
 
     email     = google_info['email']
     google_id = google_info['sub']
@@ -239,7 +252,7 @@ async def get_me(current_user: dict = Depends(get_current_user)):
 
 # ── Saved Reports ─────────────────────────────────────────────────────────────
 
-@router.post("/reports", response_model=SavedReport)
+@router.post("/reports", response_model=SavedReport, status_code=201)
 async def create_report(
     payload:      SaveReportRequest,
     current_user: dict = Depends(get_current_user),
@@ -253,15 +266,19 @@ async def create_report(
         report_data  = payload.report_data,
         pathogen     = payload.pathogen,
     )
-    # Async memory extraction — non-blocking, never fails the save
+    # Async memory extraction — non-blocking, never fails the save.
+    # The task reference is stored in _background_tasks so Python's GC cannot
+    # collect it before it finishes; the done-callback discards it afterwards.
     try:
         import asyncio
         from app.services.pi_memory_service import extract_and_store_memory
-        asyncio.create_task(extract_and_store_memory(
+        _task = asyncio.create_task(extract_and_store_memory(
             user_id     = current_user['id'],
             idea        = payload.idea,
             report_data = payload.report_data,
         ))
+        _background_tasks.add(_task)
+        _task.add_done_callback(_background_tasks.discard)
     except Exception:
         pass
     return saved
@@ -316,7 +333,7 @@ async def update_report_name(
 
 # ── Drafts ────────────────────────────────────────────────────────────────────
 
-@router.post("/drafts", response_model=SavedDraft)
+@router.post("/drafts", response_model=SavedDraft, status_code=201)
 async def create_draft(
     payload:      SaveDraftRequest,
     current_user: dict = Depends(get_current_user),
@@ -356,6 +373,13 @@ async def change_password(request: Request, current_user: dict = Depends(get_cur
     current_pw = body.get("current_password", "")
     new_pw     = body.get("new_password", "")
 
+    # BUG-73: cap length before PBKDF2 to prevent authenticated CPU-exhaustion DoS.
+    # An authenticated user could send a 100MB string, forcing 100k PBKDF2 iterations
+    # on a huge input and pegging a CPU core.
+    _MAX_PW_LEN = 100
+    if len(current_pw) > _MAX_PW_LEN or len(new_pw) > _MAX_PW_LEN:
+        raise HTTPException(status_code=400, detail="Password must not exceed 100 characters")
+
     user = await get_user_by_id(current_user["id"])
     if not user or not user.get("password_hash"):
         raise HTTPException(status_code=400, detail="Cannot change password for OAuth accounts")
@@ -386,7 +410,7 @@ async def change_password(request: Request, current_user: dict = Depends(get_cur
 
 # ── EARLY ACCESS WAITLIST ──────────────────────────────────────────────────────
 
-@router.post("/waitlist")
+@router.post("/waitlist", status_code=201)
 async def submit_waitlist(body: dict):
     """
     Save an early access request. No auth required — anyone can submit.
@@ -404,25 +428,34 @@ async def submit_waitlist(body: dict):
 
     pool = await get_pool()
     async with pool.acquire() as conn:
-        # BUG-21: DDL moved to init_user_tables() — keep only the INSERT here
-        # Check for duplicate
-        existing = await conn.fetchrow("SELECT id FROM waitlist WHERE lower(email)=lower($1)", email)
-        if not existing:
-            await conn.execute("""
-                INSERT INTO waitlist (name, email, institution, role, plan, message)
-                VALUES ($1,$2,$3,$4,$5,$6)
-            """, name or None, email, institution or None, role or None, plan, message or None)
+        # Atomic upsert — ON CONFLICT on the case-insensitive unique index eliminates
+        # the TOCTOU race that a SELECT-then-INSERT pattern would have under concurrency.
+        await conn.execute("""
+            INSERT INTO waitlist (name, email, institution, role, plan, message)
+            VALUES ($1,$2,$3,$4,$5,$6)
+            ON CONFLICT (lower(email)) DO NOTHING
+        """, name or None, email, institution or None, role or None, plan, message or None)
 
     # Send notifications (always — even for duplicates so admin is aware)
     try:
         from app.services.email_service import send_email
-        admin_email = "ijw91021@gmail.com"
-
-        # 1. Notify Isaac immediately
-        await send_email(
-            to=admin_email,
-            subject=f"🚀 Early access request — {name or email} ({plan} plan)",
-            body=f"""New early access request for Medlevate:
+        from app.core.config import settings
+        # Admin notification address: prefer ADMIN_EMAIL setting, fall back to
+        # EMAIL_FROM (the configured outbound sender), and never hardcode a
+        # personal address in source.
+        admin_email = (
+            settings.ADMIN_EMAIL.strip()
+            or settings.EMAIL_FROM.strip()
+            or settings.EMAIL_USER.strip()
+        )
+        if not admin_email:
+            logger.warning("ADMIN_EMAIL not configured — skipping admin waitlist notification")
+        else:
+            # 1. Notify admin immediately
+            await send_email(
+                to=admin_email,
+                subject=f"Early access request — {name or email} ({plan} plan)",
+                body=f"""New early access request for Medlevate:
 
 Name:        {name or '(not provided)'}
 Email:       {email}
@@ -435,7 +468,7 @@ Message:     {message or '(none)'}
 Reply to this person: {email}
 ━━━━━━━━━━━━━━━━━━━━━━━━
 """,
-        )
+            )
 
         # 2. Send confirmation to the person who submitted
         if name:
@@ -452,7 +485,6 @@ In the meantime, you can create a free account and start exploring the platform:
 https://medlevate.com/app.html?register=1
 
 — The Medlevate Team
-ijw91021@gmail.com
 """,
             )
     except Exception as e:

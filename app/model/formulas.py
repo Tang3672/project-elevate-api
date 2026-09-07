@@ -74,6 +74,8 @@ def _eval(n: ast.expr, nodes: "dict[str, Node]", cache: dict) -> float:
     if isinstance(n, ast.BinOp) and type(n.op) in _OPS:
         left  = _eval(n.left,  nodes, cache)
         right = _eval(n.right, nodes, cache)
+        if isinstance(n.op, ast.Div) and right == 0.0:
+            raise ValueError("division by zero in market model formula")
         return _OPS[type(n.op)](left, right)
 
     if isinstance(n, ast.UnaryOp) and type(n.op) in _OPS:

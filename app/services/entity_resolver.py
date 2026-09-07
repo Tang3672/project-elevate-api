@@ -28,6 +28,7 @@ Usage:
     rxcui    = await resolve_drug("metformin hydrochloride")
 """
 
+import asyncio
 import logging
 import re
 import time
@@ -131,11 +132,11 @@ async def resolve_disease(text: str, source_name: str = "query") -> Optional[str
             return row["mondo_id"]
 
         # 4. OLS4 MONDO API — exact then fuzzy
-        time.sleep(_DELAY)
-        docs = _search_mondo(text, exact=True, rows=3)
+        await asyncio.sleep(_DELAY)
+        docs = await asyncio.to_thread(_search_mondo, text, True, 3)
         method, confidence = "ols4_exact", 0.92
         if not docs:
-            docs = _search_mondo(norm, exact=False, rows=5)
+            docs = await asyncio.to_thread(_search_mondo, norm, False, 5)
             method, confidence = "ols4_fuzzy", 0.75
 
         if docs:
@@ -145,8 +146,8 @@ async def resolve_disease(text: str, source_name: str = "query") -> Optional[str
                 method, confidence = "ols4_exact", 0.95
 
             iri  = best.get("iri") or ""
-            time.sleep(_DELAY)
-            term = _fetch_term_by_iri(iri) if iri else None
+            await asyncio.sleep(_DELAY)
+            term = await asyncio.to_thread(_fetch_term_by_iri, iri) if iri else None
             term_row = _term_to_row(term) if term else None
 
             if term_row:
@@ -189,8 +190,8 @@ async def resolve_drug(text: str, source_name: str = "query") -> Optional[str]:
             return row["rxcui"]
 
         # 3. RxNav cascade
-        time.sleep(_DELAY)
-        result = resolve_drug_name(text)
+        await asyncio.sleep(_DELAY)
+        result = await asyncio.to_thread(resolve_drug_name, text)
         if result:
             rxcui = result["rxcui"]
             row_data = _build_drug_row(rxcui, result["label"], result.get("tty",""))

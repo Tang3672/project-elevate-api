@@ -21,7 +21,7 @@ from __future__ import annotations
 import html
 import logging
 import re
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Optional
 
 from app.utils import fmt_usd
@@ -90,7 +90,7 @@ def derive_report_date(report: dict, report_date: str = "") -> str:
             elif isinstance(gen, datetime):
                 d = gen
             else:
-                d = datetime.utcnow()
+                d = datetime.now(timezone.utc)
             return d.strftime("%B %Y")
         except Exception:
             pass
@@ -1371,15 +1371,19 @@ async def generate_pdf(
 
     try:
         async with async_playwright() as p:
+            # BUG-44a: launch/set_content/pdf had no timeout — a hung Chromium
+            # process would block the HTTP connection forever.  60 s is ample for
+            # any real report; the endpoint falls back to HTML on any exception.
             browser = await p.chromium.launch()
             page = await browser.new_page()
-            await page.set_content(html_str, wait_until="networkidle")
+            await page.set_content(html_str, wait_until="networkidle", timeout=60_000)
             pdf_bytes = await page.pdf(
                 format="Letter",
                 margin={"top": "1.25in", "bottom": "1in",
                         "left": "1in",   "right": "1in"},
                 display_header_footer=False,  # F-07: we use @page CSS instead
                 print_background=True,
+                timeout=60_000,
             )
             await browser.close()
             logger.info("pdf_renderer: generated %d bytes for '%s'", len(pdf_bytes), pname)

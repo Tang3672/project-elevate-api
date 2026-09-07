@@ -52,6 +52,19 @@ class Settings(BaseSettings):
     ENVIRONMENT:      str  = "development"
     ENABLE_SCHEDULER: bool = _ON_RAILWAY
 
+    # Admin
+    ADMIN_KEY:   str = ""
+    ADMIN_EMAIL: str = ""
+
+    # CORS extra origins (comma-separated)
+    ALLOWED_ORIGINS: str = ""
+
+    # Railway deployment metadata (read-only; injected by the platform)
+    RAILWAY_GIT_COMMIT_SHA: str = ""
+    RAILWAY_GIT_BRANCH:     str = ""
+    RAILWAY_REPLICA_ID:     str = ""
+    SCHEDULER_PRIMARY:      str = ""
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
@@ -101,6 +114,17 @@ def get_settings() -> Settings:
         db = os.environ.get("DATABASE_URL", "")
         if db:
             s.DATABASE_URL = db
+
+    # Railway trailing-space workaround for ADMIN_KEY (security-critical secret)
+    if not s.ADMIN_KEY:
+        for k, v in os.environ.items():
+            if k.strip() == "ADMIN_KEY" and v.strip():
+                s.ADMIN_KEY = v.strip()
+                break
+    if not s.ADMIN_EMAIL:
+        s.ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "").strip()
+    if not s.ALLOWED_ORIGINS:
+        s.ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", "").strip()
 
     return s
 

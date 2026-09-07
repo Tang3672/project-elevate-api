@@ -123,8 +123,11 @@ def build_verified_kol_list(kols: list[dict], disease_name: str = "") -> list[Ve
             name=name,
             source_url=source_url,
             source_name="PubMed (author publications)",
-            paper_count=k.get("paper_count", 0),
-            citation_total=k.get("citation_total", 0),
+            # Use `or` fallback so a null value from the API dict doesn't bypass
+            # the default (dict.get returns None when key exists with null value,
+            # ignoring the default argument).  None would crash f"{val:,}" later.
+            paper_count=k.get("paper_count") or 0,
+            citation_total=k.get("citation_total") or 0,
         ))
     return verified
 

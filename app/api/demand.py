@@ -20,6 +20,7 @@ from app.services.embedding_service import embed_text
 from app.ingestion.pipeline import build_connector_registry
 from app.scheduler.ingestion_scheduler import trigger_connector, trigger_full_pipeline
 from app.api.admin_auth import require_admin_key
+from app.api.auth import get_current_user
 
 logger = logging.getLogger(__name__)
 
@@ -109,12 +110,13 @@ async def init_demand_tables():
 
 @demand_router.post("/search")
 async def search_demand_signals(
-    query: str,
+    query: str = Query(..., max_length=2000),
     top_k: int = Query(default=15, ge=1, le=50),
     min_similarity: float = Query(default=0.55, ge=0.0, le=1.0),
     source: Optional[str] = Query(default=None, description="Filter by source name"),
     signal_type: Optional[str] = Query(default=None),
     state: Optional[str] = Query(default=None, description="2-letter state code"),
+    current_user: dict = Depends(get_current_user),
 ):
     """
     Semantic search over the demand signals index.
@@ -127,7 +129,8 @@ async def search_demand_signals(
     try:
         query_embedding = await embed_text(query)
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Embedding failed: {e}")
+        logger.error("Embedding failed for demand search: %s", e, exc_info=True)
+        raise HTTPException(status_code=502, detail="Embedding service unavailable")
 
     results = await search_similar_signals(
         query_embedding=query_embedding,
@@ -146,7 +149,7 @@ async def search_demand_signals(
 
 
 @demand_router.get("/sources")
-async def list_sources():
+async def list_sources(current_user: dict = Depends(get_current_user)):
     """List all signal sources with record counts."""
     counts = await get_signal_counts_by_source()
     return {"sources": counts}
@@ -164,7 +167,7 @@ async def provision_user(
     Returns the generated temp password so it can be shared with the user.
     plan_name: explorer (5/mo), innovator (20/mo), institution (unlimited)
     """
-    import secrets, string
+    import asyncio, secrets, string
     from app.db.user_repository import create_user, get_user_by_email
     from app.services.auth_service import hash_password
     from app.db.database import get_pool
@@ -189,7 +192,8 @@ async def provision_user(
             )
         return {"status": "updated", "email": email, "plan_name": plan_name, "note": "existing account plan updated"}
 
-    hashed = hash_password(password)
+    # BUG-B: hash_password runs 100k PBKDF2 iterations — must not block the event loop
+    hashed = await asyncio.to_thread(hash_password, password)
     user = await create_user(email=email, password_hash=hashed, name=name or None)
     if not user:
         raise HTTPException(status_code=409, detail="Could not create user — email already exists")
