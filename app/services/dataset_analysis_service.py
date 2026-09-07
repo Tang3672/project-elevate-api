@@ -233,10 +233,10 @@ async def _fetch_benchmark_papers(query: str, n: int = 5) -> list[dict]:
             papers = []
             for pmid in pmids:
                 s = summaries.get(pmid, {})
-                title = s.get("title", "")
-                authors = s.get("authors", [{}])
+                title = s.get("title") or ""
+                authors = s.get("authors") or [{}]
                 first_author = authors[0].get("name", "?") if authors else "?"
-                year = s.get("pubdate", "")[:4]
+                year = (s.get("pubdate") or "")[:4]
                 papers.append({
                     "pmid": pmid,
                     "title": title[:100],
