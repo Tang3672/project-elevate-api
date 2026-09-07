@@ -174,7 +174,7 @@ class SiteLicenseModel(RevenueModel):
             # Weighted blend across site-size tiers: {tier: {"fraction":x,"price":y}}
             blended = 0.0
             for tier in price_tiers.values():
-                blended += float(tier.get("fraction", 0)) * float(tier.get("price", 0))
+                blended += float(tier.get("fraction") or 0) * float(tier.get("price") or 0)
             effective_price = blended or annual_license_price
         else:
             effective_price = float(annual_license_price)
