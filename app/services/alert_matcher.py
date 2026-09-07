@@ -219,7 +219,7 @@ def _build_alert_summary(signal: dict, match_reason: str, watchlist_name: str) -
     desc = signal.get('description', '')[:300]
     loc  = signal.get('location_name') or signal.get('state_code') or 'National'
     mag  = signal.get('magnitude')
-    unit = signal.get('magnitude_unit', '')
+    unit = signal.get('magnitude_unit') or ''
     mag_str = f" ({mag:,.0f} {unit})" if mag else ""
     return (
         f"Relevant to your watchlist '{watchlist_name}'. "
