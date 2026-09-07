@@ -122,7 +122,7 @@ def _split_drivers(drivers: list[str], scores: dict) -> tuple[list[str], list[st
     for d in drivers:
         (may_fail if any(h in d.lower() for h in _NEG_HINTS) else above).append(d)
     # Backfill from the strongest/weakest scores if drivers were sparse.
-    ranked = sorted(((k, v) for k, v in scores.items() if k != "overall_priority"),
+    ranked = sorted(((k, v) for k, v in scores.items() if k != "overall_priority" and v is not None),
                     key=lambda kv: kv[1])
     if not may_fail and ranked:
         k, v = ranked[0]
