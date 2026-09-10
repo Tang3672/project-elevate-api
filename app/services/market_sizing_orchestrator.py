@@ -78,6 +78,9 @@ class OrchestratedResult:
     # Engine 9 – Heuristics
     fired_heuristics: Optional[List] = field(default=None)  # List[FiredHeuristic] | None
 
+    # Engine 10 – Triangulation (bottom-up vs top-down cross-validation)
+    triangulation: Optional[object] = field(default=None)  # TriangulationResult | None
+
     def to_dict(self) -> dict:
         d: Dict = {
             "disease_name": self.disease_name,
@@ -105,6 +108,8 @@ class OrchestratedResult:
             d["expert_consensus"] = self.expert_consensus.to_dict()
         if self.fired_heuristics:
             d["fired_heuristics"] = [h.to_dict() for h in self.fired_heuristics]
+        if self.triangulation is not None:
+            d["triangulation"] = self.triangulation.to_dict()
         return d
 
     def format_for_prompt(self) -> str:
@@ -247,6 +252,23 @@ class OrchestratedResult:
                 lines.append("")
             except Exception as _e:
                 logger.debug("format_for_prompt: heuristics section skipped: %s", _e)
+
+        # ── v7: Triangulation — bottom-up vs top-down cross-validation ────────
+        tri = self.triangulation
+        if tri is not None:
+            try:
+                lines.append("MARKET SIZING TRIANGULATION (bottom-up vs top-down):")
+                lines.append(f"  Under-diagnosis correction: ×{tri.underdiagnosis_multiplier:.1f} applied to reported prevalence")
+                if tri.underdiagnosis_rationale:
+                    lines.append(f"  Rationale: {tri.underdiagnosis_rationale[:160]}")
+                if tri.treatment_funnel_summary:
+                    lines.append(f"  Treatment funnel: {tri.treatment_funnel_summary[:200]}")
+                lines.append("")
+                for note_line in tri.cross_validation_note.split("\n"):
+                    lines.append(f"  {note_line}" if note_line and not note_line.startswith("  ") else note_line)
+                lines.append("")
+            except Exception as _e:
+                logger.debug("format_for_prompt: triangulation section skipped: %s", _e)
 
         lines.append(c.honesty_statement)
         lines.append("=== END MARKET SIZING ===")
@@ -408,6 +430,59 @@ async def run(
     except Exception as e:
         logger.warning("apply_heuristics failed (non-fatal): %s", e)
 
+    # ── Step 10: Triangulation — bottom-up vs top-down cross-validation ───────
+    tri_result = None
+    try:
+        from app.services.market_sizing_triangulator import run as _tri_run
+        from app.services.market_sizing_engine import underdiagnosis_correction
+        # Infer therapeutic area from product_type tier (best available proxy)
+        _ta = _product_type_to_tier1(product_type).replace("_", " ")
+        _ta_key = _product_type_to_tier1(product_type)
+        # Map orchestrator tier1 → engine TA key for under-diagnosis lookup
+        _tier1_to_ta = {
+            "drug_small_molecule": "other",
+            "biologic":            "immunology",
+            "gene_cell_therapy":   "gene_therapy",
+            "medical_device":      "device",
+            "diagnostic":          "diagnostic",
+            "digital_health":      "device",
+            "vaccine_immunotherapy":"vaccine",
+            "other_platform":      "other",
+        }
+        _engine_ta = _tier1_to_ta.get(_ta_key, "other")
+        _ud_mult, _ud_rationale = underdiagnosis_correction(_engine_ta)
+
+        # Estimate raw prevalent patients for top-down disease-share calculation.
+        # Use the bottom-up final_population as a proxy (pre-funnel is unavailable here).
+        _prev_patients = int(pf_result.final_population / max(0.01, 0.38 * 0.52))
+
+        # Build treatment funnel summary from patient_flow steps
+        _funnel_steps = getattr(pf_result, "steps", [])
+        _funnel_summary = " → ".join(
+            f"{s.label} ({s.running_value:,.0f})"
+            for s in _funnel_steps
+            if s.running_value > 0
+        ) if _funnel_steps else f"Final addressable population: {pf_result.final_population:,.0f}"
+
+        tri_result = await asyncio.to_thread(
+            _tri_run,
+            disease_name=disease_name,
+            therapeutic_area=_engine_ta,
+            product_type=product_type,
+            bottom_up_sam_usd=sam_revenue,
+            prevalent_patients=_prev_patients,
+            underdiagnosis_multiplier=_ud_mult,
+            underdiagnosis_rationale=_ud_rationale,
+            treatment_funnel_summary=_funnel_summary,
+        )
+        logger.info(
+            "triangulation done: bottom_up=%s, top_down=%s, divergence=%.0f%%, reconciled=%s",
+            _fmt(sam_revenue), _fmt(tri_result.top_down_tam_usd),
+            tri_result.divergence_ratio * 100, _fmt(tri_result.reconciled_sam_usd),
+        )
+    except Exception as e:
+        logger.warning("market_sizing_triangulator failed (non-fatal): %s", e)
+
     return OrchestratedResult(
         disease_name=disease_name,
         product_type=product_type,
@@ -430,6 +505,8 @@ async def run(
         expert_activations=expert_acts,
         expert_consensus=expert_cons,
         fired_heuristics=heuristics_fired,
+        # v7 triangulation
+        triangulation=tri_result,
     )
 
 

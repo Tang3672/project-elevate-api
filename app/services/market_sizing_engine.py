@@ -107,6 +107,56 @@ _TREATMENT_ELIGIBLE: dict[str, float] = {
     "other":           0.52,
 }
 
+# Under-diagnosis correction factors by therapeutic area.
+# Published CDC/registry prevalence numbers systematically undercount patients
+# who haven't been diagnosed or reached specialist care.
+# Sources: NORD rare disease gap studies; PM360 orphan drug market methodology;
+#          ISPOR Population Cascade framework (Mauskopf 2013).
+# Factor is applied to reported prevalence BEFORE the diagnostic yield funnel,
+# giving the true epidemiological population before access/diagnosis barriers.
+_UNDERDIAGNOSIS_CORRECTION: dict[str, tuple[float, str]] = {
+    # (multiplier, rationale)
+    "rare_disease":    (2.5, "Rare diseases are chronically under-ascertained; "
+                             "diagnosis gaps of 50–75% documented in NORD surveys. "
+                             "Multiplier 2.5× applied to CDC/registry prevalence."),
+    "gene_therapy":    (2.2, "Ultra-rare indications served by gene therapy have "
+                             "high under-ascertainment due to specialist access barriers."),
+    "cns":             (1.8, "CNS/neurological diseases have significant diagnostic "
+                             "delay (3–12 yr median) causing under-reporting in claims data."),
+    "hematology":      (1.4, "Hematological malignancies generally well-documented "
+                             "via cancer registries; modest correction for subtypes."),
+    "oncology":        (1.2, "SEER/NCI cancer registries are among the most complete; "
+                             "small correction for registry lag and non-reporting sites."),
+    "immunology":      (1.6, "Autoimmune conditions often misattributed or undiagnosed "
+                             "for years before specialist referral."),
+    "metabolic":       (1.3, "Metabolic diseases (T2D, NASH, etc.) have known "
+                             "undiagnosed populations; ADA estimates ~20% T2D undiagnosed."),
+    "cardiovascular":  (1.2, "CV disease generally well-captured in claims; small "
+                             "correction for asymptomatic/pre-clinical populations."),
+    "amr_infectious":  (1.5, "AMR infections under-reported due to limited cultures "
+                             "and rapid patient turnover; WHO estimates 2–3× true burden."),
+    "respiratory":     (1.4, "COPD/asthma under-diagnosis well-documented (~50% COPD "
+                             "undiagnosed; BOLD study)."),
+    "ophthalmology":   (1.3, "Glaucoma and macular degeneration have significant "
+                             "undiagnosed populations, especially in underserved areas."),
+    "vaccine":         (1.0, "Vaccine-preventable disease burden tracked by CDC; "
+                             "no correction applied."),
+    "device":          (1.0, "Device markets sized by procedure/facility counts; "
+                             "no patient under-diagnosis correction needed."),
+    "diagnostic":      (1.0, "Diagnostic markets sized by test volume; no correction."),
+    "other":           (1.3, "Default moderate correction for unspecified TAs."),
+}
+
+
+def underdiagnosis_correction(therapeutic_area: str) -> tuple[float, str]:
+    """
+    Return the (multiplier, rationale) for under-ascertainment of true disease
+    prevalence relative to published CDC/registry figures.
+    Multiplier >= 1.0; apply to reported prevalence before the diagnostic funnel.
+    """
+    ta = therapeutic_area.lower()
+    return _UNDERDIAGNOSIS_CORRECTION.get(ta, (1.3, "Default correction for unspecified TA."))
+
 
 def apply_population_cascade(
     prevalent_patients: int,
@@ -121,10 +171,20 @@ def apply_population_cascade(
         treat_elig *= 0.65
     if is_first_in_class:
         treat_elig = min(treat_elig * 1.25, 0.95)
-    diagnosed = int(prevalent_patients * diag_yield)
+
+    # Apply under-diagnosis correction to raw prevalence before applying funnel rates.
+    # This corrects for patients who exist but haven't been counted in registries.
+    corr_factor, corr_rationale = underdiagnosis_correction(ta)
+    corrected_prevalence = int(prevalent_patients * corr_factor)
+
+    diagnosed = int(corrected_prevalence * diag_yield)
     eligible  = int(diagnosed * treat_elig)
-    summary = (f"Prevalence {prevalent_patients:,} → Diagnosed {diagnosed:,} "
-               f"({diag_yield:.0%} yield) → Eligible {eligible:,} ({treat_elig:.0%})")
+    summary = (
+        f"Reported prevalence {prevalent_patients:,} "
+        f"→ Under-diagnosis corrected {corrected_prevalence:,} (×{corr_factor:.1f}) "
+        f"→ Diagnosed {diagnosed:,} ({diag_yield:.0%} yield) "
+        f"→ Eligible {eligible:,} ({treat_elig:.0%} treatment-eligible)"
+    )
     return eligible, diag_yield, treat_elig, summary
 
 
