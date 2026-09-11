@@ -313,3 +313,52 @@ def test_sensitivity_payload_shapes_are_documented():
         f"({sorted(mc_keys & seg_keys)}). Consumers distinguish them structurally; "
         "overlapping keys make that ambiguous."
     )
+
+
+def test_report_field_failures_are_not_logged_below_warning():
+    """
+    A try block that populates a user-visible report field must not hide its
+    failure at debug level. Railway logs INFO and above, so a debug-only handler
+    makes a whole missing report section invisible in production — the same
+    class of silent failure as the discarded bibliography.
+
+    alignment_service already logs every other non-fatal failure at warning;
+    this keeps that convention enforced.
+    """
+    tree = ast.parse(ALIGNMENT.read_text())
+    offenders = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Try):
+            continue
+        fields = {
+            t.attr
+            for c in ast.walk(node) if isinstance(c, ast.Assign)
+            for t in c.targets
+            if isinstance(t, ast.Attribute)
+            and isinstance(t.value, ast.Name) and t.value.id == "report"
+        }
+        if not fields:
+            continue
+        for handler in node.handlers:
+            if len(handler.body) == 1 and isinstance(handler.body[0], ast.Pass):
+                offenders.append((handler.lineno, sorted(fields), "except: pass"))
+                continue
+            levels = {
+                c.func.attr
+                for c in ast.walk(handler) if isinstance(c, ast.Call)
+                if isinstance(c.func, ast.Attribute)
+                and c.func.attr in {"debug", "info", "warning", "error",
+                                    "exception", "critical"}
+            }
+            if levels and levels <= {"debug"}:
+                offenders.append((handler.lineno, sorted(fields), "debug-only log"))
+
+    detail = "\n".join(
+        f"  line {ln}: {why} while writing report.{', report.'.join(f)}"
+        for ln, f, why in sorted(offenders)
+    )
+    assert not offenders, (
+        "Exception handler(s) hide a report-field failure below warning level:\n"
+        + detail
+        + "\n\nUse logger.warning so a missing report section is visible in production."
+    )

@@ -2616,7 +2616,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
         if _grounded:
             report.grounded_context = _grounded
     except Exception as _gc_e:
-        logger.debug("grounded_context build failed (non-fatal): %s", _gc_e)
+        logger.warning("grounded_context build failed (non-fatal): %s", _gc_e)
 
     # Attach the cost-aware routing plan (P3) for visibility/audit.
     if _routing_plan is not None:
@@ -2656,7 +2656,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
             from app.services.expert_panel import panel_to_dict
             report.expert_panel = panel_to_dict(panel_result)
     except Exception as _ep_e:
-        logger.debug("Expert panel attach failed (non-fatal): %s", _ep_e)
+        logger.warning("Expert panel attach failed (non-fatal): %s", _ep_e)
 
     # ── Part D: Market segmentation tree (spec D.1–D.7) ─────────────────────────
     # Only built for LIFE_SCIENCES_RESEARCH domain — the funnel template is
@@ -2761,7 +2761,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
         from app.services.world_model_graph import report_id_for
         report.report_id = report_id_for(report.model_dump(mode="json"))
     except Exception as _s7_e:
-        logger.debug("report_id wiring failed (non-fatal): %s", _s7_e)
+        logger.warning("report_id wiring failed (non-fatal): %s", _s7_e)
 
     # Back-fill prompt submission with sub_expert_id and report_id now that both are known
     if submission_id:
