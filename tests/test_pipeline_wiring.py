@@ -100,3 +100,84 @@ def test_format_derivation_for_prompt_includes_citations():
     prompt = format_derivation_for_prompt(d)
     assert "[NIH RePORTER]" in prompt, "NIH RePORTER citation missing"
     assert "[NSF Award Search]" in prompt, "NSF Award Search citation missing"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Bibliography wiring guard
+#
+# Root cause of the "only 6 sources appear in the report" bug:
+#   _generate_expert_report() builds the full pipeline bibliography via
+#   collect_all_citations() (live SBIR awards, preprints, patents, competitor
+#   trials, aggregated papers, EDGAR filings). generate_pi_report() then called
+#   build_sources_from_report(), which rebuilds report.sources from structured
+#   report fields ONLY and silently discarded every pipeline source.
+#
+# The failure was invisible — no exception, just a short bibliography.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_build_sources_from_report_discards_pipeline_sources():
+    """
+    Documents the upstream behaviour the merge in generate_pi_report compensates
+    for. If build_sources_from_report ever starts preserving incoming sources,
+    this test fails and the merge block can be simplified.
+    """
+    from app.services.source_formatter import build_sources_from_report
+    pipeline = [{"number": 1, "name": "SBIR Award (FY2026): X — NeuroCo",
+                 "url": "https://reporter.nih.gov/project-details/10812345"}]
+    out = build_sources_from_report({"sources": list(pipeline)})
+    surviving = {s.get("url") for s in out.get("sources", [])}
+    assert pipeline[0]["url"] not in surviving, (
+        "build_sources_from_report now preserves pipeline sources — "
+        "the re-append block in generate_pi_report may no longer be needed"
+    )
+
+
+def test_generate_pi_report_reappends_pipeline_bibliography():
+    """
+    generate_pi_report must stash report.sources before build_sources_from_report
+    and re-append what was dropped. Without this, every live-fetched citation
+    (SBIR, preprints, patents, competitor trials) vanishes from the report.
+    """
+    src = ALIGNMENT.read_text()
+    assert "_pipeline_bib" in src, (
+        "generate_pi_report no longer stashes the pipeline bibliography — "
+        "collect_all_citations() output will be silently discarded"
+    )
+    stash = src.index("_pipeline_bib = ")
+    rebuild = src.index("build_sources_from_report(report_dict)")
+    assert stash < rebuild, "pipeline bibliography must be captured BEFORE the rebuild"
+
+
+def test_collect_all_citations_receives_every_pipeline_source():
+    """
+    Every live data source with URLs must be passed to collect_all_citations().
+    Dropping a kwarg here is how sources silently stop appearing.
+    """
+    import inspect
+    from app.services.source_aggregator import collect_all_citations
+    params = set(inspect.signature(collect_all_citations).parameters)
+    for expected in ("patent_landscape", "funding_intel", "aggregated_sources",
+                     "regulatory_precedent", "competitive_intelligence"):
+        assert expected in params, f"collect_all_citations lost the {expected} parameter"
+
+    src = ALIGNMENT.read_text()
+    call_start = src.index("collect_all_citations(\n")
+    call_body = src[call_start:call_start + 600]
+    for kwarg in ("patent_landscape=", "funding_intel=", "aggregated_sources=",
+                  "regulatory_precedent=", "competitive_intelligence="):
+        assert kwarg in call_body, f"alignment_service stopped passing {kwarg}"
+
+
+def test_competitive_intelligence_uses_matching_schema():
+    """
+    Block 12 reads competitor_trials.trials / fda_precedents.approvals — the
+    gather_competitive_intelligence() schema. Passing the fda_pipeline result
+    (fda_recent_actions / trial_pipeline) instead yields zero citations.
+    """
+    src = ALIGNMENT.read_text()
+    call_start = src.index("collect_all_citations(\n")
+    call_body = src[call_start:call_start + 600]
+    assert "competitive_intelligence=_strategic_intel_for_bib" in call_body, (
+        "competitive_intelligence must receive _strategic_intel_for_bib "
+        "(gather_competitive_intelligence schema), not the fda_pipeline result"
+    )

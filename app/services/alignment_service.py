@@ -556,6 +556,12 @@ async def generate_pi_report(
     # Build sources from structured data
     try:
         from app.services.source_formatter import build_sources_from_report
+        # _generate_expert_report already populated report.sources with the full
+        # pipeline bibliography via collect_all_citations() — live SBIR awards,
+        # preprints, patents, competitor trials, aggregated papers, EDGAR filings.
+        # build_sources_from_report() rebuilds the list from structured report
+        # fields only and drops every one of those, so stash them and re-append.
+        _pipeline_bib = [dict(s) for s in (report.sources or []) if isinstance(s, dict)]
         report_dict = report.model_dump(mode="json")
         report_dict = build_sources_from_report(report_dict)
         _raw_sources = report_dict.get("sources", [])
@@ -569,9 +575,36 @@ async def generate_pi_report(
         if len(_raw_sources) < _before:
             logger.info("sources: filtered %d spurious citation(s) from bibliography",
                         _before - len(_raw_sources))
+        # Re-append the pipeline sources the structured rebuild dropped. Structured
+        # sources keep numbers 1..M so any inline [N] markers stay valid; pipeline
+        # sources are numbered M+1.. behind them.
+        _structured_count = len(_raw_sources)
+        _accessed = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        _seen_urls = {
+            str(s.get("url", "")).strip().lower().rstrip("/")
+            for s in _raw_sources if s.get("url")
+        }
+        for s in _pipeline_bib:
+            _u = str(s.get("url", "")).strip().lower().rstrip("/")
+            if _u and _u in _seen_urls:
+                continue
+            _nm = str(s.get("name", ""))
+            if _BAD_SBIR_PROGRAM_RE.search(_nm) or _BAD_EVIDENCE_SOURCE_RE.search(_nm):
+                continue
+            if not _nm and not _u:
+                continue
+            if _u:
+                _seen_urls.add(_u)
+            _raw_sources.append({
+                **s,
+                "number": len(_raw_sources) + 1,
+                "accessed": s.get("accessed") or _accessed,
+            })
         report.sources = _raw_sources
-
-        # (aggregated sources injected later after aggregator runs)
+        logger.info(
+            "Bibliography: %d sources (%d structured + %d pipeline)",
+            len(_raw_sources), _structured_count, len(_raw_sources) - _structured_count,
+        )
 
     except Exception as e:
         logger.warning(f"Source building failed: {e}")
