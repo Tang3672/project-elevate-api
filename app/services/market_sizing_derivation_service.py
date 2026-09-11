@@ -111,6 +111,8 @@ class MarketSizingDerivation:
     # G.14: EDGAR calibration correction applied to TAM/SAM/SOM
     edgar_calibration_factor:   Optional[float] = None   # ratio applied (>1 means model was scaled down)
     edgar_calibration_note:     Optional[str]  = None   # human-readable explanation
+    # Triangulation result (bottom-up vs top-down cross-validation)
+    triangulation:              Optional[object] = None
 
     def model_dump(self, mode: str = "python") -> dict:
         """Serialize to dict, compatible with the pydantic-style call in alignment_service."""
@@ -2202,7 +2204,10 @@ def _derive_research_tool_formula(
         ),
         primary_citations=[
             {"ref": "NIH RePORTER", "title": "NIH-funded research grants by topic", "url": "https://reporter.nih.gov/"},
+            {"ref": "NSF Award Search", "title": "NSF-funded research grants by topic", "url": "https://www.nsf.gov/awardsearch/"},
             {"ref": "Primary PI interviews", "title": "PI spend band (primary research)", "url": ""},
+            {"ref": "Lab equipment price benchmarks", "title": "Annual spend per lab from grant budget analysis", "url": "https://grants.nih.gov/grants/policy/nihgps/nihgps.pdf"},
+            {"ref": "SBIR.gov", "title": "Federal SBIR/STTR awards to research tool companies", "url": "https://www.sbir.gov/"},
         ],
         monte_carlo=_mc,
     )
@@ -2384,6 +2389,31 @@ def generate_market_sizing_derivation(
     else:
         deriv = _derive_pharma_formula(idea, dn, therapeutic_area, us_patient_population, archetype, signals)
 
+    # ── Triangulation: cross-validate bottom-up SAM vs top-down TAM ──────────
+    try:
+        from app.services.market_sizing_triangulator import run as _tri_run
+        from app.services.market_sizing_engine import underdiagnosis_correction
+        _engine_ta = therapeutic_area or "other"
+        _ud_mult, _ud_rationale = underdiagnosis_correction(_engine_ta)
+        _funnel_summary = ""
+        if deriv.steps:
+            _funnel_summary = " → ".join(
+                f"{s.title.split('—')[-1].strip()}: {s.value:,.0f} {s.unit}"
+                for s in deriv.steps[:4]
+            )
+        deriv.triangulation = _tri_run(
+            disease_name=dn,
+            therapeutic_area=_engine_ta,
+            product_type=product_type,
+            bottom_up_sam_usd=deriv.us_sam_usd,
+            prevalent_patients=us_patient_population or None,
+            underdiagnosis_multiplier=_ud_mult,
+            underdiagnosis_rationale=_ud_rationale,
+            treatment_funnel_summary=_funnel_summary,
+        )
+    except Exception as _tri_e:
+        logger.warning("Triangulation failed (non-fatal): %s", _tri_e)
+
     return deriv
 
 
@@ -2422,11 +2452,46 @@ def format_derivation_for_prompt(deriv: MarketSizingDerivation) -> str:
                 f"(SOM swing ±{e.swing_pct:.0f}%)"
             )
 
+    # ── Triangulation block ───────────────────────────────────────────────────
+    tri_lines: list[str] = []
+    if deriv.triangulation is not None:
+        tri = deriv.triangulation
+        tri_lines = [
+            f"",
+            f"CROSS-VALIDATION (Bottom-Up vs Top-Down Triangulation):",
+            f"  Bottom-up SAM (patient/buyer-based): {_fmt(tri.bottom_up_sam_usd)}",
+            f"  Top-down TAM (TA anchor × disease share × product-type share): {_fmt(tri.top_down_tam_usd)}",
+            f"  Divergence: {tri.divergence_ratio:.0%} — {'FLAGGED' if tri.divergence_flagged else 'within tolerance'}",
+            f"  Reconciled estimate: {_fmt(tri.reconciled_sam_usd)} "
+            f"(bottom-up weight {tri.reconciliation_weight_bottom_up:.0%} / "
+            f"top-down weight {tri.reconciliation_weight_top_down:.0%})",
+            f"  {tri.cross_validation_note}",
+        ]
+        if tri.underdiagnosis_rationale:
+            tri_lines.append(
+                f"  Under-diagnosis correction: ×{tri.underdiagnosis_multiplier:.1f} — {tri.underdiagnosis_rationale}"
+            )
+        if tri.treatment_funnel_summary:
+            tri_lines.append(f"  Treatment funnel: {tri.treatment_funnel_summary}")
+
+    # ── Primary citations block ───────────────────────────────────────────────
+    cite_lines: list[str] = []
+    if deriv.primary_citations:
+        cite_lines = [f"", f"SOURCES (cite these by name in your narrative):"]
+        for c in deriv.primary_citations:
+            ref = c.get("ref", "")
+            title = c.get("title", "")
+            url = c.get("url", "")
+            entry = f"  [{ref}] {title}"
+            if url:
+                entry += f" — {url}"
+            cite_lines.append(entry)
+
     lines += [
         f"",
         f"Key assumptions: {' | '.join(deriv.key_assumptions[:4])}",
         f"Uncertainty note: {deriv.confidence_note}",
-    ] + mc_lines + [
+    ] + mc_lines + tri_lines + cite_lines + [
         f"",
         f"═══ MANDATORY MARKET SIZING NUMBERS — USE EXACTLY ═══",
         f"TAM: {deriv.tam_fmt} | SAM: {deriv.sam_fmt} | SOM: {deriv.som_fmt}",
@@ -2440,5 +2505,7 @@ def format_derivation_for_prompt(deriv: MarketSizingDerivation) -> str:
         f"  - Show arithmetic explicitly (e.g. '500 procedures/yr × $25,000 = $12.5M TAM')",
         f"  - Flag uncertainty sources and explain the confidence interval range",
         f"  - Contrast with how a wrong model (e.g. drug model for a device) would give misleading results",
+        f"  - Cite the sources listed above by name (e.g. '[NIH RePORTER]', '[IQVIA 2024]')",
+        f"  - Include the cross-validation analysis showing both bottom-up and top-down methods",
     ]
     return "\n".join(lines)
