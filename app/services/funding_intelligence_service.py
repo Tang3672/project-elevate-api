@@ -191,12 +191,14 @@ async def get_preprint_velocity(disease_name: str, days_back: int = 90) -> dict:
                 ][:10]
                 results["count"] += len(relevant)
                 for p in relevant[:3]:
+                    doi = p.get("doi", "")
                     results["recent_titles"].append({
                         "title":   p.get("title", "")[:100],
                         "authors": p.get("authors", "")[:60],
                         "date":    p.get("date", ""),
                         "server":  server,
-                        "doi":     p.get("doi", ""),
+                        "doi":     doi,
+                        "url":     f"https://doi.org/{doi}" if doi else "",
                     })
         except Exception as e:
             logger.debug("bioRxiv fetch failed for %s: %s", server, e)
@@ -258,6 +260,7 @@ async def get_new_entrants(disease_name: str, days_back: int = 365) -> list[dict
                         "start_date": start,
                         "phase":   phase,
                         "source":  "ClinicalTrials.gov",
+                        "url":     f"https://clinicaltrials.gov/study/{nct}" if nct else "",
                     })
             logger.info("New trial entrants: %d for '%s'", len(new_entrants), disease_name)
             return new_entrants[:8]

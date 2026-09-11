@@ -1454,6 +1454,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
     ci = pub_data = strategic_intel = aggregated_sources = chapter_data = None
     pipeline_result = panel_result = funding_intel = patent_landscape = regulatory_precedent = Exception("not gathered")
     _gather_error = None
+    _competitive_intelligence = {}  # safe default; overwritten if gather_competitive_intelligence succeeds
     # ta_for_deriv is computed precisely in the market-sizing block below, but the
     # data-gather above uses it for source selection — bind a safe default first
     # so it can never be referenced-before-assignment (UnboundLocalError).
@@ -2763,11 +2764,14 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
         from app.services.source_aggregator import collect_all_citations
         _pl_for_bib = patent_landscape if not isinstance(patent_landscape, Exception) else None
         _fi_for_bib = funding_intel if not isinstance(funding_intel, Exception) else None
+        _rp_for_bib = regulatory_precedent if not isinstance(regulatory_precedent, Exception) else None
         report.sources = collect_all_citations(
             report.model_dump(mode="json"),
             patent_landscape=_pl_for_bib,
             funding_intel=_fi_for_bib,
             aggregated_sources=_aggregated_sources,
+            regulatory_precedent=_rp_for_bib,
+            competitive_intelligence=_competitive_intelligence or None,
         )
         logger.info("Bibliography: %d sources collected", len(report.sources))
     except Exception as _bib_e:

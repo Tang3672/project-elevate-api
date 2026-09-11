@@ -51,12 +51,15 @@ async def get_regulatory_precedent(disease_name: str) -> dict:
                 brand = (of.get("brand_name") or [None])[0]
                 manufacturer = (of.get("manufacturer_name") or [None])[0]
                 route = (of.get("route") or [None])[0]
+                import urllib.parse as _uparse
                 drugs.append({
                     "generic_name":  generic.title(),
                     "brand_name":    brand,
                     "manufacturer":  manufacturer or "Unknown",
                     "route":         route or "",
                     "label_updated": res.get("effective_time", ""),
+                    "url":           "https://dailymed.nlm.nih.gov/dailymed/search.cfm?labeltype=all&query="
+                                     + _uparse.quote(generic.title()),
                 })
                 if len(drugs) >= 8:
                     break

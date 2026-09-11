@@ -40,6 +40,8 @@ def collect_all_citations(
     patent_landscape: Optional[dict] = None,
     funding_intel: Optional[dict] = None,
     aggregated_sources: Optional[dict] = None,
+    regulatory_precedent: Optional[dict] = None,
+    competitive_intelligence: Optional[dict] = None,
 ) -> list[dict]:
     """
     Return a numbered list of all cited sources for a given report dict.
@@ -53,7 +55,15 @@ def collect_all_citations(
         with Google Patents URLs.  May be None if the service failed.
     funding_intel:
         Raw return value of get_funding_intelligence() — contains sbir_awards
-        with NIH Reporter URLs.  May be None if the service failed.
+        (NIH Reporter), edgar_signals (SEC EDGAR), new_entrants (ClinicalTrials),
+        and preprints (bioRxiv/medRxiv).  May be None if the service failed.
+    regulatory_precedent:
+        Raw return value of get_regulatory_precedent() — contains approved_drugs
+        with DailyMed URLs.  May be None if the service failed.
+    competitive_intelligence:
+        Raw return value of gather_competitive_intelligence() — contains
+        competitor_trials (ClinicalTrials.gov) and fda_precedents (Drugs@FDA).
+        May be None if the service failed.
     aggregated_sources:
         Raw return value of source_aggregator_service.aggregate_all_sources() —
         contains CrossRef, Europe PMC, Semantic Scholar, NIH grants, GBD, and
@@ -195,6 +205,35 @@ def collect_all_citations(
                 label += f" — {company}"
             add(label, url, category="sbir_award")
 
+        # ── 9c. SEC EDGAR 8-K financing signals ───────────────────────────────
+        for signal in (funding_intel.get("edgar_signals") or [])[:6]:
+            company = signal.get("company", "")
+            date = signal.get("date", "")
+            url = signal.get("url", "")
+            label = f"SEC EDGAR 8-K: {company}" + (f" ({date})" if date else "")
+            add(label[:120], url, category="funding_signal")
+
+        # ── 9d. ClinicalTrials.gov new entrants (competitor trial registrations) ─
+        for entrant in (funding_intel.get("new_entrants") or [])[:8]:
+            sponsor = entrant.get("sponsor", "")
+            nct = entrant.get("nct_id", "")
+            title = entrant.get("title", "")[:80]
+            url = entrant.get("url", "") or (f"https://clinicaltrials.gov/study/{nct}" if nct else "")
+            phase = entrant.get("phase", "")
+            label = f"ClinicalTrials.gov {phase}: {title} — {sponsor}"
+            add(label[:120], url, category="competitive_landscape")
+
+        # ── 9e. bioRxiv/medRxiv preprints (research momentum signal) ──────────
+        preprints_data = funding_intel.get("preprints") or {}
+        for preprint in (preprints_data.get("recent_titles") or [])[:5]:
+            title = preprint.get("title", "")[:90]
+            authors = preprint.get("authors", "")[:50]
+            server = preprint.get("server", "")
+            doi = preprint.get("doi", "")
+            url = preprint.get("url", "") or (f"https://doi.org/{doi}" if doi else "")
+            label = f"[{server}] {title}" + (f" — {authors}" if authors else "")
+            add(label[:120], url, category="literature")
+
     # ── 4c. Derivation step source_url (academic references per formula step) ─
     # DerivationStep.source_url holds paper/guideline URLs (DisMod II, NICE TSD 14,
     # Bass model, BLP demand system, ISPOR, ICER, CMS, CDC, etc.) that are wired
@@ -252,6 +291,42 @@ def collect_all_citations(
             drug = cms_item.get("drug_name", "") or cms_item.get("name", "")
             url = cms_item.get("url", "")
             add(f"CMS Pricing: {drug}"[:100], url, category="market_sizing")
+
+    # ── 11. FDA-approved drugs for this indication (openFDA / DailyMed) ───────
+    # From get_regulatory_precedent() — drugs listed in FDA drug label database
+    # for this indication, with DailyMed URLs for label verification.
+    if isinstance(regulatory_precedent, dict):
+        for drug in (regulatory_precedent.get("approved_drugs") or []):
+            generic = drug.get("generic_name", "")
+            brand = drug.get("brand_name", "")
+            manufacturer = drug.get("manufacturer", "")
+            url = drug.get("url", "")
+            label = f"FDA Approved: {generic}"
+            if brand and brand.lower() != generic.lower():
+                label += f" ({brand})"
+            if manufacturer and manufacturer != "Unknown":
+                label += f" — {manufacturer}"
+            add(label[:120], url, category="regulatory")
+
+    # ── 12. Competitive intelligence — live ClinicalTrials.gov + Drugs@FDA ────
+    # From gather_competitive_intelligence() — real-time competitor trial and
+    # approval URLs that informed the competitive landscape narrative.
+    if isinstance(competitive_intelligence, dict):
+        for trial in (competitive_intelligence.get("competitor_trials") or {}).get("trials", []):
+            sponsor = trial.get("sponsor", "") or trial.get("lead_sponsor", "")
+            title = trial.get("title", "") or trial.get("brief_title", "")
+            nct = trial.get("nct_id", "") or trial.get("nctId", "")
+            url = trial.get("url", "") or (f"https://clinicaltrials.gov/study/{nct}" if nct else "")
+            phase = trial.get("phase", "")
+            label = f"Competitor Trial {phase}: {title}"[:90] + (f" — {sponsor}" if sponsor else "")
+            add(label[:120], url, category="competitive_landscape")
+
+        for approval in (competitive_intelligence.get("fda_precedents") or {}).get("approvals", []):
+            drug = approval.get("drug_name", "") or approval.get("generic_name", "")
+            company = approval.get("company", "") or approval.get("applicant", "")
+            url = approval.get("url", "")
+            label = f"FDA Precedent: {drug}" + (f" ({company})" if company else "")
+            add(label[:120], url, category="regulatory")
 
     # ── Number sequentially ───────────────────────────────────────────────────
     for i, entry in enumerate(entries, 1):
