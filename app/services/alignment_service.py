@@ -1455,6 +1455,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
     pipeline_result = panel_result = funding_intel = patent_landscape = regulatory_precedent = Exception("not gathered")
     _gather_error = None
     _competitive_intelligence = {}  # safe default; overwritten if gather_competitive_intelligence succeeds
+    _strategic_intel_for_bib = None  # safe default; set from strategic_intel if it succeeds
     # ta_for_deriv is computed precisely in the market-sizing block below, but the
     # data-gather above uses it for source selection — bind a safe default first
     # so it can never be referenced-before-assignment (UnboundLocalError).
@@ -1627,7 +1628,12 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
         if not isinstance(strategic_intel, Exception):
             strategic_context = format_intelligence_for_expert(strategic_intel, disease_name)
             researcher_ctx = researcher_ctx + strategic_context
+            # strategic_intel has the correct schema for Block 12 bibliography
+            # (competitor_trials.trials / fda_precedents.approvals with ClinicalTrials.gov
+            # and Drugs@FDA URLs). ci (fda_pipeline) has a different schema.
+            _strategic_intel_for_bib = strategic_intel
         else:
+            _strategic_intel_for_bib = None
             # B-04: fallback uses strategy_database (archetype-gated, no clinical
             # defaults for research_tool/research_infrastructure archetypes)
             from app.services.strategy_database import format_strategies_for_report
@@ -2771,7 +2777,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
             funding_intel=_fi_for_bib,
             aggregated_sources=_aggregated_sources,
             regulatory_precedent=_rp_for_bib,
-            competitive_intelligence=_competitive_intelligence or None,
+            competitive_intelligence=_strategic_intel_for_bib or None,
         )
         logger.info("Bibliography: %d sources collected", len(report.sources))
     except Exception as _bib_e:
