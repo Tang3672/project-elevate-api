@@ -2006,29 +2006,52 @@ def _derive_research_tool_formula(
         if _user_overrides.get("som"):
             _som_lo, _som_hi = _user_overrides["som"]
 
-    # Live NIH RePORTER query — replaces the PI's market-size guess with a count
-    # grounded in actual grant data. Skipped when population was derived from
-    # instrument requirements (more specific than a grant search).
-    _skip_reporter = (_user_overrides.get("pop", "")).startswith("instrument requirement")
-    if not _skip_reporter:
-        _nih_kw = " ".join(
-            [therapeutic_area]
-            + [w for w in (idea or "").lower().split()[:15] if len(w) > 4]
-        )[:150].strip()
-        _nih_total = _query_nih_reporter_total(_nih_kw)
-        if _nih_total and _nih_total > 200:
-            # RePORTER total = grant count; unique PIs ≈ total × 0.65
-            # (many PIs hold multiple concurrent awards)
-            _nih_lo = max(int(_nih_total * 0.65), 100)
-            _nih_hi = _nih_total
+    # Live NIH RePORTER query — always runs as an independent cross-check, even when
+    # the PI provided an instrument-requirement estimate. When both are available,
+    # we show the discrepancy explicitly and use the lower (conservative) figure.
+    _nih_kw = " ".join(
+        [therapeutic_area]
+        + [w for w in (idea or "").lower().split()[:15] if len(w) > 4]
+    )[:150].strip()
+    _nih_total = _query_nih_reporter_total(_nih_kw)
+    _pi_pop_note = _user_overrides.get("pop", "")
+    _pi_provided = _pi_pop_note.startswith("instrument requirement")
+    if _nih_total and _nih_total > 200:
+        _nih_lo = max(int(_nih_total * 0.65), 100)
+        _nih_hi = _nih_total
+        _nih_fy_cur = date.today().year
+        _nih_src = (
+            f"NIH RePORTER (live, FY{_nih_fy_cur - 2}–{_nih_fy_cur % 100:02d}): "
+            f"{_nih_total:,} active R-series grants matching '{_nih_kw[:60]}'; "
+            f"estimated {_nih_lo:,}–{_nih_hi:,} unique PIs"
+        )
+        if _pi_provided:
+            # Show both estimates; use the lower (more conservative) range.
+            _pi_mid = int((pop_lo + pop_hi) / 2)
+            _nih_mid = int((_nih_lo + _nih_hi) / 2)
+            if _nih_mid < _pi_mid:
+                pop_lo, pop_hi = _nih_lo, _nih_hi
+                pop_src = (
+                    f"NIH RePORTER verification: {_nih_src}. "
+                    f"⚠ PI estimate ({_pi_mid:,} labs) is {_pi_mid / max(_nih_mid,1):.1f}× higher than "
+                    f"NIH grant count ({_nih_mid:,} unique PIs). Conservative NIH figure used."
+                )
+            else:
+                pop_src = (
+                    f"PI estimate ({_pi_mid:,} labs) confirmed by NIH RePORTER ({_nih_mid:,} unique PIs). "
+                    f"{_nih_src}."
+                )
+        else:
             pop_lo, pop_hi = _nih_lo, _nih_hi
-            _nih_fy_cur = date.today().year
-            pop_src = (
-                f"NIH RePORTER (live, FY{_nih_fy_cur - 2}–{_nih_fy_cur % 100:02d}): {_nih_total:,} active R-series grants "
-                f"matching '{_nih_kw[:60]}'; estimated {_nih_lo:,}–{_nih_hi:,} unique PIs"
-            )
-            logger.info("NIH RePORTER: %d grants → pop %d–%d for '%s'",
-                        _nih_total, _nih_lo, _nih_hi, _nih_kw[:60])
+            pop_src = _nih_src
+        logger.info("NIH RePORTER: %d grants → pop %d–%d for '%s'",
+                    _nih_total, pop_lo, pop_hi, _nih_kw[:60])
+    elif _pi_provided:
+        pop_src = (
+            f"PI intake estimate ({int(pop_lo):,}–{int(pop_hi):,} qualifying labs). "
+            "NIH RePORTER query returned insufficient results to verify independently — "
+            "validate with structured buyer interviews before using for fundraising."
+        )
 
     # Recompute midpoints after any overrides
     sam_mid = (_sam_lo + _sam_hi) / 2
