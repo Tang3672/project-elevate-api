@@ -362,3 +362,96 @@ def test_report_field_failures_are_not_logged_below_warning():
         + detail
         + "\n\nUse logger.warning so a missing report section is visible in production."
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Report-content regressions found by auditing a shipped report
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_stale_date_scrub_preserves_citation_years():
+    """
+    The R-04 stale-date scrubber replaces past dates in recommended_next_steps so
+    the action plan never shows an expired deadline. It must not strip publication
+    years out of citations — a shipped report read
+    "following the 10x Genomics/Zheng et al. (Science [date removed]) precedent".
+    """
+    import re
+    from datetime import datetime, timezone
+
+    src = ALIGNMENT.read_text()
+    assert "_CITATION_CUE_RE" in src, (
+        "the citation-year exemption was removed from the R-04 scrubber — "
+        "past publication years will be replaced with [date removed]"
+    )
+
+    # Re-run the scrubber's own logic over citation vs milestone text.
+    now = datetime.now(timezone.utc)
+    year_re = re.compile(r"\b(20\d{2})\b")
+    cue_re = re.compile(
+        r"(?:et\s+al\.?,?\s*\(?|"
+        r"PMID:?\s*\d*\s*|doi:?\s*\S*\s*|"
+        r"\b(?:Science|Nature|Cell|Lancet|NEJM|JAMA|PNAS|BMJ|eLife|Neuron|"
+        r"Nat\s+\w+|Sci\s+\w+|J\s+\w+|PLOS\s+\w+|Proc\s+\w+)"
+        r"\s*,?\s*\(?)$",
+        re.I,
+    )
+
+    def scrub(text):
+        def rep(m):
+            if int(m.group(1)) >= now.year:
+                return m.group(0)
+            if cue_re.search(text[max(0, m.start() - 45):m.start()]):
+                return m.group(0)
+            return "[date removed]"
+        return year_re.sub(rep, text)
+
+    citations = [
+        "following the 10x Genomics/Zheng et al. (Science 2017) precedent",
+        "Open Ephys started as lab hardware at MIT (Siegle et al., Nat Neurosci 2017).",
+        "manual retrieval (Lopes et al. 2015; Hu et al. 2014)",
+    ]
+    for text in citations:
+        assert "[date removed]" not in scrub(text), f"citation year stripped from: {text}"
+
+    milestones = [
+        "Submit the SBIR Phase I application by the 2024 deadline.",
+        "Complete the pilot deployment in 2023 before fundraising.",
+    ]
+    for text in milestones:
+        assert "[date removed]" in scrub(text), f"stale milestone survived: {text}"
+
+
+def test_computed_axis_lifts_reach_the_report():
+    """
+    A.2 requires alignment_service to override axis_decisions with lifts computed
+    from real between-group variance for LIFE_SCIENCES_RESEARCH. generate_pi_report
+    previously replaced that wholesale with the axis-library heuristic, so no
+    computed lift ever reached the user.
+    """
+    src = ALIGNMENT.read_text()
+    assert "_library_axes" in src, "C.2 no longer keeps the library result separate"
+    lib_line = src.index("_library_axes = format_axis_decisions")
+    guard = src.index('if _computed.get("selected"):')
+    assert lib_line < guard, "the computed-lift guard must follow the library selection"
+    assert '"selected": _computed["selected"]' in src, (
+        "generate_pi_report no longer prefers A.2's computed lifts — the axis-library "
+        "heuristic will overwrite measured variance again"
+    )
+
+
+def test_market_percentages_use_consistent_precision():
+    """
+    The canonical formula line and the derivation step assumptions print the same
+    ratios. A shipped report showed 'SOM = SAM x 22.5%' next to 'midpoint 22%'.
+    Both sides now use :g so 60.0 renders '60' and 0.225 renders '22.5'.
+    """
+    deriv = (ROOT / "app" / "services" / "market_sizing_derivation_service.py").read_text()
+    assert "{som_mid*100:g}%" in deriv, "SOM midpoint reverted to .0% rounding"
+    assert "{sam_mid*100:g}%" in deriv, "SAM midpoint reverted to .0% rounding"
+    assert "{som_mid:.0%}" not in deriv, "SOM midpoint still uses .0% somewhere"
+
+    src = ALIGNMENT.read_text()
+    assert "{pen:g}%" in src and "{cap:g}%" in src, (
+        "the canonical formula line no longer uses :g — it will disagree with the "
+        "derivation steps again (22.5% vs 22%)"
+    )

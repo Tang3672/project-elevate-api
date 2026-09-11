@@ -789,7 +789,32 @@ async def generate_pi_report(
         from app.market.axis_library import select_axes, format_axis_decisions
         _lift_hints = _compute_axis_lift_hints(idea, demand_results, _resolved_domain)
         _axis_decisions = select_axes(_resolved_domain, report.expert_domain or "", lift_hints=_lift_hints)
-        report.axis_decisions = format_axis_decisions(_axis_decisions)
+        _library_axes = format_axis_decisions(_axis_decisions)
+        # A.2: for LIFE_SCIENCES_RESEARCH, _generate_expert_report already computed
+        # per-axis lifts from real between-group variance on product-specific cells.
+        # Measured variance outranks the axis-library keyword heuristic, so it keeps
+        # the selected list. The library's non-candidate rejections are retained
+        # because the segmentation tree never evaluates patient/payer axes.
+        _computed = report.axis_decisions or {}
+        if _computed.get("selected"):
+            _computed_ids = {
+                d.get("axis_id")
+                for d in (_computed.get("selected") or []) + (_computed.get("rejected") or [])
+            }
+            _extra_rejected = [
+                r for r in (_library_axes.get("rejected") or [])
+                if r.get("axis_id") not in _computed_ids
+            ]
+            report.axis_decisions = {
+                "selected": _computed["selected"],
+                "rejected": list(_computed.get("rejected") or []) + _extra_rejected,
+            }
+            logger.info(
+                "C.2: kept A.2 computed lifts (%d selected) + %d library non-candidate rejections",
+                len(_computed["selected"]), len(_extra_rejected),
+            )
+        else:
+            report.axis_decisions = _library_axes
     except Exception as _axis_e:
         logger.warning("Axis selection failed (non-fatal): %s", _axis_e)
 
@@ -2248,6 +2273,17 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
         )
         _QUARTER_RE = _re_r04.compile(r"\bQ([1-4])\s+(\d{4})\b", _re_r04.I)
         _YEAR_RE    = _re_r04.compile(r"\b(20\d{2})\b")
+        # A publication year in a citation is legitimately in the past and must
+        # survive the scrub — stripping it produces "(Science [date removed])".
+        # Matches the text immediately to the LEFT of a bare year.
+        _CITATION_CUE_RE = _re_r04.compile(
+            r"(?:et\s+al\.?,?\s*\(?|"
+            r"PMID:?\s*\d*\s*|doi:?\s*\S*\s*|"
+            r"\b(?:Science|Nature|Cell|Lancet|NEJM|JAMA|PNAS|BMJ|eLife|Neuron|"
+            r"Nat\s+\w+|Sci\s+\w+|J\s+\w+|PLOS\s+\w+|Proc\s+\w+)"
+            r"\s*,?\s*\(?)$",
+            _re_r04.I,
+        )
 
         def _is_past_month(month: int, year: int) -> bool:
             return (year, month) < (_now_r04.year, _now_r04.month)
@@ -2273,13 +2309,17 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
                     return "[date removed — update to future milestone]"
                 return m.group(0)
             text = _QUARTER_RE.sub(_replace_quarter, text)
-            # Bare year (only if clearly a past year — avoid hitting dollar amounts)
+            # Bare year (only if clearly a past year — avoid hitting dollar amounts
+            # and citation publication years, which are supposed to be in the past)
+            _year_src = text
             def _replace_year(m):
                 year = int(m.group(1))
-                if _is_past_year(year):
-                    return "[date removed]"
-                return m.group(0)
-            text = _YEAR_RE.sub(_replace_year, text)
+                if not _is_past_year(year):
+                    return m.group(0)
+                if _CITATION_CUE_RE.search(_year_src[max(0, m.start() - 45):m.start()]):
+                    return m.group(0)
+                return "[date removed]"
+            text = _YEAR_RE.sub(_replace_year, _year_src)
             return text
 
         _steps = data.get("recommended_next_steps") or []
@@ -2734,15 +2774,9 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
                         "selected": sorted(_selected, key=lambda x: -(x["est_lift"] or 0)),
                         "rejected": _rejected_tree + _nc_rejected,
                     }
-                    # NOTE: generate_pi_report replaces report.axis_decisions with the
-                    # axis-library selection (+ idea-derived lift hints) after this
-                    # function returns, so this value only reaches the report if that
-                    # step raises. The two taxonomies use different axis_ids and cannot
-                    # be merged. Logged as a fallback, not as the shipped value.
                     logger.info(
-                        "A.2: computed axis lifts from segmentation tree (fallback only — "
-                        "generate_pi_report normally overrides): %d selected, %d rejected "
-                        "(domain=%s)",
+                        "A.2: axis_decisions set from computed segmentation lifts: "
+                        "%d selected, %d rejected (domain=%s)",
                         len(_selected), len(_rejected_tree) + len(_nc_rejected), _resolved_domain,
                     )
                 except Exception as _ax_e:
@@ -3741,8 +3775,10 @@ def _enforce_market_consistency(report, deriv) -> None:
                 }.get(_arch, "buyers × annual revenue per buyer")
                 ms.formula = (
                     f"TAM = ${tam:,.0f} ({_fmt_usd(tam)}, {_tam_basis}). "
-                    f"SAM = TAM × {pen}% reachable penetration = ${sam:,.0f} ({_fmt_usd(sam)}). "
-                    f"SOM = SAM × {cap}% ({_HORIZON_YEARS}-yr penetration midpoint) = ${som:,.0f} ({_fmt_usd(som)}). "
+                    # :g drops a trailing .0 so this reads "60%" / "22.5%" and matches
+                    # the percentages the derivation steps print for the same ratios.
+                    f"SAM = TAM × {pen:g}% reachable penetration = ${sam:,.0f} ({_fmt_usd(sam)}). "
+                    f"SOM = SAM × {cap:g}% ({_HORIZON_YEARS}-yr penetration midpoint) = ${som:,.0f} ({_fmt_usd(som)}). "
                     f"US, annual; figures from the deterministic bottom-up derivation."
                 )
             except Exception as _fe:

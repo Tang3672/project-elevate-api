@@ -2136,7 +2136,7 @@ def _derive_research_tool_formula(
         ),
         DerivationStep(
             step_num=4,
-            title=f"Step 4 — Serviceable Addressable Market (SAM = {sam_mid:.0%} of TAM, midpoint)",
+            title=f"Step 4 — Serviceable Addressable Market (SAM = {sam_mid*100:g}% of TAM, midpoint)",
             formula=(
                 f"SAM = {_fmt(tam)} × [{_sam_lo:.0%}–{_sam_hi:.0%}] early-adopter fraction "
                 f"= {_fmt(tam * _sam_lo)}–{_fmt(tam * _sam_hi)}; midpoint {_fmt(sam)}"
@@ -2150,12 +2150,12 @@ def _derive_research_tool_formula(
                 f"fraction of eligible labs expected to adopt within {HORIZON_YEARS} years given the product's "
                 f"workflow fit and switching friction. "
                 + (f"Derived from intake answer: {_user_overrides['sam']}. " if _user_overrides.get("sam") else "")
-                + f"Midpoint {sam_mid:.0%} used as the planning base. "
+                + f"Midpoint {sam_mid*100:g}% used as the planning base. "
                 f"This is the second-largest source of uncertainty in the model — see sensitivity ranking."
             ),
             data_source=_user_overrides.get("sam") or "Assumed (method=assumed); target: structured PI interviews n≥30",
             assumptions=[
-                f"Early-adopter fraction range: {_sam_lo:.0%}–{_sam_hi:.0%} (midpoint {sam_mid:.0%})",
+                f"Early-adopter fraction range: {_sam_lo:.0%}–{_sam_hi:.0%} (midpoint {sam_mid*100:g}%)",
                 "Validate with structured interview data before fundraising",
             ],
         ),
@@ -2174,12 +2174,12 @@ def _derive_research_tool_formula(
                 f"{HORIZON_YEARS}-yr penetration [{_som_lo:.0%}–{_som_hi:.0%}] of SAM assumes: (1) 12–18 month sales cycle per lab, "
                 f"(2) referral-driven growth from early adopters, (3) pricing at or below observed spend band. "
                 + (f"Adoption pathway answer adjusts the penetration rate range. " if _user_overrides.get("som") else "")
-                + f"Midpoint {som_mid:.0%} used as planning base. "
+                + f"Midpoint {som_mid*100:g}% used as planning base. "
                 f"This is the largest single source of uncertainty in the model — see sensitivity ranking."
             ),
             data_source="Derived from adoption pathway answer" if _user_overrides.get("som") else f"Assumed (method=assumed); target: comparable research-tool SaaS launch benchmarks",
             assumptions=[
-                f"5-yr penetration range: {_som_lo:.0%}–{_som_hi:.0%} of SAM (midpoint {som_mid:.0%})",
+                f"5-yr penetration range: {_som_lo:.0%}–{_som_hi:.0%} of SAM (midpoint {som_mid*100:g}%)",
                 "No Bass diffusion calibration yet; ranges from early-stage SaaS benchmarks",
             ],
         ),
@@ -2215,8 +2215,8 @@ def _derive_research_tool_formula(
             "Buyer = academic PI on grant cycle (not hospital enterprise)",
             f"Lab population: {int(pop_lo):,}–{int(pop_hi):,} eligible labs ({pop_src})",
             f"Annualised spend: ${sp_lo:,.0f}–${sp_hi:,.0f}/lab/yr ({sp_src})",
-            f"SAM adoption rate: {_sam_lo:.0%}–{_sam_hi:.0%} (midpoint {sam_mid:.0%})" + (" — from workflow type" if _user_overrides.get("sam") else " — assumed"),
-            f"SOM 5-yr penetration: {_som_lo:.0%}–{_som_hi:.0%} (midpoint {som_mid:.0%})" + (" — from adoption pathway" if _user_overrides.get("som") else " — assumed"),
+            f"SAM adoption rate: {_sam_lo:.0%}–{_sam_hi:.0%} (midpoint {sam_mid*100:g}%)" + (" — from workflow type" if _user_overrides.get("sam") else " — assumed"),
+            f"SOM 5-yr penetration: {_som_lo:.0%}–{_som_hi:.0%} (midpoint {som_mid*100:g}%)" + (" — from adoption pathway" if _user_overrides.get("som") else " — assumed"),
         ],
         confidence_note=(
             f"Lab count unverified (NIH RePORTER queries, not executed); "
