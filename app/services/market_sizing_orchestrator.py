@@ -305,7 +305,20 @@ async def run(
     """
     Execute the full 5-engine pipeline for one disease + product.
     Returns OrchestratedResult; call .format_for_prompt() to get the LLM block.
+
+    ⚠️  THIS FUNCTION IS NOT CALLED BY THE PRODUCTION PIPELINE.
+    If you see this log line in a live report trace, something is wired wrong.
     """
+    import inspect
+    _caller_stack = " > ".join(
+        f.filename.split("/")[-1] + ":" + str(f.lineno)
+        for f in inspect.stack()[1:6]
+    )
+    logger.error(
+        "market_sizing_orchestrator.run() called — THIS IS DEAD CODE in production. "
+        "Real reports use market_sizing_derivation_service.generate_market_sizing_derivation(). "
+        "Caller stack: %s", _caller_stack
+    )
     from app.services import patient_flow_engine, monetization_engine, analog_engine, confidence_engine
 
     overrides = overrides or {}
