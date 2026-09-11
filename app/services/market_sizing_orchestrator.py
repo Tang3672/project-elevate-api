@@ -1,4 +1,20 @@
 """
+⚠️  DEAD CODE — NOT CALLED BY THE PRODUCTION PIPELINE  ⚠️
+===========================================================
+This file is NOT how reports are generated.
+
+The real production path is:
+  alignment_service.py
+    → market_sizing_derivation_service.generate_market_sizing_derivation()
+    → market_sizing_derivation_service.format_derivation_for_prompt()
+
+Any feature you add HERE will NEVER appear in a generated report.
+Add new market-sizing features to market_sizing_derivation_service.py instead.
+
+This orchestrator is only used by standalone validation scripts (tests/validate_*.py).
+It is preserved for offline experimentation but must never be imported from alignment_service.
+
+===========================================================
 Market Sizing Orchestrator  (Build Spec v6, Parts 1-4)
 =======================================================
 9-step pipeline (steps 1-5 unchanged, steps 6-9 new in v6):
