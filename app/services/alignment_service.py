@@ -2734,9 +2734,15 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
                         "selected": sorted(_selected, key=lambda x: -(x["est_lift"] or 0)),
                         "rejected": _rejected_tree + _nc_rejected,
                     }
+                    # NOTE: generate_pi_report replaces report.axis_decisions with the
+                    # axis-library selection (+ idea-derived lift hints) after this
+                    # function returns, so this value only reaches the report if that
+                    # step raises. The two taxonomies use different axis_ids and cannot
+                    # be merged. Logged as a fallback, not as the shipped value.
                     logger.info(
-                        "A.2: axis_decisions overridden with computed lifts: "
-                        "%d selected, %d rejected (domain=%s)",
+                        "A.2: computed axis lifts from segmentation tree (fallback only — "
+                        "generate_pi_report normally overrides): %d selected, %d rejected "
+                        "(domain=%s)",
                         len(_selected), len(_rejected_tree) + len(_nc_rejected), _resolved_domain,
                     )
                 except Exception as _ax_e:

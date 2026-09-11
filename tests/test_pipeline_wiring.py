@@ -181,3 +181,135 @@ def test_competitive_intelligence_uses_matching_schema():
         "competitive_intelligence must receive _strategic_intel_for_bib "
         "(gather_competitive_intelligence schema), not the fda_pipeline result"
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Generic double-write guard
+#
+# The report.sources bug (collect_all_citations() built the bibliography, then
+# build_sources_from_report() silently discarded it) is an instance of a class:
+# one code path computes rich data into a report field, a later path replaces it,
+# and nothing raises. Rather than test the known instances one at a time, this
+# guard flags EVERY report.<field> written from more than one place and requires
+# each to carry a written justification.
+#
+# If this test fails, a new double-write was introduced. Determine whether the
+# later write discards the earlier one. If it is safe (mutually exclusive
+# branches, or a deliberate merge), add it to REVIEWED_DOUBLE_WRITES with the
+# reason. If it is not safe, fix it — do not just add the key.
+# ─────────────────────────────────────────────────────────────────────────────
+
+REVIEWED_DOUBLE_WRITES = {
+    "sources":
+        "MERGED. _generate_expert_report builds the full pipeline bibliography via "
+        "collect_all_citations(); generate_pi_report re-appends what "
+        "build_sources_from_report() drops. See the bibliography wiring tests above.",
+    "validation":
+        "SAFE. Mutually exclusive: the skip_verification branch writes a PENDING "
+        "placeholder, the else branch delegates to run_report_verification().",
+    "trust":
+        "SAFE. Mutually exclusive, same skip_verification if/else as report.validation.",
+    "archetype_violations":
+        "SAFE. Mutually exclusive if/else (violations found vs empty list).",
+    "competitive_landscape":
+        "SAFE. Research-tool branch returns early; the remaining writes are the "
+        "main path and its except handler.",
+    "axis_decisions":
+        "INTENTIONAL OVERRIDE. _generate_expert_report's A.2 block computes lifts "
+        "from the segmentation tree's dimension_report; generate_pi_report then "
+        "replaces it with the axis-library selection plus idea-derived lift hints. "
+        "The library path wins on purpose: it yields the full axis set with "
+        "non-candidate rejection reasons, and the two taxonomies use different "
+        "axis_ids so they cannot be merged. A.2 survives only if the library step "
+        "raises. Do not silently flip this precedence.",
+    "sensitivity":
+        "DOMAIN-DEPENDENT OVERRIDE. Monte Carlo sensitivity_ranking is written "
+        "first; for LIFE_SCIENCES_RESEARCH the segment-tree tornado analysis "
+        "(spec D.7) replaces it. The two payloads share no keys — see "
+        "test_sensitivity_payload_shapes_are_documented.",
+}
+
+
+def _report_field_writes():
+    """Map report.<field> -> [(lineno, enclosing function), ...] for alignment_service."""
+    tree = ast.parse(ALIGNMENT.read_text())
+    funcs = [
+        (n.lineno, getattr(n, "end_lineno", n.lineno), n.name)
+        for n in ast.walk(tree)
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+    ]
+
+    def enclosing(line):
+        best = None
+        for start, end, name in funcs:
+            if start <= line <= end and (best is None or start > best[0]):
+                best = (start, end, name)
+        return best[2] if best else "<module>"
+
+    writes: dict[str, list] = {}
+    for node in ast.walk(tree):
+        targets = []
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+        elif isinstance(node, (ast.AugAssign, ast.AnnAssign)):
+            targets = [node.target]
+        for t in targets:
+            if (isinstance(t, ast.Attribute)
+                    and isinstance(t.value, ast.Name)
+                    and t.value.id == "report"):
+                writes.setdefault(t.attr, []).append((node.lineno, enclosing(node.lineno)))
+    return writes
+
+
+def test_every_report_field_double_write_is_reviewed():
+    """Any report field written from 2+ places must carry a justification."""
+    multi = {f: locs for f, locs in _report_field_writes().items() if len(locs) > 1}
+    unreviewed = sorted(set(multi) - set(REVIEWED_DOUBLE_WRITES))
+    detail = "\n".join(
+        f"  report.{f}: " + ", ".join(f"line {ln} in {fn}" for ln, fn in sorted(multi[f]))
+        for f in unreviewed
+    )
+    assert not unreviewed, (
+        "New report field(s) written from more than one place:\n" + detail +
+        "\n\nCheck whether the later write discards the earlier one. This is how the "
+        "report.sources bibliography bug shipped. If safe, add the field to "
+        "REVIEWED_DOUBLE_WRITES with the reason; if not, fix the ordering."
+    )
+
+
+def test_reviewed_double_writes_list_has_no_stale_entries():
+    """Keep the justification list honest — drop entries that no longer double-write."""
+    multi = {f for f, locs in _report_field_writes().items() if len(locs) > 1}
+    stale = sorted(set(REVIEWED_DOUBLE_WRITES) - multi)
+    assert not stale, (
+        f"REVIEWED_DOUBLE_WRITES lists field(s) that are no longer written twice: "
+        f"{stale}. Remove them so the list keeps reflecting reality."
+    )
+
+
+def test_sensitivity_payload_shapes_are_documented():
+    """
+    report.sensitivity receives two payloads with NO keys in common:
+      Monte Carlo  -> parameter, lo_label, hi_label, som_at_lo, som_at_hi, swing_pct
+      segment tree -> node_id, label, method, impact_usd, impact_pct, ...
+    Any consumer must handle both. If a field is renamed so the shapes start to
+    overlap (or diverge further), this test fails and the consumer needs review.
+    """
+    from dataclasses import fields as dc_fields
+    from app.services.market_sizing_derivation_service import SensitivityEntry
+
+    mc_keys = {f.name for f in dc_fields(SensitivityEntry)}
+    assert mc_keys == {"parameter", "lo_label", "hi_label",
+                       "som_at_lo", "som_at_hi", "swing_pct"}, (
+        f"SensitivityEntry shape changed to {sorted(mc_keys)} — report.sensitivity "
+        "consumers assume the documented Monte Carlo shape"
+    )
+
+    seg_keys = {"node_id", "label", "method", "base_value", "base_frac",
+                "low_frac", "high_frac", "tam_base_usd", "tam_low_usd",
+                "tam_high_usd", "impact_usd", "impact_pct"}
+    assert not (mc_keys & seg_keys), (
+        "The two report.sensitivity payloads now share keys "
+        f"({sorted(mc_keys & seg_keys)}). Consumers distinguish them structurally; "
+        "overlapping keys make that ambiguous."
+    )
