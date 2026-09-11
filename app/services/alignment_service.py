@@ -1422,6 +1422,41 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
         disease_keywords = disease_name.replace("(", "").replace(")", "").split()[:4]
         sub_expert_id = getattr(expert, "sub_expert_id", getattr(expert, "domain_id", ""))
 
+        # Pre-compute ta_for_deriv before gather so chapter_data_service and
+        # run_retrieval_pipeline get the real TA, not the "other" safe default.
+        try:
+            from app.services.universe_builder import get_universe, DISEASE_POPULATIONS
+            from app.services.opportunity_scorer_v2 import _TA_DEFAULTS, _DISEASE_OVERRIDES
+            for _key, _pop in DISEASE_POPULATIONS.items():
+                if disease_name and (disease_name.lower() in _key.lower() or _key.lower() in disease_name.lower()):
+                    break
+            for _d_entry, _ta_entry, *_rest in get_universe():
+                if disease_name and (disease_name.lower() in _d_entry.lower() or _d_entry.lower() in disease_name.lower()):
+                    ta_for_deriv = _ta_entry
+                    break
+            if not ta_for_deriv or ta_for_deriv == "other":
+                _PRE_EXPERT_TA_MAP = {
+                    "drug_amr": "amr_infectious", "drug_amr_antibiotics": "amr_infectious",
+                    "drug_oncology": "oncology", "biologic_oncology": "oncology",
+                    "drug_cns": "cns", "drug_mental_health": "cns",
+                    "drug_cardiology": "cardiovascular", "drug_metabolic": "metabolic",
+                    "drug_rare_disease": "rare_disease", "biologic_rare_disease": "rare_disease",
+                    "gene_therapy_rare": "gene_therapy", "gene_therapy_oncology": "oncology",
+                    "gene_therapy_hematology": "hematology", "gene_therapy_cns": "cns",
+                    "biologic_immunology": "immunology", "biologic_hematology": "hematology",
+                    "device_cardiovascular": "cardiovascular", "device_metabolic": "metabolic",
+                    "diagnostic_molecular": "diagnostic",
+                    "digital_cds": "device", "digital_therapeutic": "device",
+                    "vaccine_prophylactic": "vaccine",
+                    "research_tool_agronomy": "agronomy",
+                    "research_tool_non_clinical": "neuroscience",
+                    "research_infrastructure_saas": "neuroscience",
+                }
+                _expert_domain = getattr(expert, "domain_id", getattr(expert, "sub_expert_id", "other"))
+                ta_for_deriv = _PRE_EXPERT_TA_MAP.get(_expert_domain, "other")
+        except Exception as _pre_ta_e:
+            logger.debug("Pre-gather TA lookup failed (using default): %s", _pre_ta_e)
+
         # Run FDA/ClinicalTrials and PubMed in parallel
         from app.services.competitive_intelligence_service import (
             gather_competitive_intelligence,
