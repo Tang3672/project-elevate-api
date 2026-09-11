@@ -39,6 +39,7 @@ def collect_all_citations(
     *,
     patent_landscape: Optional[dict] = None,
     funding_intel: Optional[dict] = None,
+    aggregated_sources: Optional[dict] = None,
 ) -> list[dict]:
     """
     Return a numbered list of all cited sources for a given report dict.
@@ -53,6 +54,10 @@ def collect_all_citations(
     funding_intel:
         Raw return value of get_funding_intelligence() — contains sbir_awards
         with NIH Reporter URLs.  May be None if the service failed.
+    aggregated_sources:
+        Raw return value of source_aggregator_service.aggregate_all_sources() —
+        contains CrossRef, Europe PMC, Semantic Scholar, NIH grants, GBD, and
+        CMS pricing data with URLs.  May be None if the service failed.
     """
     entries: list[dict] = []
     seen: set[str] = set()
@@ -189,6 +194,64 @@ def collect_all_citations(
             if company and company != "Unknown org":
                 label += f" — {company}"
             add(label, url, category="sbir_award")
+
+    # ── 4c. Derivation step source_url (academic references per formula step) ─
+    # DerivationStep.source_url holds paper/guideline URLs (DisMod II, NICE TSD 14,
+    # Bass model, BLP demand system, ISPOR, ICER, CMS, CDC, etc.) that are wired
+    # into the formula engine but never propagated to the bibliography.
+    for step in (report.get("market_sizing_derivation") or {}).get("steps") or []:
+        title = step.get("title", "") or step.get("label", "")
+        source_paper = step.get("source_paper", "")
+        label = f"{source_paper} — {title}"[:120] if source_paper else title[:120]
+        add(label, step.get("source_url", ""), category="market_sizing")
+
+    # ── 5c. Competitive landscape competitor source URLs ──────────────────────
+    cl = report.get("competitive_landscape") or {}
+    for comp in cl.get("competitors") or []:
+        name = comp.get("name", "") or comp.get("company", "")
+        url = comp.get("source_url", "") or comp.get("url", "")
+        if name or url:
+            add(f"Competitor: {name}", url, category="competitive_landscape")
+
+    # ── 10. Aggregated multi-source data (CrossRef, Europe PMC, Semantic Scholar,
+    #         NIH Grants, GBD, CMS drug pricing) — fetched live, URL-bearing ────
+    if isinstance(aggregated_sources, dict):
+        # Academic papers (CrossRef / Europe PMC / Semantic Scholar)
+        for paper in (aggregated_sources.get("papers") or []):
+            title = paper.get("title", "")[:100]
+            url = paper.get("url", "") or paper.get("doi_url", "")
+            authors = paper.get("authors", "")
+            year = paper.get("year", "")
+            source = paper.get("source", "")
+            label = title or f"{authors} ({year})"
+            if source:
+                label = f"[{source}] {label}"
+            add(label[:120], url, category="literature")
+
+        # NIH grants (NIH RePORTER)
+        for grant in (aggregated_sources.get("nih_grants") or []):
+            title = grant.get("title", "")[:90]
+            pi = grant.get("pi_name", "") or grant.get("contact_pi_name", "")
+            grant_num = grant.get("project_num", "") or grant.get("grant_number", "")
+            url = grant.get("url", "") or (
+                f"https://reporter.nih.gov/project-details/{grant_num}" if grant_num else ""
+            )
+            label = f"NIH Grant ({grant_num}): {title}" if grant_num else f"NIH Grant: {title}"
+            if pi:
+                label += f" — PI: {pi}"
+            add(label[:120], url, category="nih_grant")
+
+        # GBD (Global Burden of Disease) data points
+        for gbd_item in (aggregated_sources.get("gbd") or []):
+            title = gbd_item.get("title", "") or gbd_item.get("metric", "")
+            url = gbd_item.get("url", "")
+            add(f"GBD: {title}"[:100], url, category="disease_data")
+
+        # CMS drug/device pricing data
+        for cms_item in (aggregated_sources.get("cms_pricing") or []):
+            drug = cms_item.get("drug_name", "") or cms_item.get("name", "")
+            url = cms_item.get("url", "")
+            add(f"CMS Pricing: {drug}"[:100], url, category="market_sizing")
 
     # ── Number sequentially ───────────────────────────────────────────────────
     for i, entry in enumerate(entries, 1):

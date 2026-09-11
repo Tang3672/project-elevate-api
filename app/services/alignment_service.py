@@ -1675,6 +1675,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
         _gather_error = f"{type(e).__name__}: {e}"
         logger.warning(f"Competitive intelligence fetch failed: {e}\n{_tbx.format_exc()}")
         _competitive_intelligence = {}
+        _aggregated_sources = None
 
 
     # === INNOVATION INTELLIGENCE SWEEP — runs in executor, doesn't block ===
@@ -2766,6 +2767,7 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
             report.model_dump(mode="json"),
             patent_landscape=_pl_for_bib,
             funding_intel=_fi_for_bib,
+            aggregated_sources=_aggregated_sources,
         )
         logger.info("Bibliography: %d sources collected", len(report.sources))
     except Exception as _bib_e:
