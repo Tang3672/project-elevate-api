@@ -108,6 +108,17 @@ def collect_all_citations(
             category="market_sizing",
         )
 
+    # ── 4b. Market sizing derivation primary citations ─────────────────────────
+    # These are the named sources from the MoE specialist formula (NIH RePORTER,
+    # NSF Award Search, IQVIA, EvaluatePharma, etc.) that were injected into the
+    # Claude prompt but may not have been reproduced verbatim in the LLM narrative.
+    for c in (report.get("market_sizing_derivation") or {}).get("primary_citations") or []:
+        add(
+            f"{c.get('ref', '')} — {c.get('title', '')}"[:120],
+            c.get("url", ""),
+            category="market_sizing",
+        )
+
     # ── 5a. Regulatory pathway designations ───────────────────────────────────
     rp = report.get("regulatory_pathway") or {}
     for des in rp.get("designations") or []:
