@@ -10,12 +10,17 @@ Sources harvested (in priority order for deduplication):
   1. LLM-generated sources (report["sources"])
   2. PubMed / OpenAlex literature citations
   3. Disease intelligence data_points
-  4. Market sizing waterfall steps
+  4. Market sizing waterfall steps + derivation step academic references
   5. Regulatory pathway designations + trial requirements
   6. Market access buyer segments
   7. Demand signals / supporting evidence (NIH RePORTER, NSF, etc.)
   8. Strategic playbook
-  9. Pipeline-level: Google Patents, NIH SBIR awards, Semantic Scholar KOLs
+  9. Pipeline-level: Google Patents, NIH SBIR awards, SEC EDGAR 8-K,
+     ClinicalTrials.gov new entrants, bioRxiv/medRxiv preprints
+ 10. Aggregated sources: CrossRef, Europe PMC, Semantic Scholar, NIH grants,
+     GBD, CMS pricing, SEC EDGAR 10-K, ASHP drug shortage
+ 11. FDA-approved drugs with DailyMed URLs (regulatory_precedent)
+ 12. Competitor trials (ClinicalTrials.gov) + FDA precedents (competitive_intelligence)
 
 Deduplication is URL-based: sources with no URL are always included;
 sources with a URL are included once (first occurrence wins).
@@ -291,6 +296,21 @@ def collect_all_citations(
             drug = cms_item.get("drug_name", "") or cms_item.get("name", "")
             url = cms_item.get("url", "")
             add(f"CMS Pricing: {drug}"[:100], url, category="market_sizing")
+
+        # SEC EDGAR filings (10-K / 8-K competitor financials)
+        for filing in (aggregated_sources.get("sec_filings") or [])[:5]:
+            company = filing.get("company", "")
+            form = filing.get("form_type", "")
+            date = filing.get("filing_date", "")
+            url = filing.get("url", "")
+            label = f"SEC {form}: {company}" + (f" ({date})" if date else "")
+            add(label[:120], url, category="funding_signal")
+
+        # ASHP drug shortage data
+        for shortage in (aggregated_sources.get("drug_shortage") or [])[:3]:
+            drug = shortage.get("drug", "")
+            url = shortage.get("url", "")
+            add(f"ASHP Drug Shortage: {drug}"[:100], url, category="market_sizing")
 
     # ── 11. FDA-approved drugs for this indication (openFDA / DailyMed) ───────
     # From get_regulatory_precedent() — drugs listed in FDA drug label database
