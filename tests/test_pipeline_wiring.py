@@ -701,3 +701,47 @@ def test_derivation_passes_bottom_up_tam_to_triangulator():
         "the derivation stopped passing its TAM, so divergence reverts to comparing "
         "SAM against TAM and will over-report disagreement"
     )
+
+
+def test_self_reported_inputs_do_not_inherit_source_authority():
+    """
+    Confidence granted a 0.90 base to any step whose source_url sat on an
+    authoritative domain. Step 1 of the Hublink report was a PI-provided lab count
+    whose own text said the NIH RePORTER lookup "returned insufficient results to
+    verify independently" — yet it scored 70%, the highest in the model, above every
+    value derived from it, on the one input the Math Verifier flagged for +/-37%
+    sensitivity. An attached URL is where a number could be checked, not where it
+    came from.
+    """
+    from app.services.market_provenance_service import _confidence_for
+
+    self_reported = _confidence_for("https://reporter.nih.gov/",
+                                    "PI intake answer — PI-provided: 30,000-80,000 labs", [])
+    unverified = _confidence_for("https://reporter.nih.gov/",
+                                 "PI intake estimate. NIH RePORTER query returned "
+                                 "insufficient results to verify independently", [])
+    genuine = _confidence_for("https://seer.cancer.gov/statfacts/", "SEER incidence data", [])
+
+    assert self_reported <= 0.55, (
+        f"a self-reported estimate scores {self_reported} — it is inheriting the "
+        "authority of a URL it did not come from"
+    )
+    assert unverified <= 0.55, f"an explicitly unverified lookup scores {unverified}"
+    assert genuine >= 0.85, (
+        f"genuinely sourced authoritative data dropped to {genuine} — the fix is "
+        "too broad and is penalising real citations"
+    )
+
+
+def test_scenario_panel_formats_money_like_the_market_cards():
+    """
+    The scenario panel used :.0f for millions while the market cards used :.1f, so
+    one report showed SOM as both "$2.8M" and "$3M".
+    """
+    from app.services.market_provenance_service import _fmt_usd
+    from app.services.market_sizing_derivation_service import _fmt
+    for value in (20_625_000, 12_375_000, 2_784_375, 157_500_000):
+        assert _fmt_usd(value) == _fmt(value), (
+            f"{value}: scenario panel renders {_fmt_usd(value)} but the market cards "
+            f"render {_fmt(value)}"
+        )
