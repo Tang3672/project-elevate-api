@@ -156,8 +156,16 @@ async def search_semantic_scholar(query: str, max_results: int = 5) -> List[Dict
                 headers={"User-Agent": "ProjectElevate/1.0 (research@projectelevate.io)"},
             )
             if r.status_code != 200:
+                # 429 is the common case without an API key. It was being swallowed
+                # silently, so Semantic Scholar contributed nothing while still being
+                # advertised in the source plan. Log it so the gap is visible.
+                logger.warning(
+                    "Semantic Scholar returned HTTP %s%s",
+                    r.status_code,
+                    " (rate limited — no API key configured)" if r.status_code == 429 else "",
+                )
                 return []
-            
+
             results = []
             for item in r.json().get("data", []):
                 authors = item.get("authors", [])
@@ -186,6 +194,68 @@ async def search_semantic_scholar(query: str, max_results: int = 5) -> List[Dict
             return results
     except Exception as e:
         logger.warning(f"Semantic Scholar search failed: {e}")
+        return []
+
+
+# ── OPENALEX ──────────────────────────────────────────────────────────────────
+
+async def search_openalex(query: str, max_results: int = 6) -> List[Dict]:
+    """Search OpenAlex — 250M+ works, no API key, generous rate limits.
+
+    Added because the report's source plan already advertised OpenAlex while
+    nothing queried it, and because the other literature sources skew to PubMed:
+    Europe PMC returns pubmed.ncbi.nlm.nih.gov URLs, Semantic Scholar rewrites to
+    a PubMed URL whenever a PMID exists, and Semantic Scholar is frequently
+    rate-limited (HTTP 429) without an API key. OpenAlex indexes conference
+    proceedings, software papers, theses and non-MEDLINE venues that PubMed does
+    not cover, which is where research-tool and methods literature actually lives.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+            r = await client.get(
+                "https://api.openalex.org/works",
+                params={
+                    "search": query,
+                    "per-page": max_results,
+                    "sort": "relevance_score:desc",
+                    # OpenAlex asks for a contact address to join the polite pool.
+                    "mailto": "research@projectelevate.io",
+                },
+                headers={"User-Agent": "ProjectElevate/1.0 (research@projectelevate.io)"},
+            )
+            if r.status_code != 200:
+                logger.warning("OpenAlex search returned HTTP %s", r.status_code)
+                return []
+
+            results: List[Dict] = []
+            for w in r.json().get("results", []):
+                doi = (w.get("doi") or "").replace("https://doi.org/", "")
+                ids = w.get("ids") or {}
+                pmid = (ids.get("pmid") or "").rsplit("/", 1)[-1] if ids.get("pmid") else ""
+                # Prefer the DOI link: it is the point of adding this source.
+                url = f"https://doi.org/{doi}" if doi else (w.get("id") or "")
+                authorships = w.get("authorships") or []
+                first = (authorships[0].get("author") or {}).get("display_name", "") if authorships else ""
+                author_str = f"{first} et al." if first and len(authorships) > 1 else (first or "Unknown")
+                venue = ((w.get("primary_location") or {}).get("source") or {}).get("display_name", "") or ""
+                if not w.get("display_name") or not url:
+                    continue
+                results.append({
+                    "source": "OpenAlex",
+                    "title": w.get("display_name", ""),
+                    "authors": author_str,
+                    "journal": venue,
+                    "year": str(w.get("publication_year") or ""),
+                    "pmid": pmid,
+                    "doi": doi,
+                    "url": url,
+                    "citations": w.get("cited_by_count", 0) or 0,
+                    "abstract": "",
+                    "type": w.get("type", "journal_article") or "journal_article",
+                })
+            return results
+    except Exception as e:
+        logger.warning("OpenAlex search failed: %s", e)
         return []
 
 
@@ -519,13 +589,29 @@ async def aggregate_all_sources(
     drug_query = drug_names[0] if drug_names else disease_name.split()[0]
 
     # Run ALL sources in parallel - 20+ simultaneous requests
+    # An epidemiology sweep only makes sense for a clinical product. Running it for a
+    # research tool returned papers on Chlamydia incidence, Korean myocardial
+    # infarction and Type 1 diabetes — keyword matches with no bearing on a lab
+    # data-acquisition workflow. Non-clinical archetypes get a methods/instrumentation
+    # sweep instead, which is where their real comparators are published.
+    _is_research_tool = (sub_expert_id or "").startswith(
+        ("research_tool", "research_infrastructure"))
+    _secondary_query = (
+        f"{disease_name} laboratory instrumentation data acquisition methods"
+        if _is_research_tool else
+        f"{disease_name} epidemiology incidence prevalence"
+    )
+
     results = await asyncio.gather(
-        # Literature - 5 sources
+        # Literature - 6 sources
         search_crossref(query, max_results=5),
         search_europe_pmc(query, max_results=5),
         search_semantic_scholar(query, max_results=5),
         search_preprints(query, max_results=3),
-        search_crossref(f"{disease_name} epidemiology incidence prevalence", max_results=3),
+        search_crossref(_secondary_query, max_results=3),
+        # OpenAlex: DOI-first, indexes venues PubMed does not
+        search_openalex(query, max_results=6),
+        search_openalex(_secondary_query, max_results=4),
         # Funding & grants
         search_nih_grants(grant_query, max_results=5),
         # Market & pricing data
@@ -541,27 +627,48 @@ async def aggregate_all_sources(
         return_exceptions=True
     )
 
-    crossref, europe_pmc, semantic, preprints, crossref_epi, nih_grants, cms_pricing, gbd, drug_shortage, news1, news2, news3, sec_filings = [
+    crossref, europe_pmc, semantic, preprints, crossref_epi, openalex, openalex_2, nih_grants, cms_pricing, gbd, drug_shortage, news1, news2, news3, sec_filings = [
         r if not isinstance(r, Exception) else [] for r in results
     ]
     news = list(news1 or []) + list(news2 or []) + list(news3 or [])
-    all_paper_sources = [crossref, europe_pmc, semantic, preprints, crossref_epi]
-    
-    # Deduplicate papers by title similarity
-    all_papers = []
-    seen_titles = set()
+    all_paper_sources = [crossref, europe_pmc, semantic, preprints, crossref_epi,
+                         openalex, openalex_2]
+
+    # Deduplicate by title, and also by DOI/URL — the same paper arrives from
+    # several providers and a title-only key missed those with differing casing.
+    deduped: List[List[Dict]] = []
+    seen_titles: set = set()
+    seen_ids: set = set()
     for paper_list in all_paper_sources:
-        for p in paper_list:
-            title_key = p.get("title", "")[:50].lower()
-            if title_key and title_key not in seen_titles:
-                seen_titles.add(title_key)
-                all_papers.append(p)
-    
-    # Sort by citation count
-    all_papers.sort(key=lambda x: x.get("citations", 0), reverse=True)
+        kept = []
+        for p in (paper_list or []):
+            title_key = (p.get("title") or "")[:50].lower().strip()
+            id_key = ((p.get("doi") or "") or (p.get("url") or "")).lower().rstrip("/")
+            if not title_key:
+                continue
+            if title_key in seen_titles or (id_key and id_key in seen_ids):
+                continue
+            seen_titles.add(title_key)
+            if id_key:
+                seen_ids.add(id_key)
+            kept.append(p)
+        deduped.append(kept)
+
+    # Take one paper from each provider in turn before taking a second from any.
+    # Ranking the pooled list purely by citation count let a few very famous but
+    # unrelated papers (ENCODE, a GBD incidence study) fill the cap and squeeze out
+    # every lower-cited but on-topic result, which is what made the bibliography
+    # look PubMed-only. Within each provider the order stays citation-ranked.
+    for lst in deduped:
+        lst.sort(key=lambda x: x.get("citations", 0) or 0, reverse=True)
+    all_papers = []
+    for tier in range(max((len(l) for l in deduped), default=0)):
+        for lst in deduped:
+            if tier < len(lst):
+                all_papers.append(lst[tier])
     
     return {
-        "papers": all_papers[:12],
+        "papers": all_papers[:18],
         "nih_grants": nih_grants or [],
         "news": news[:8],
         "gbd": gbd or [],
@@ -570,7 +677,7 @@ async def aggregate_all_sources(
         "sec_filings": sec_filings or [],
         "total_papers": len(all_papers),
         "sources_queried": [
-            "CrossRef", "Europe PMC", "Semantic Scholar", "medRxiv/bioRxiv",
+            "CrossRef", "OpenAlex", "Europe PMC", "Semantic Scholar", "medRxiv/bioRxiv",
             "NIH Reporter", "STAT News", "FiercePharma", "BioPharma Dive",
             "IHME Global Burden of Disease", "CMS Drug Pricing", "ASHP Drug Shortage",
             "SEC EDGAR", "CrossRef Epidemiology"

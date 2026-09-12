@@ -945,3 +945,61 @@ def test_known_unwired_list_has_no_stale_entries():
     assert not stale, (
         f"these are now imported by production and should leave KNOWN_UNWIRED_SERVICES: {stale}"
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Literature source diversity
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_openalex_is_implemented_and_queried():
+    """
+    The report's source plan advertised OpenAlex while nothing queried it. It is
+    the main non-PubMed provider: Europe PMC returns pubmed.ncbi.nlm.nih.gov URLs,
+    Semantic Scholar rewrites to a PubMed URL whenever a PMID exists and is
+    frequently HTTP 429 without an API key.
+    """
+    from app.services import source_aggregator_service as svc
+    assert hasattr(svc, "search_openalex"), "OpenAlex searcher was removed"
+
+    src = (ROOT / "app" / "services" / "source_aggregator_service.py").read_text()
+    assert "search_openalex(query" in src, "OpenAlex is defined but never queried"
+    assert "openalex, openalex_2" in src, "OpenAlex results are not unpacked from the gather"
+    assert "openalex, openalex_2]" in src, (
+        "OpenAlex results are fetched but not merged into the paper pool"
+    )
+
+
+def test_paper_selection_is_source_diverse_not_citation_ranked():
+    """
+    Ranking the pooled papers purely by citation count let a few very famous but
+    unrelated papers fill the cap, which is what made the bibliography look
+    PubMed-only. Selection must round-robin across providers first.
+    """
+    src = (ROOT / "app" / "services" / "source_aggregator_service.py").read_text()
+    assert "for tier in range(" in src, (
+        "paper selection reverted to a flat citation sort — one provider can crowd "
+        "out every other again"
+    )
+    assert '"papers": all_papers[:18]' in src, "the paper cap was lowered"
+
+
+def test_epidemiology_sweep_is_skipped_for_research_tools():
+    """
+    Running an epidemiology query for a lab tool returned papers on Chlamydia
+    incidence, Korean myocardial infarction and Type 1 diabetes — keyword matches
+    with no bearing on a data-acquisition workflow.
+    """
+    src = (ROOT / "app" / "services" / "source_aggregator_service.py").read_text()
+    assert "_is_research_tool" in src and "_secondary_query" in src, (
+        "the archetype-aware secondary literature query was removed; research tools "
+        "will be sized against clinical epidemiology papers again"
+    )
+    assert "laboratory instrumentation data acquisition methods" in src
+
+
+def test_semantic_scholar_rate_limit_is_logged():
+    """A silent 429 made the provider contribute nothing while still being advertised."""
+    src = (ROOT / "app" / "services" / "source_aggregator_service.py").read_text()
+    block = src.split("async def search_semantic_scholar")[1][:1600]
+    assert "logger.warning" in block, "Semantic Scholar failures are silent again"
+    assert "rate limited" in block
