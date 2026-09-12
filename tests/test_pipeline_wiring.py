@@ -664,3 +664,40 @@ def test_step1_rationale_has_no_double_period():
     )
     text = getattr(d.steps[0], "rationale", "") or getattr(d.steps[0], "explanation", "")
     assert ".." not in text, f"double period in Step 1 rationale: ...{text[-70:]!r}"
+
+
+def test_triangulation_divergence_compares_like_for_like():
+    """
+    Divergence measured bottom-up SAM against top-down TAM, so the SAM fraction was
+    baked into the "disagreement": at a 60% SAM fraction two models that agree
+    perfectly scored 40% divergence, above the 25% threshold, meaning the
+    cross-validation could never pass for a typical research-tool funnel.
+    """
+    from app.services.market_sizing_triangulator import triangulate, DIVERGENCE_THRESHOLD
+    kw = dict(disease_name="behavioral neuroscience",
+              therapeutic_area="neuroscience", product_type="other")
+    td = 157_500_000
+
+    for sam_fraction in (0.50, 0.60, 0.75):
+        r = triangulate(bottom_up_sam_usd=td * sam_fraction,
+                        bottom_up_tam_usd=td, top_down_tam_usd=td, **kw)
+        assert r.divergence_ratio < 1e-9, (
+            f"models agreeing exactly report {r.divergence_ratio:.1%} divergence at a "
+            f"{sam_fraction:.0%} SAM fraction — the funnel stage is leaking into the check"
+        )
+        assert not r.divergence_flagged
+
+    # A genuine disagreement must still flag.
+    r = triangulate(bottom_up_sam_usd=12_375_000, bottom_up_tam_usd=20_625_000,
+                    top_down_tam_usd=td, **kw)
+    assert r.divergence_flagged, "a real 87% TAM gap stopped flagging"
+    assert r.divergence_ratio > DIVERGENCE_THRESHOLD
+
+
+def test_derivation_passes_bottom_up_tam_to_triangulator():
+    """Without this the triangulator silently falls back to the SAM-vs-TAM comparison."""
+    deriv_src = (ROOT / "app" / "services" / "market_sizing_derivation_service.py").read_text()
+    assert "bottom_up_tam_usd=deriv.us_tam_usd" in deriv_src, (
+        "the derivation stopped passing its TAM, so divergence reverts to comparing "
+        "SAM against TAM and will over-report disagreement"
+    )

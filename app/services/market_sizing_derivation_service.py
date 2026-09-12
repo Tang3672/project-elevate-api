@@ -2444,6 +2444,8 @@ def generate_market_sizing_derivation(
             therapeutic_area=_engine_ta,
             product_type=product_type,
             bottom_up_sam_usd=deriv.us_sam_usd,
+            # compare like with like: the divergence flag is a TAM-vs-TAM check
+            bottom_up_tam_usd=deriv.us_tam_usd,
             prevalent_patients=us_patient_population or None,
             underdiagnosis_multiplier=_ud_mult,
             underdiagnosis_rationale=_ud_rationale,
@@ -2497,9 +2499,12 @@ def format_derivation_for_prompt(deriv: MarketSizingDerivation) -> str:
         tri_lines = [
             f"",
             f"CROSS-VALIDATION (Bottom-Up vs Top-Down Triangulation):",
-            f"  Bottom-up SAM (patient/buyer-based): {_fmt(tri.bottom_up_sam_usd)}",
+            f"  Bottom-up TAM (buyer population × spend): {_fmt(deriv.us_tam_usd)}",
             f"  Top-down TAM (TA anchor × disease share × product-type share): {_fmt(tri.top_down_tam_usd)}",
-            f"  Divergence: {tri.divergence_ratio:.0%} — {'FLAGGED' if tri.divergence_flagged else 'within tolerance'}",
+            f"  Divergence (TAM vs TAM, like-for-like): {tri.divergence_ratio:.0%} — "
+            f"{'FLAGGED' if tri.divergence_flagged else 'within tolerance'}",
+            f"  (For reference, bottom-up SAM after the reachability gate: {_fmt(tri.bottom_up_sam_usd)}. "
+            f"Do NOT describe the divergence as SAM-vs-TAM — it compares the two TAM estimates.)",
             f"  Reconciled estimate: {_fmt(tri.reconciled_sam_usd)} "
             f"(bottom-up weight {tri.reconciliation_weight_bottom_up:.0%} / "
             f"top-down weight {tri.reconciliation_weight_top_down:.0%})",
