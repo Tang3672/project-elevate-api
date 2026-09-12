@@ -142,6 +142,25 @@ async def search_europe_pmc(query: str, max_results: int = 5) -> List[Dict]:
 
 # ── SEMANTIC SCHOLAR ──────────────────────────────────────────────────────────
 
+def _semantic_scholar_key() -> str:
+    """Read the optional Semantic Scholar key without importing settings at module load."""
+    try:
+        from app.core.config import get_settings
+        return (get_settings().SEMANTIC_SCHOLAR_API_KEY or "").strip()
+    except Exception:
+        import os
+        return (os.environ.get("SEMANTIC_SCHOLAR_API_KEY") or "").strip()
+
+
+def _semantic_scholar_headers() -> Dict[str, str]:
+    """Send x-api-key when configured; the API works unkeyed but is heavily throttled."""
+    headers = {"User-Agent": "ProjectElevate/1.0 (research@projectelevate.io)"}
+    key = _semantic_scholar_key()
+    if key:
+        headers["x-api-key"] = key
+    return headers
+
+
 async def search_semantic_scholar(query: str, max_results: int = 5) -> List[Dict]:
     """Search Semantic Scholar for highly-cited papers with citation networks."""
     try:
@@ -153,16 +172,23 @@ async def search_semantic_scholar(query: str, max_results: int = 5) -> List[Dict
                     "limit": max_results,
                     "fields": "title,authors,year,venue,citationCount,abstract,externalIds,openAccessPdf",
                 },
-                headers={"User-Agent": "ProjectElevate/1.0 (research@projectelevate.io)"},
+                headers=_semantic_scholar_headers(),
             )
             if r.status_code != 200:
-                # 429 is the common case without an API key. It was being swallowed
+                # 429 is the common case on the shared pool. It was being swallowed
                 # silently, so Semantic Scholar contributed nothing while still being
                 # advertised in the source plan. Log it so the gap is visible.
+                _keyed = bool(_semantic_scholar_key())
                 logger.warning(
                     "Semantic Scholar returned HTTP %s%s",
                     r.status_code,
-                    " (rate limited — no API key configured)" if r.status_code == 429 else "",
+                    (
+                        " (rate limited — set SEMANTIC_SCHOLAR_API_KEY for a dedicated "
+                        "quota: https://www.semanticscholar.org/product/api#api-key-form)"
+                        if r.status_code == 429 and not _keyed else
+                        " (rate limited despite an API key — quota exhausted)"
+                        if r.status_code == 429 else ""
+                    ),
                 )
                 return []
 

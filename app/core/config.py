@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     FDA_API_KEY:      str = ""
     CENSUS_API_KEY:   str = ""
     HRSA_API_KEY:     str = ""
+    # Optional. Without it the Semantic Scholar API is shared-pool rate limited and
+    # returns HTTP 429 for most requests, contributing no papers. Free key request:
+    # https://www.semanticscholar.org/product/api#api-key-form
+    SEMANTIC_SCHOLAR_API_KEY: str = ""
 
     # Reddit
     REDDIT_CLIENT_ID:     str = ""
@@ -100,6 +104,14 @@ def get_settings() -> Settings:
             s.STRIPE_PRICE_ID = v.strip()
     if not s.OPENAI_API_KEY:
         s.OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+    if not s.SEMANTIC_SCHOLAR_API_KEY:
+        # Trailing-space tolerant, same as ANTHROPIC_API_KEY above — the Railway UI
+        # has been observed to append one when pasting.
+        s.SEMANTIC_SCHOLAR_API_KEY = (
+            os.environ.get("SEMANTIC_SCHOLAR_API_KEY")
+            or os.environ.get("SEMANTIC_SCHOLAR_API_KEY ")
+            or ""
+        ).strip()
     if not s.SMTP_HOST:
         s.SMTP_HOST = os.environ.get("SMTP_HOST", "").strip()
     if not s.SMTP_USER:

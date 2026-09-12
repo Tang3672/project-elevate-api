@@ -1003,3 +1003,34 @@ def test_semantic_scholar_rate_limit_is_logged():
     block = src.split("async def search_semantic_scholar")[1][:1600]
     assert "logger.warning" in block, "Semantic Scholar failures are silent again"
     assert "rate limited" in block
+
+
+def test_semantic_scholar_sends_api_key_when_configured():
+    """
+    Semantic Scholar is heavily throttled on the shared pool (HTTP 429), which is why
+    it contributed zero papers while being advertised in the source plan. The key is
+    optional — the provider must still degrade gracefully without one.
+    """
+    import os
+    from app.services.source_aggregator_service import _semantic_scholar_headers
+
+    saved = os.environ.pop("SEMANTIC_SCHOLAR_API_KEY", None)
+    try:
+        assert "x-api-key" not in _semantic_scholar_headers(), (
+            "an x-api-key header is being sent with no key configured"
+        )
+        # Trailing space: the Railway UI has been seen to append one on paste.
+        os.environ["SEMANTIC_SCHOLAR_API_KEY"] = "probe-key-123 "
+        headers = _semantic_scholar_headers()
+        assert headers.get("x-api-key") == "probe-key-123", (
+            f"key not forwarded or not stripped: {headers.get('x-api-key')!r}"
+        )
+    finally:
+        os.environ.pop("SEMANTIC_SCHOLAR_API_KEY", None)
+        if saved is not None:
+            os.environ["SEMANTIC_SCHOLAR_API_KEY"] = saved
+
+    from app.core.config import Settings
+    assert "SEMANTIC_SCHOLAR_API_KEY" in Settings.model_fields, (
+        "the setting was removed, so the key can only be supplied via raw env"
+    )
