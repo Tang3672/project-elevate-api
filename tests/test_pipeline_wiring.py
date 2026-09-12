@@ -745,3 +745,88 @@ def test_scenario_panel_formats_money_like_the_market_cards():
             f"{value}: scenario panel renders {_fmt_usd(value)} but the market cards "
             f"render {_fmt(value)}"
         )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Top-down market sizing for research tools
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_research_tool_topdown_does_not_use_a_drug_market_anchor():
+    """
+    The TA anchors are therapeutic drug markets. A lab data-sync tool routed
+    through them fell back to the $15B "other" placeholder times default shares —
+    every factor a default — which is why the report called the result naive.
+    """
+    from app.services.market_sizing_triangulator import compute_top_down, _TA_MARKET_USD
+
+    research_tam, anchor, _ds, _ps, note = compute_top_down(
+        disease_name="behavioral neuroscience", therapeutic_area="neuroscience",
+        product_type="other", archetype="research_tool_non_clinical",
+    )
+    assert anchor != _TA_MARKET_USD["other"], (
+        "research tools are being sized off the drug-market placeholder again"
+    )
+    assert "research funding" in note.lower(), f"unexpected top-down basis: {note}"
+
+    # The clinical path must be untouched.
+    clinical_tam, clinical_anchor, _, _, clinical_note = compute_top_down(
+        disease_name="non-small cell lung cancer", therapeutic_area="oncology",
+        product_type="drug_small_molecule", prevalent_patients=230_000,
+    )
+    assert clinical_anchor == _TA_MARKET_USD["oncology"]
+    assert "research funding" not in clinical_note.lower()
+
+
+def test_research_tool_topdown_is_stepwise_ranged_and_sourced():
+    """
+    The top-down must carry the same rigour as the bottom-up: ordered steps, a
+    low/mid/high on every factor, a citable source, and an explicit flag on any
+    factor that is an assumption rather than a sourced figure.
+    """
+    from app.services.market_sizing_triangulator import compute_top_down_research_tool
+
+    lo, mid, hi, steps = compute_top_down_research_tool("neuroscience")
+    assert len(steps) >= 5, f"expected a multi-step derivation, got {len(steps)}"
+    assert lo < mid < hi, f"top-down range is not ordered: {lo} / {mid} / {hi}"
+
+    for st in steps:
+        assert st["lo"] <= st["mid"] <= st["hi"], f"step {st['step']} range unordered"
+        assert st.get("basis"), f"step {st['step']} has no stated basis"
+        assert st.get("source"), f"step {st['step']} has no source"
+        assert "assumed" in st, f"step {st['step']} does not declare assumed status"
+
+    sourced = [s for s in steps if not s["assumed"] and s.get("source_url")]
+    assert len(sourced) >= 3, "top-down should rest on at least three cited factors"
+    assert any(s["assumed"] for s in steps), (
+        "no factor is marked assumed — the software-share factor is not sourced and "
+        "must say so rather than presenting itself as grounded"
+    )
+
+
+def test_triangulation_reports_whether_bottom_up_falls_in_topdown_range():
+    """
+    A midpoint gap alone is a weak signal. Because the top-down is now a range, the
+    note must say whether the bottom-up TAM lands inside it — for Hublink,
+    $20.6M sits within $13.4M-$224.6M, which is corroboration, not disagreement.
+    """
+    from app.services.market_sizing_triangulator import run as tri_run
+
+    r = tri_run(disease_name="behavioral neuroscience", therapeutic_area="neuroscience",
+                product_type="other", bottom_up_sam_usd=12_375_000,
+                bottom_up_tam_usd=20_625_000, archetype="research_tool_non_clinical")
+
+    assert r.top_down_tam_lo_usd < r.top_down_tam_hi_usd
+    assert r.top_down_steps, "stepwise top-down did not reach the result object"
+    assert "INSIDE the top-down range" in r.cross_validation_note
+    assert "patient" not in r.cross_validation_note.split("Reconciled")[0].lower(), (
+        "clinical patient language is leaking into a research-tool cross-validation"
+    )
+
+
+def test_derivation_passes_archetype_to_the_triangulator():
+    """Without the archetype the research path never activates."""
+    deriv_src = (ROOT / "app" / "services" / "market_sizing_derivation_service.py").read_text()
+    assert "archetype=deriv.archetype" in deriv_src, (
+        "the derivation stopped passing its archetype, so research tools will be "
+        "sized off the therapeutic drug anchors again"
+    )

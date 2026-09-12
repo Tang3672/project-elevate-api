@@ -107,6 +107,15 @@ class TriangulationResult:
     # Treatment funnel summary
     treatment_funnel_summary: str = field(default="")
 
+    # Product archetype, and the stepwise top-down derivation when one was built.
+    # Research tools size top-down off federal research funding rather than a
+    # therapeutic drug anchor, and each factor carries its own range and source so
+    # the top-down can be shown as a waterfall beside the bottom-up.
+    archetype: str = field(default="")
+    top_down_steps: list = field(default_factory=list)
+    top_down_tam_lo_usd: float = field(default=0.0)
+    top_down_tam_hi_usd: float = field(default=0.0)
+
     def to_dict(self) -> dict:
         return {
             "bottom_up_sam_usd":             round(self.bottom_up_sam_usd),
@@ -123,6 +132,10 @@ class TriangulationResult:
             "underdiagnosis_rationale":      self.underdiagnosis_rationale,
             "treatment_funnel_summary":      self.treatment_funnel_summary,
             "cross_validation_note":         self.cross_validation_note,
+            "archetype":                     self.archetype,
+            "top_down_steps":                self.top_down_steps,
+            "top_down_tam_lo_usd":           round(self.top_down_tam_lo_usd),
+            "top_down_tam_hi_usd":           round(self.top_down_tam_hi_usd),
         }
 
 
@@ -182,11 +195,146 @@ def _disease_prevalence_share(
     return _TA_DEFAULT_SHARE.get(ta, 0.08)
 
 
+# ── Research-tool top-down: federal research funding, not a drug market ───────
+# The clinical anchors above are therapeutic drug markets. Pointing them at a lab
+# instrument or research-software product is a category error — a behavioural-lab
+# data tool does not compete for oncology drug spend — and it produced a top-down
+# figure built entirely from fallback defaults. Research tools are bought out of
+# federal grant budgets, so the anchor chain follows that money instead.
+#
+# Every factor carries a lo/mid/hi range and a citable source, matching the rigour
+# of the bottom-up buyer model rather than a single-point multiply. Factors that
+# are genuinely assumed are marked assumed=True so the report can say so.
+
+_FEDERAL_RESEARCH_FUNDING_USD = {
+    # NIH extramural (~80% of the NIH appropriation) plus the NSF research account.
+    # Range spans recent appropriation levels rather than asserting one exact year.
+    "lo": 40_000_000_000, "mid": 46_000_000_000, "hi": 52_000_000_000,
+    "source": "NIH Office of Budget + NSF Budget Requests (US federal extramural research)",
+    "source_url": "https://officeofbudget.od.nih.gov/",
+}
+
+# Field share of federal extramural research funding. NIH reports categorical
+# spending by research area (RCDC); these are the shares of the combined
+# NIH + NSF extramural pool attributable to each field.
+_FIELD_FUNDING_SHARE = {
+    "neuroscience":   (0.14, 0.19, 0.24),
+    "cns":            (0.14, 0.19, 0.24),
+    "oncology":       (0.12, 0.16, 0.20),
+    "immunology":     (0.08, 0.11, 0.14),
+    "genomics":       (0.05, 0.08, 0.11),
+    "cardiovascular": (0.05, 0.07, 0.09),
+    "metabolic":      (0.04, 0.06, 0.08),
+    "agronomy":       (0.02, 0.04, 0.06),
+    "engineering":    (0.05, 0.08, 0.11),
+    "other":          (0.03, 0.06, 0.09),
+}
+
+# Share of grant direct costs that buys equipment and supplies rather than
+# personnel. NIH modular budgets put personnel well above half of direct costs;
+# equipment + supplies is the line a research tool is actually purchased from.
+_EQUIPMENT_SUPPLIES_SHARE = (0.08, 0.12, 0.18)
+_EQUIPMENT_SOURCE_URL = "https://grants.nih.gov/grants/policy/nihgps/nihgps.pdf"
+
+# Share of the equipment + supplies line spent on software and data infrastructure
+# rather than reagents, consumables and bench hardware. This is the least grounded
+# factor in the chain and is reported as an explicit assumption with a wide band.
+_RESEARCH_SOFTWARE_SHARE = (0.03, 0.06, 0.10)
+
+
+def compute_top_down_research_tool(
+    field: str,
+    idea: str = "",
+) -> tuple[float, float, float, list[dict]]:
+    """Stepwise top-down TAM for a research tool, sized off federal research funding.
+
+    Returns (tam_lo, tam_mid, tam_hi, steps) where each step records its own
+    lo/mid/hi, unit, source and whether it is an assumption — so the top-down can
+    be rendered as a waterfall beside the bottom-up instead of a single number.
+    """
+    f = (field or "other").lower()
+    fund = _FEDERAL_RESEARCH_FUNDING_USD
+    fs_lo, fs_mid, fs_hi = _FIELD_FUNDING_SHARE.get(f, _FIELD_FUNDING_SHARE["other"])
+    eq_lo, eq_mid, eq_hi = _EQUIPMENT_SUPPLIES_SHARE
+    sw_lo, sw_mid, sw_hi = _RESEARCH_SOFTWARE_SHARE
+
+    steps = [
+        {
+            "step": 1,
+            "label": "US federal extramural research funding",
+            "lo": fund["lo"], "mid": fund["mid"], "hi": fund["hi"],
+            "unit": "USD/yr",
+            "basis": "NIH extramural (~80% of appropriation) plus the NSF research account. "
+                     "This is the pool research-tool purchases are made from.",
+            "source": fund["source"],
+            "source_url": fund["source_url"],
+            "assumed": False,
+        },
+        {
+            "step": 2,
+            "label": f"Share of that funding in {field or 'this field'}",
+            "lo": fs_lo, "mid": fs_mid, "hi": fs_hi,
+            "unit": "fraction",
+            "basis": "NIH reports categorical spending by research area (RCDC); the range "
+                     "spans reported variation across recent years.",
+            "source": "NIH RePORT categorical spending",
+            "source_url": "https://report.nih.gov/funding/categorical-spending",
+            "assumed": False,
+        },
+        {
+            "step": 3,
+            "label": "Equipment and supplies share of grant direct costs",
+            "lo": eq_lo, "mid": eq_mid, "hi": eq_hi,
+            "unit": "fraction",
+            "basis": "Personnel dominates direct costs; equipment and supplies is the budget "
+                     "line a research tool is purchased from.",
+            "source": "NIH Grants Policy Statement (budget composition)",
+            "source_url": _EQUIPMENT_SOURCE_URL,
+            "assumed": False,
+        },
+        {
+            "step": 4,
+            "label": "Software and data-infrastructure share of that line",
+            "lo": sw_lo, "mid": sw_mid, "hi": sw_hi,
+            "unit": "fraction",
+            "basis": "Fraction spent on software and data tooling rather than reagents, "
+                     "consumables and bench hardware. Least grounded factor in the chain — "
+                     "validate against institutional procurement data before relying on it.",
+            "source": "Assumed — no primary source; reported as an explicit assumption",
+            "source_url": "",
+            "assumed": True,
+        },
+    ]
+
+    tam_lo = fund["lo"] * fs_lo * eq_lo * sw_lo
+    tam_mid = fund["mid"] * fs_mid * eq_mid * sw_mid
+    tam_hi = fund["hi"] * fs_hi * eq_hi * sw_hi
+
+    steps.append({
+        "step": 5,
+        "label": "Top-down TAM (product of steps 1-4)",
+        "lo": tam_lo, "mid": tam_mid, "hi": tam_hi,
+        "unit": "USD/yr",
+        "basis": "Range is the product of the low and high ends; the midpoint is the "
+                 "planning base. Compare against the bottom-up TAM, not the SAM.",
+        "source": "Derived from steps 1-4",
+        "source_url": "",
+        "assumed": False,
+    })
+    return tam_lo, tam_mid, tam_hi, steps
+
+
+def _is_research_archetype(archetype: str, therapeutic_area: str = "") -> bool:
+    a = (archetype or "").lower()
+    return a.startswith(("research_tool", "research_infrastructure"))
+
+
 def compute_top_down(
     disease_name: str,
     therapeutic_area: str,
     product_type: str,
     prevalent_patients: Optional[int] = None,
+    archetype: str = "",
 ) -> tuple[float, float, float, float, str]:
     """
     Top-down TAM estimate:
@@ -197,6 +345,22 @@ def compute_top_down(
     """
     ta = therapeutic_area.lower()
     pt = product_type.lower()
+
+    # Research tools are bought from grant budgets, not from therapeutic drug spend.
+    # Routing them through the clinical anchors produced a figure assembled entirely
+    # from fallback defaults ($15B "other" placeholder x default shares).
+    if _is_research_archetype(archetype, ta):
+        _lo, _mid, _hi, _steps = compute_top_down_research_tool(ta, disease_name)
+        return (
+            _mid,
+            _FEDERAL_RESEARCH_FUNDING_USD["mid"],
+            _FIELD_FUNDING_SHARE.get(ta, _FIELD_FUNDING_SHARE["other"])[1],
+            _EQUIPMENT_SUPPLIES_SHARE[1] * _RESEARCH_SOFTWARE_SHARE[1],
+            "Top-down (research tool): US federal extramural research funding "
+            f"({_fmt(_FEDERAL_RESEARCH_FUNDING_USD['mid'])}) x field share x "
+            f"equipment/supplies share x software share = {_fmt(_mid)} "
+            f"(range {_fmt(_lo)}-{_fmt(_hi)})",
+        )
 
     ta_anchor = _TA_MARKET_USD.get(ta, _TA_MARKET_USD["other"])
     disease_share = _disease_prevalence_share(disease_name, ta, prevalent_patients)
@@ -219,6 +383,7 @@ def triangulate(
     product_type: str,
     bottom_up_tam_usd: Optional[float] = None,
     prevalent_patients: Optional[int] = None,
+    archetype: str = "",
     underdiagnosis_multiplier: float = 1.0,
     underdiagnosis_rationale: str = "",
     treatment_funnel_summary: str = "",
@@ -238,6 +403,12 @@ def triangulate(
       Top-down TAM is the Total Addressable Market (pre-funnel, broader).
       We expect top-down ≥ bottom-up; if bottom-up > top-down something is wrong.
     """
+    _td_steps: list = []
+    _td_lo = _td_hi = 0.0
+    if _is_research_archetype(archetype, therapeutic_area):
+        _td_lo, _td_mid, _td_hi, _td_steps = compute_top_down_research_tool(
+            therapeutic_area, disease_name)
+
     a = max(bottom_up_sam_usd, 1.0)
     b = max(top_down_tam_usd, 1.0)
 
@@ -282,8 +453,12 @@ def triangulate(
         direction = (
             f"Top-down TAM ({_fmt(b)}) is HIGHER than bottom-up SAM ({_fmt(a)}). "
             "This is expected — TAM is broader than post-funnel SAM. "
-            "The gap represents patients who exist but are not yet reachable "
-            "(undiagnosed, untreated, or out of label)."
+            + ("The gap represents labs that sit in the funded field but are not "
+               "reachable for this workflow (wrong instrumentation, no unmet need, "
+               "or no budget line in the current cycle)."
+               if _is_research_archetype(archetype, therapeutic_area) else
+               "The gap represents patients who exist but are not yet reachable "
+               "(undiagnosed, untreated, or out of label).")
         )
     else:
         direction = (
@@ -291,10 +466,32 @@ def triangulate(
             "This is the strongest possible validation signal."
         )
 
+    # Label the comparison for what it actually is. The bottom-up figure compared
+    # here is the TAM (same funnel stage as the top-down), and a research tool is
+    # sized off grant budgets rather than a patient population.
+    _is_research = _is_research_archetype(archetype, therapeutic_area)
+    bu_cmp = float(bottom_up_tam_usd) if (bottom_up_tam_usd and bottom_up_tam_usd > 0) else a
+    _bu_basis = "buyer population x spend" if _is_research else "patient-based"
+    _td_basis = "federal research funding chain" if _is_research else "industry anchor"
+    _td_range = f" (range {_fmt(_td_lo)}-{_fmt(_td_hi)})" if (_td_lo and _td_hi) else ""
+    if _td_lo and _td_hi and _td_lo <= bu_cmp <= _td_hi:
+        _within_note = (
+            "The bottom-up TAM falls INSIDE the top-down range, so the two methods "
+            "corroborate each other despite the midpoint gap."
+        )
+    elif _td_lo and _td_hi:
+        _within_note = (
+            "The bottom-up TAM falls OUTSIDE the top-down range - reconcile the "
+            "buyer population or the field/equipment share assumptions."
+        )
+    else:
+        _within_note = "Top-down is a single-point anchor; no range available to test containment."
+
     note = (
         f"{note_prefix} ({divergence:.0%} divergence)\n"
-        f"  Bottom-up SAM (patient-based): {_fmt(a)}\n"
-        f"  Top-down TAM (industry anchor): {_fmt(b)}\n"
+        f"  Bottom-up TAM ({_bu_basis}): {_fmt(bu_cmp)}\n"
+        f"  Top-down TAM ({_td_basis}): {_fmt(b)}{_td_range}\n"
+        f"  {_within_note}\n"
         f"  Reconciled estimate:            {_fmt(reconciled)} "
         f"  (bottom-up weight {w_bu:.0%} / top-down weight {w_td:.0%})\n"
         f"  {direction}"
@@ -326,6 +523,10 @@ def triangulate(
         reconciliation_weight_bottom_up=w_bu,
         reconciliation_weight_top_down=w_td,
         cross_validation_note=note,
+        archetype=archetype,
+        top_down_steps=_td_steps,
+        top_down_tam_lo_usd=_td_lo,
+        top_down_tam_hi_usd=_td_hi,
         underdiagnosis_multiplier=underdiagnosis_multiplier,
         underdiagnosis_rationale=underdiagnosis_rationale,
         treatment_funnel_summary=treatment_funnel_summary,
@@ -342,6 +543,7 @@ def run(
     underdiagnosis_multiplier: float = 1.0,
     underdiagnosis_rationale: str = "",
     treatment_funnel_summary: str = "",
+    archetype: str = "",
 ) -> TriangulationResult:
     """
     Entry point called by the orchestrator (Step 10).
@@ -352,6 +554,7 @@ def run(
         therapeutic_area=therapeutic_area,
         product_type=product_type,
         prevalent_patients=prevalent_patients,
+        archetype=archetype,
     )
     return triangulate(
         bottom_up_sam_usd=bottom_up_sam_usd,
@@ -361,6 +564,7 @@ def run(
         therapeutic_area=therapeutic_area,
         product_type=product_type,
         prevalent_patients=prevalent_patients,
+        archetype=archetype,
         underdiagnosis_multiplier=underdiagnosis_multiplier,
         underdiagnosis_rationale=underdiagnosis_rationale,
         treatment_funnel_summary=treatment_funnel_summary,

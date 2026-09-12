@@ -2446,6 +2446,8 @@ def generate_market_sizing_derivation(
             bottom_up_sam_usd=deriv.us_sam_usd,
             # compare like with like: the divergence flag is a TAM-vs-TAM check
             bottom_up_tam_usd=deriv.us_tam_usd,
+            # research tools size top-down off federal research funding, not drug spend
+            archetype=deriv.archetype,
             prevalent_patients=us_patient_population or None,
             underdiagnosis_multiplier=_ud_mult,
             underdiagnosis_rationale=_ud_rationale,
@@ -2500,11 +2502,34 @@ def format_derivation_for_prompt(deriv: MarketSizingDerivation) -> str:
             f"",
             f"CROSS-VALIDATION (Bottom-Up vs Top-Down Triangulation):",
             f"  Bottom-up TAM (buyer population × spend): {_fmt(deriv.us_tam_usd)}",
-            f"  Top-down TAM (TA anchor × disease share × product-type share): {_fmt(tri.top_down_tam_usd)}",
+            f"  Top-down TAM ({'federal research funding × field share × equipment share × software share' if getattr(tri, 'top_down_steps', None) else 'TA anchor × disease share × product-type share'}): {_fmt(tri.top_down_tam_usd)}"
+            + (f" (range {_fmt(tri.top_down_tam_lo_usd)}–{_fmt(tri.top_down_tam_hi_usd)})" if getattr(tri, 'top_down_tam_lo_usd', 0) else ""),
             f"  Divergence (TAM vs TAM, like-for-like): {tri.divergence_ratio:.0%} — "
             f"{'FLAGGED' if tri.divergence_flagged else 'within tolerance'}",
             f"  (For reference, bottom-up SAM after the reachability gate: {_fmt(tri.bottom_up_sam_usd)}. "
             f"Do NOT describe the divergence as SAM-vs-TAM — it compares the two TAM estimates.)",
+        ]
+        _td_steps = getattr(tri, "top_down_steps", None) or []
+        if _td_steps:
+            tri_lines.append("  TOP-DOWN DERIVATION (stepwise, same rigour as the bottom-up):")
+            for _st in _td_steps:
+                _u = _st.get("unit", "")
+                def _f(v, u=_u):
+                    return f"{v*100:.0f}%" if u == "fraction" else _fmt(v)
+                _flag = " [ASSUMED — no primary source]" if _st.get("assumed") else ""
+                tri_lines.append(
+                    f"    Step {_st.get('step')}: {_st.get('label','')} — "
+                    f"{_f(_st.get('lo',0))} / {_f(_st.get('mid',0))} / {_f(_st.get('hi',0))} "
+                    f"(low/mid/high){_flag}"
+                )
+                if _st.get("source"):
+                    _u2 = _st.get("source_url") or ""
+                    tri_lines.append(f"      Source: {_st['source']}" + (f" — {_u2}" if _u2 else ""))
+            tri_lines.append(
+                "    The top-down is a RANGE. State the range, not just the midpoint, and say "
+                "explicitly whether the bottom-up TAM falls inside it."
+            )
+        tri_lines += [
             f"  Reconciled estimate: {_fmt(tri.reconciled_sam_usd)} "
             f"(bottom-up weight {tri.reconciliation_weight_bottom_up:.0%} / "
             f"top-down weight {tri.reconciliation_weight_top_down:.0%})",
