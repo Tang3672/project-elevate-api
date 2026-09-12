@@ -861,3 +861,87 @@ def test_all_money_formatters_render_identically():
     assert rendered["market_sizing_triangulator"][0] == "$20.6M", (
         "millions reverted to zero-decimal rounding"
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Unwired-feature guard
+#
+# The most expensive bug class in this repo is a feature that is fully built and
+# thoroughly unit-tested but never called from production. market_sizing_orchestrator,
+# the A.2 axis lifts, H-07's check_price_vs_spend_band and collect_all_citations'
+# output were all instances — every one had passing tests while being dead or
+# discarded in the real pipeline.
+#
+# That makes "the tests pass" a weaker signal here than it looks. This guard pins
+# the modules currently in that state so a NEW one cannot join them quietly.
+# ─────────────────────────────────────────────────────────────────────────────
+
+KNOWN_UNWIRED_SERVICES = {
+    "distribution_builder",
+    "dynamic_prompt_generator",
+    "revenue_models",
+    "market_sizing",
+    "market_sizing_validator",
+    "portfolio_benchmark_service",   # deliberate: removed for privacy, see alignment_service
+    "segment_resolver",
+    "disease_knowledge",
+    "denominator_sources",
+}
+
+
+def _services_with_tests_but_no_production_importer() -> dict[str, int]:
+    """Service modules imported nowhere under app/ but covered by tests/."""
+    import re as _re
+    services_dir = ROOT / "app" / "services"
+    app_sources = [
+        p for p in (ROOT / "app").rglob("*.py")
+        if p.is_file()
+    ]
+    tests_dir = ROOT / "tests"
+    test_text = " ".join(
+        p.read_text(encoding="utf-8", errors="ignore")
+        for p in tests_dir.rglob("*.py") if p.is_file()
+    )
+
+    unwired: dict[str, int] = {}
+    for path in sorted(services_dir.glob("*.py")):
+        module = path.stem
+        if module == "__init__":
+            continue
+        import_re = _re.compile(
+            rf"(from\s+app\.services\.{module}\s+import"
+            rf"|from\s+app\.services\s+import\s+[^\n]*\b{module}\b"
+            rf"|import\s+app\.services\.{module}\b)"
+        )
+        imported = any(
+            import_re.search(p.read_text(encoding="utf-8", errors="ignore"))
+            for p in app_sources if p != path
+        )
+        if not imported and module in test_text:
+            unwired[module] = len(path.read_text(encoding="utf-8", errors="ignore").splitlines())
+    return unwired
+
+
+def test_no_new_service_becomes_tested_but_unwired():
+    """
+    A service module that tests exercise but no production code imports is the
+    signature of this repo's most costly bug class. If this fails, either wire the
+    module into the pipeline or add it to KNOWN_UNWIRED_SERVICES with a reason.
+    """
+    unwired = _services_with_tests_but_no_production_importer()
+    surprises = sorted(set(unwired) - KNOWN_UNWIRED_SERVICES)
+    detail = "\n".join(f"  app/services/{m}.py ({unwired[m]} lines)" for m in surprises)
+    assert not surprises, (
+        "service module(s) are tested but imported nowhere in app/:\n" + detail +
+        "\n\nTheir passing tests do not mean the feature runs. Wire it into the "
+        "pipeline, or add it to KNOWN_UNWIRED_SERVICES with the reason it is inert."
+    )
+
+
+def test_known_unwired_list_has_no_stale_entries():
+    """If a module gets wired up, drop it from the list so it keeps meaning something."""
+    unwired = _services_with_tests_but_no_production_importer()
+    stale = sorted(KNOWN_UNWIRED_SERVICES - set(unwired))
+    assert not stale, (
+        f"these are now imported by production and should leave KNOWN_UNWIRED_SERVICES: {stale}"
+    )
