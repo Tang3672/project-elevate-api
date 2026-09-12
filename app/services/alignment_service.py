@@ -2716,6 +2716,37 @@ When stating cost: "Phase 3 costs for comparable [drug class] programs have rang
     except Exception as _ep_e:
         logger.warning("Expert panel attach failed (non-fatal): %s", _ep_e)
 
+    # ── H-07: pricing reconciliation (price benchmark vs observed spend ceiling) ──
+    # The Step 2 rationale tells the reader "if the asking price exceeds the observed
+    # spend ceiling, this gap should appear in the reconciliation". check_price_vs_spend_band()
+    # implements that check but was never called from any production path, so the gap
+    # was never surfaced — a report could pair an $8,500/yr price benchmark with a
+    # $500/yr spend ceiling and say nothing.
+    try:
+        _ceiling = getattr(deriv, "spend_ceiling_annual_usd", None) if deriv else None
+        _panel_price = None
+        if panel_result is not None and not isinstance(panel_result, Exception):
+            _com = getattr(panel_result, "commercial", None)
+            _panel_price = getattr(_com, "annual_price_benchmark_usd", None) if _com else None
+        if _ceiling and _panel_price:
+            _gap = float(_panel_price) / float(_ceiling)
+            if _gap > 1.0:
+                _msg = (
+                    f"PRICING MISMATCH: the commercial panel benchmarks "
+                    f"${float(_panel_price):,.0f}/yr but the {getattr(deriv, 'buyer_persona', 'buyer')} "
+                    f"buyer's observed annual spend ceiling is ${float(_ceiling):,.0f}/yr "
+                    f"(source: {getattr(deriv, 'spend_source', 'buyer model')}). Gap is {_gap:.1f}x. "
+                    f"The market model is sized at the observed spend band, not the benchmark price — "
+                    f"validate willingness to pay before using either figure for fundraising."
+                )
+                _risks = list(getattr(report, "strategic_risks", None) or [])
+                if not any("PRICING MISMATCH" in str(r) for r in _risks):
+                    _risks.insert(0, _msg)
+                    report.strategic_risks = _risks
+                logger.info("H-07: pricing mismatch surfaced (%.1fx gap)", _gap)
+    except Exception as _h07_e:
+        logger.warning("H-07 pricing reconciliation failed (non-fatal): %s", _h07_e)
+
     # ── Part D: Market segmentation tree (spec D.1–D.7) ─────────────────────────
     # Only built for LIFE_SCIENCES_RESEARCH domain — the funnel template is
     # specific to academic buyer models. Clinical/pharma products use the

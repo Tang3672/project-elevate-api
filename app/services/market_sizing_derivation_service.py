@@ -113,6 +113,13 @@ class MarketSizingDerivation:
     edgar_calibration_note:     Optional[str]  = None   # human-readable explanation
     # Triangulation result (bottom-up vs top-down cross-validation)
     triangulation:              Optional[object] = None
+    # H-07: the buyer's observed annual spend ceiling, carried out of the buyer
+    # model so check_price_vs_spend_band() can compare it against the price the
+    # commercial panel benchmarks. Without this the reconciliation the Step 2
+    # rationale promises has no ceiling to reconcile against.
+    spend_ceiling_annual_usd:   Optional[float] = None
+    buyer_persona:              Optional[str]   = None
+    spend_source:               Optional[str]   = None
 
     def model_dump(self, mode: str = "python") -> dict:
         """Serialize to dict, compatible with the pydantic-style call in alignment_service."""
@@ -2084,7 +2091,10 @@ def _derive_research_tool_formula(
                 f"Buyer is an academic PI, not a hospital enterprise. "
                 f"Population = {domain_label}. "
                 f"Range: {int(pop_lo):,} (conservative) to {int(pop_hi):,} (optimistic). "
-                f"Source: {pop_src}."
+                # pop_src is user-supplied and often already ends in a period —
+                # appending unconditionally produced "...for fundraising.."
+                f"Source: {pop_src.rstrip()}"
+                + ("" if pop_src.rstrip().endswith((".", "!", "?")) else ".")
             ),
             data_source=pop_src,
             assumptions=[
@@ -2233,6 +2243,11 @@ def _derive_research_tool_formula(
             {"ref": "SBIR.gov", "title": "Federal SBIR/STTR awards to research tool companies", "url": "https://www.sbir.gov/"},
         ],
         monte_carlo=_mc,
+        # H-07: carried out so the pricing reconciliation the Step 2 rationale
+        # promises can actually be computed against the commercial panel's price.
+        spend_ceiling_annual_usd=float(sp_hi),
+        buyer_persona="academic PI",
+        spend_source=sp_src,
     )
 
 

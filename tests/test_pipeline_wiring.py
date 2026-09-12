@@ -604,3 +604,63 @@ def test_prompt_does_not_forbid_the_source_marker_format():
         "the citation-style instruction contradicts the [SOURCE:] tagging rules in "
         "knowledge_retriever.py / disease_knowledge.py / pubmed_service.py again"
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# H-07 pricing reconciliation — was fully implemented, tested, and never called
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_h07_pricing_reconciliation_is_wired_into_production():
+    """
+    check_price_vs_spend_band() implements the reconciliation that the Step 2
+    rationale promises the reader ("if the asking price exceeds the observed spend
+    ceiling, this gap should appear in the reconciliation"), but it was referenced
+    only by its own definition and its unit tests. A shipped report paired an
+    $8,500/yr price benchmark with a $500/yr spend ceiling and said nothing.
+    """
+    src = ALIGNMENT.read_text()
+    assert "PRICING MISMATCH" in src, (
+        "the H-07 pricing reconciliation is no longer wired into alignment_service — "
+        "a price/spend gap will ship unflagged again"
+    )
+    assert "spend_ceiling_annual_usd" in src, (
+        "alignment_service no longer reads the buyer spend ceiling off the derivation"
+    )
+
+
+def test_derivation_exposes_spend_ceiling_reflecting_user_overrides():
+    """
+    The ceiling must be the PI's overridden band, not the buyer-model default.
+    The default academic-lab ceiling is $10,000/yr; the Hublink intake overrode it
+    to $500/yr. Using the default would make an $8,500/yr benchmark look fine.
+    """
+    from app.services.market_sizing_derivation_service import generate_market_sizing_derivation
+    d = generate_market_sizing_derivation(
+        idea="Hublink automates SD-card-to-cloud sync for behavioral neurotech labs",
+        product_type="other", disease_name="", therapeutic_area="neuroscience",
+        us_patient_population=0, sub_expert_id="research_tool_non_clinical",
+        user_params={"seg.target_lab_count": "30,000-80,000 qualifying labs",
+                     "price.annual_per_lab": "$250-$500/yr per lab"},
+    )
+    ceiling = getattr(d, "spend_ceiling_annual_usd", None)
+    assert ceiling == 500.0, (
+        f"spend ceiling is {ceiling}, expected the PI-overridden 500.0 — if this is "
+        "10000.0 the override stopped propagating and H-07 will not fire"
+    )
+    assert 8500 / ceiling > 1.0, "the Hublink price/spend gap no longer trips H-07"
+
+
+def test_step1_rationale_has_no_double_period():
+    """
+    The Step 1 rationale appended '.' to a user-supplied source string that already
+    ended in one, producing '...before using for fundraising..'.
+    """
+    from app.services.market_sizing_derivation_service import generate_market_sizing_derivation
+    d = generate_market_sizing_derivation(
+        idea="behavioral neurotech cloud sync", product_type="other", disease_name="",
+        therapeutic_area="neuroscience", us_patient_population=0,
+        sub_expert_id="research_tool_non_clinical",
+        user_params={"seg.target_lab_count": "30,000-80,000 qualifying labs."},
+    )
+    text = getattr(d.steps[0], "rationale", "") or getattr(d.steps[0], "explanation", "")
+    assert ".." not in text, f"double period in Step 1 rationale: ...{text[-70:]!r}"
