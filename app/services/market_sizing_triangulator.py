@@ -207,11 +207,13 @@ def _disease_prevalence_share(
 # are genuinely assumed are marked assumed=True so the report can say so.
 
 _FEDERAL_RESEARCH_FUNDING_USD = {
-    # NIH extramural (~80% of the NIH appropriation) plus the NSF research account.
-    # Range spans recent appropriation levels rather than asserting one exact year.
-    "lo": 40_000_000_000, "mid": 46_000_000_000, "hi": 52_000_000_000,
-    "source": "NIH Office of Budget + NSF Budget Requests (US federal extramural research)",
-    "source_url": "https://officeofbudget.od.nih.gov/",
+    # Checked against FY2025 appropriations: NIH program level ~$47.0B with ~82-83%
+    # going to extramural research (~$39B), plus NSF Research & Related Activities
+    # at $7.53B — roughly $46.5B combined. The band is kept wide because the figure
+    # moves with each appropriation cycle and continuing resolutions.
+    "lo": 42_000_000_000, "mid": 47_000_000_000, "hi": 52_000_000_000,
+    "source": "NIH FY2025 appropriation (~83% extramural) + NSF FY2025 Research & Related Activities ($7.53B)",
+    "source_url": "https://www.nih.gov/about-nih/organization/budget",
 }
 
 # Field share of federal extramural research funding. NIH reports categorical
@@ -275,9 +277,10 @@ def compute_top_down_research_tool(
             "label": f"Share of that funding in {field or 'this field'}",
             "lo": fs_lo, "mid": fs_mid, "hi": fs_hi,
             "unit": "fraction",
-            "basis": "NIH reports categorical spending by research area (RCDC); the range "
-                     "spans reported variation across recent years.",
-            "source": "NIH RePORT categorical spending",
+            "basis": "NIH reports categorical spending by research area (RCDC). This share is "
+                     "approximate: the RCDC table is the authoritative figure and should be "
+                     "read directly for the field in question before the number is quoted.",
+            "source": "NIH RePORT categorical spending (approximate — verify against the RCDC table)",
             "source_url": "https://report.nih.gov/funding/categorical-spending",
             "assumed": False,
         },
