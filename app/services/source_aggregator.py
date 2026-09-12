@@ -312,6 +312,17 @@ def collect_all_citations(
             url = shortage.get("url", "")
             add(f"ASHP Drug Shortage: {drug}"[:100], url, category="market_sizing")
 
+        # Industry news (STAT, FiercePharma, BioPharma Dive, vendor announcements)
+        for item in (aggregated_sources.get("news") or [])[:6]:
+            title = item.get("title", "")[:100]
+            outlet = item.get("source", "")
+            date = item.get("date", "")
+            url = item.get("url", "")
+            label = f"{outlet}: {title}" if outlet else title
+            if date:
+                label += f" ({date})"
+            add(label[:120], url, category="industry_news")
+
     # ── 11. FDA-approved drugs for this indication (openFDA / DailyMed) ───────
     # From get_regulatory_precedent() — drugs listed in FDA drug label database
     # for this indication, with DailyMed URLs for label verification.

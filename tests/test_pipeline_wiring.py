@@ -455,3 +455,152 @@ def test_market_percentages_use_consistent_precision():
         "the canonical formula line no longer uses :g — it will disagree with the "
         "derivation steps again (22.5% vs 22%)"
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Bibliography size floor + inline citation linkage
+#
+# Measured end-to-end against live fetchers for a non-clinical research-tool idea:
+# 42 sources. These tests lock in the wiring that produces that number, and the
+# inline [N] markers the frontend's citation linker turns into #src-N anchors.
+# ─────────────────────────────────────────────────────────────────────────────
+
+MIN_EXPECTED_SOURCES = 30
+
+
+def _realistic_pipeline_payloads():
+    """Payload volumes matching what the live fetchers actually return."""
+    return (
+        {  # funding_intel
+            "sbir_awards": [
+                {"project_title": f"Telemetry platform {i}", "company": f"NeuroCo{i}",
+                 "fiscal_year": 2025, "url": f"https://reporter.nih.gov/project-details/108{i:05d}"}
+                for i in range(8)
+            ],
+            "edgar_signals": [],
+            "new_entrants": [],
+            "preprints": {"recent_titles": [
+                {"title": f"Preprint {i}", "authors": "Lee A", "server": "biorxiv",
+                 "doi": f"10.1101/2026.0{i}.01", "url": f"https://doi.org/10.1101/2026.0{i}.01"}
+                for i in range(4)
+            ]},
+        },
+        {  # aggregated_sources
+            "papers": [{"title": f"Paper {i}", "source": "CrossRef",
+                        "url": f"https://pubmed.ncbi.nlm.nih.gov/{3000000+i}/"} for i in range(12)],
+            "nih_grants": [{"title": f"Grant {i}", "project_num": f"R01NS{100+i}", "pi_name": f"Dr {i}",
+                            "url": f"https://reporter.nih.gov/project-details/R01NS{100+i}"} for i in range(5)],
+            "gbd": [{"title": "Neuro disorders GBD 2021", "url": "https://vizhub.healthdata.org/gbd-results/"}],
+            "news": [{"title": f"Industry item {i}", "source": "STAT", "date": "2026-01-01",
+                      "url": f"https://www.statnews.com/2026/01/0{i}/item"} for i in range(6)],
+            "drug_shortage": [{"drug": "n/a", "url": "https://www.ashp.org/drug-shortages/current-shortages"}],
+            "cms_pricing": [], "sec_filings": [],
+        },
+    )
+
+
+def test_bibliography_clears_minimum_source_floor():
+    """
+    A research-tool report must ship a substantive bibliography. If this drops,
+    a harvesting block stopped firing or a consumer started discarding entries.
+    """
+    from app.services.source_aggregator import collect_all_citations
+    funding_intel, aggregated = _realistic_pipeline_payloads()
+    cites = collect_all_citations(
+        {"sources": [], "disease_intelligence": {"data_points": []},
+         "market_sizing": {"steps": []}, "strategic_playbook": []},
+        patent_landscape=None, funding_intel=funding_intel,
+        aggregated_sources=aggregated, regulatory_precedent=None,
+        competitive_intelligence=None,
+    )
+    assert len(cites) >= MIN_EXPECTED_SOURCES, (
+        f"bibliography fell to {len(cites)} sources (floor {MIN_EXPECTED_SOURCES}). "
+        "A harvesting block stopped firing or entries are being dropped."
+    )
+    assert all(c.get("url") for c in cites), "a harvested citation has no URL"
+    numbers = [c["number"] for c in cites]
+    assert numbers == list(range(1, len(numbers) + 1)), "citation numbering is not contiguous"
+
+
+def test_industry_news_is_harvested():
+    """news items carry URLs and were previously dropped on the floor."""
+    from app.services.source_aggregator import collect_all_citations
+    cites = collect_all_citations(
+        {"sources": []},
+        aggregated_sources={"news": [
+            {"title": "Bruker Neuroscience Summit", "source": "Bruker", "date": "2026-01-01",
+             "url": "https://www.bruker.com/news/summit-2026"}]},
+    )
+    assert any("bruker.com" in c.get("url", "") for c in cites), (
+        "aggregated_sources.news is no longer harvested into the bibliography"
+    )
+
+
+def test_inline_markers_resolve_to_final_bibliography_numbers():
+    """
+    Claude tags claims with [SOURCE: name | url]; those must become [N] matching
+    the FINAL bibliography numbering, because generate_pi_report renumbers after
+    merging the pipeline sources. A marker with no URL must degrade to plain text
+    rather than leave a [N] pointing at nothing.
+    """
+    from app.models.alignment import PIReport
+    from app.services.source_formatter import apply_inline_citations
+
+    report = PIReport(
+        product_type="other",
+        idea_submitted="research tool",
+        executive_summary=(
+            "Known source [SOURCE: Lopes 2015 | https://pubmed.ncbi.nlm.nih.gov/26834641/]. "
+            "New source [SOURCE: Mystery | https://example.org/new]. "
+            "No url [SOURCE: Internal estimate]."
+        ),
+    )
+    report.recommended_next_steps = [
+        "Nested field [SOURCE: NIH RePORTER | https://reporter.nih.gov/]."
+    ]
+    sources = [
+        {"number": 1, "name": "Filler", "url": "https://example.com/filler"},
+        {"number": 2, "name": "Lopes 2015", "url": "https://pubmed.ncbi.nlm.nih.gov/26834641/"},
+    ]
+    stats = apply_inline_citations(report, sources)
+
+    assert "[2]" in report.executive_summary, "known URL did not resolve to its bibliography number"
+    assert "[SOURCE:" not in report.executive_summary, "raw marker left in the report body"
+    assert "Internal estimate" in report.executive_summary and "[3]" not in report.executive_summary.split("No url")[1], (
+        "a URL-less marker produced a dangling citation number"
+    )
+    assert "[SOURCE:" not in report.recommended_next_steps[0], "nested list field was not walked"
+    assert stats["appended"] >= 1, "a newly cited URL was not appended to the bibliography"
+
+    numbers = {s["number"] for s in sources}
+    import re as _re
+    refs = {int(n) for n in _re.findall(r"\[(\d+)\]",
+            report.executive_summary + " " + report.recommended_next_steps[0])}
+    assert refs <= numbers, f"inline refs {sorted(refs - numbers)} have no bibliography entry"
+
+
+def test_generate_pi_report_resolves_inline_citations():
+    """The inline pass must run, and must run AFTER the bibliography is final."""
+    src = ALIGNMENT.read_text()
+    assert "apply_inline_citations" in src, (
+        "generate_pi_report no longer resolves [SOURCE:] markers — the report body "
+        "will keep raw markers and the frontend [N] linker will have nothing to link"
+    )
+    assert src.index("report.sources = _raw_sources") < src.index("apply_inline_citations(report"), (
+        "inline citations must be resolved after the final bibliography is assigned, "
+        "otherwise [N] numbers will not match the merged numbering"
+    )
+
+
+def test_prompt_does_not_forbid_the_source_marker_format():
+    """
+    knowledge_retriever, disease_knowledge and pubmed_service all instruct Claude to
+    tag claims with [SOURCE: name | url]. alignment_service used to say "Do NOT use
+    [SOURCE: x] format" in the same prompt, so the markers were never emitted and
+    narrative claims contributed nothing to the bibliography.
+    """
+    src = ALIGNMENT.read_text()
+    assert "Do NOT use [SOURCE: x] format" not in src, (
+        "the citation-style instruction contradicts the [SOURCE:] tagging rules in "
+        "knowledge_retriever.py / disease_knowledge.py / pubmed_service.py again"
+    )

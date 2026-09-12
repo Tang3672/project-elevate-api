@@ -606,6 +606,19 @@ async def generate_pi_report(
             len(_raw_sources), _structured_count, len(_raw_sources) - _structured_count,
         )
 
+        # Resolve inline [SOURCE: ...] markers against the FINAL numbering. This has
+        # to run after the merge above: extract_and_format_sources() numbers markers
+        # on a detached dict that generate_pi_report throws away, so without this the
+        # report body keeps raw markers and the frontend's [N] -> #src-N linker has
+        # nothing to link. Mutates report in place and may append newly cited URLs.
+        from app.services.source_formatter import apply_inline_citations
+        _cit = apply_inline_citations(report, report.sources)
+        if any(_cit.values()):
+            logger.info(
+                "Inline citations: %d resolved, %d appended, %d unlinked (bibliography now %d)",
+                _cit["resolved"], _cit["appended"], _cit["unlinked"], len(report.sources),
+            )
+
     except Exception as e:
         logger.warning(f"Source building failed: {e}")
 
@@ -1459,7 +1472,12 @@ CITATION STYLE: Write like a Nature Medicine paper or NIH grant application. Eve
 - "A 2019 CDC Threats Report documented 2.8 million AMR infections annually in the U.S., with 35,000 deaths."
 - "The pivotal SOLO I/II trials (Eckmann et al., NEJM 2015, PMID 25853744) demonstrated non-inferiority of oritavancin vs vancomycin for ABSSSI."
 - "Under 21 CFR 314.500, FDA accelerated approval allows approval based on a surrogate endpoint reasonably likely to predict clinical benefit."
-Do NOT separate citations from claims. Do NOT use [SOURCE: x] format. Embed the citation in the sentence itself.
+Do NOT separate citations from claims — name the source in the sentence itself.
+Then, in addition, append a machine-readable tag [SOURCE: publisher | url] immediately after any
+statistic or named finding that came from the retrieved knowledge above, so it can be linked to the
+bibliography. The tag supplements the prose attribution; it never replaces it. Example:
+  "A 2019 CDC Threats Report documented 2.8 million AMR infections annually [SOURCE: CDC AR Threats 2019 | https://www.cdc.gov/antimicrobial-resistance/data-research/threats/index.html]."
+Only tag claims whose URL appears verbatim in the retrieved knowledge — never invent one.
 
 TIMELINE AND COST RULES - CRITICAL:
 Never state development timelines or costs without citing a real comparable drug program.
