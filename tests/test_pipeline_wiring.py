@@ -830,3 +830,34 @@ def test_derivation_passes_archetype_to_the_triangulator():
         "the derivation stopped passing its archetype, so research tools will be "
         "sized off the therapeutic drug anchors again"
     )
+
+
+def test_all_money_formatters_render_identically():
+    """
+    Six modules each define their own USD formatter. Four rounded millions to zero
+    decimals while two used one, so the cross-validation note said "$21M" for the
+    same TAM the market cards rendered as "$20.6M". Same class as the 22.5%/22%
+    mismatch: one quantity, two renderings, in one report.
+    """
+    import importlib
+    modules = [
+        "market_sizing_derivation_service", "market_provenance_service",
+        "market_sizing_triangulator", "market_sizing_engine",
+        "market_sizing", "market_sizing_validator",
+    ]
+    probes = [20_625_000, 12_375_000, 2_784_375, 157_500_000]
+    rendered = {}
+    for name in modules:
+        mod = importlib.import_module(f"app.services.{name}")
+        fmt = getattr(mod, "_fmt", None) or getattr(mod, "_fmt_usd", None)
+        assert fmt, f"{name} no longer exposes a money formatter"
+        rendered[name] = tuple(fmt(v) for v in probes)
+
+    distinct = set(rendered.values())
+    assert len(distinct) == 1, (
+        "money formatters disagree, so one figure will appear two ways in a single "
+        f"report:\n" + "\n".join(f"  {k}: {v}" for k, v in sorted(rendered.items()))
+    )
+    assert rendered["market_sizing_triangulator"][0] == "$20.6M", (
+        "millions reverted to zero-decimal rounding"
+    )

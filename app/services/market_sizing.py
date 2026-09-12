@@ -381,5 +381,5 @@ def _fmt(usd: float) -> str:
     if usd >= 1e9:
         return f"${usd / 1e9:.1f}B"
     if usd >= 1e6:
-        return f"${usd / 1e6:.0f}M"
+        return f"${usd / 1e6:.1f}M"
     return f"${usd:,.0f}"
