@@ -131,7 +131,26 @@ def _confidence_for(source_url: str, data_source: str, assumptions: list[str]) -
     modeled = any(k in ds for k in ("assumption", "model", "estimate", "derived", "proxy")) \
         or len(assumptions or []) >= 2
 
-    if any(root in url for root in _AUTHORITATIVE):
+    # A citation only earns the authoritative bonus if the value actually came from
+    # that source. When the data_source says the lookup failed or was never run, the
+    # URL is where the number *should* have come from, not where it did — crediting
+    # it scored an unverified PI estimate at 70% purely because the text mentioned
+    # reporter.nih.gov, ranking it above every value derived from it.
+    unverified = any(k in ds for k in (
+        "insufficient results", "could not be verified", "could not be independently",
+        "not executed", "unverified", "pending verification", "not been verified",
+        "insufficient to verify", "unable to verify",
+    ))
+    # Self-reported inputs are the PI's own estimate. An attached authoritative URL
+    # is context for where it could be checked, not the provenance of the number.
+    self_reported = any(k in ds for k in (
+        "pi intake", "pi-provided", "pi provided", "intake answer",
+        "primary pi interview", "self-reported", "user-provided",
+    ))
+
+    if unverified or self_reported:
+        base = 0.55
+    elif any(root in url for root in _AUTHORITATIVE):
         base = 0.90
     elif url.startswith("http"):
         base = 0.75
@@ -143,8 +162,11 @@ def _confidence_for(source_url: str, data_source: str, assumptions: list[str]) -
 
 
 def _fmt_usd(v: float) -> str:
+    # Millions carry one decimal to match market_sizing_derivation_service._fmt.
+    # With :.0f the scenario panel rendered the same SOM as "$3M" while the market
+    # cards said "$2.8M", so one report showed two values for one number.
     if v >= 1e9:  return f"${v/1e9:.1f}B"
-    if v >= 1e6:  return f"${v/1e6:.0f}M"
+    if v >= 1e6:  return f"${v/1e6:.1f}M"
     if v >= 1e4:  return f"${v/1e3:.0f}K"
     return f"${v:,.0f}"
 

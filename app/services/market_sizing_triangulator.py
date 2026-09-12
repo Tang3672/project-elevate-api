@@ -217,6 +217,7 @@ def triangulate(
     disease_name: str,
     therapeutic_area: str,
     product_type: str,
+    bottom_up_tam_usd: Optional[float] = None,
     prevalent_patients: Optional[int] = None,
     underdiagnosis_multiplier: float = 1.0,
     underdiagnosis_rationale: str = "",
@@ -240,7 +241,17 @@ def triangulate(
     a = max(bottom_up_sam_usd, 1.0)
     b = max(top_down_tam_usd, 1.0)
 
-    divergence = abs(a - b) / max(a, b)
+    # Divergence must compare the SAME funnel stage. Measuring bottom-up SAM
+    # against top-down TAM builds the SAM fraction into the "disagreement": with a
+    # 60% SAM fraction two models that agree perfectly still score 40% divergence,
+    # above the 25% threshold, so the check could never pass. Compare TAM to TAM
+    # whenever the bottom-up TAM is available; fall back to the old behaviour only
+    # when it is not.
+    if bottom_up_tam_usd and bottom_up_tam_usd > 0:
+        _cmp_a = max(float(bottom_up_tam_usd), 1.0)
+        divergence = abs(_cmp_a - b) / max(_cmp_a, b)
+    else:
+        divergence = abs(a - b) / max(a, b)
     flagged = divergence > DIVERGENCE_THRESHOLD
 
     # Reconciliation weights: bottom-up is always more trusted (built from real
@@ -326,6 +337,7 @@ def run(
     therapeutic_area: str,
     product_type: str,
     bottom_up_sam_usd: float,
+    bottom_up_tam_usd: Optional[float] = None,
     prevalent_patients: Optional[int] = None,
     underdiagnosis_multiplier: float = 1.0,
     underdiagnosis_rationale: str = "",
@@ -343,6 +355,7 @@ def run(
     )
     return triangulate(
         bottom_up_sam_usd=bottom_up_sam_usd,
+        bottom_up_tam_usd=bottom_up_tam_usd,
         top_down_tam_usd=top_down_tam,
         disease_name=disease_name,
         therapeutic_area=therapeutic_area,

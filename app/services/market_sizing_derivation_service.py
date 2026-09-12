@@ -113,6 +113,13 @@ class MarketSizingDerivation:
     edgar_calibration_note:     Optional[str]  = None   # human-readable explanation
     # Triangulation result (bottom-up vs top-down cross-validation)
     triangulation:              Optional[object] = None
+    # H-07: the buyer's observed annual spend ceiling, carried out of the buyer
+    # model so check_price_vs_spend_band() can compare it against the price the
+    # commercial panel benchmarks. Without this the reconciliation the Step 2
+    # rationale promises has no ceiling to reconcile against.
+    spend_ceiling_annual_usd:   Optional[float] = None
+    buyer_persona:              Optional[str]   = None
+    spend_source:               Optional[str]   = None
 
     def model_dump(self, mode: str = "python") -> dict:
         """Serialize to dict, compatible with the pydantic-style call in alignment_service."""
@@ -2084,7 +2091,10 @@ def _derive_research_tool_formula(
                 f"Buyer is an academic PI, not a hospital enterprise. "
                 f"Population = {domain_label}. "
                 f"Range: {int(pop_lo):,} (conservative) to {int(pop_hi):,} (optimistic). "
-                f"Source: {pop_src}."
+                # pop_src is user-supplied and often already ends in a period —
+                # appending unconditionally produced "...for fundraising.."
+                f"Source: {pop_src.rstrip()}"
+                + ("" if pop_src.rstrip().endswith((".", "!", "?")) else ".")
             ),
             data_source=pop_src,
             assumptions=[
@@ -2136,7 +2146,7 @@ def _derive_research_tool_formula(
         ),
         DerivationStep(
             step_num=4,
-            title=f"Step 4 — Serviceable Addressable Market (SAM = {sam_mid:.0%} of TAM, midpoint)",
+            title=f"Step 4 — Serviceable Addressable Market (SAM = {sam_mid*100:g}% of TAM, midpoint)",
             formula=(
                 f"SAM = {_fmt(tam)} × [{_sam_lo:.0%}–{_sam_hi:.0%}] early-adopter fraction "
                 f"= {_fmt(tam * _sam_lo)}–{_fmt(tam * _sam_hi)}; midpoint {_fmt(sam)}"
@@ -2150,12 +2160,12 @@ def _derive_research_tool_formula(
                 f"fraction of eligible labs expected to adopt within {HORIZON_YEARS} years given the product's "
                 f"workflow fit and switching friction. "
                 + (f"Derived from intake answer: {_user_overrides['sam']}. " if _user_overrides.get("sam") else "")
-                + f"Midpoint {sam_mid:.0%} used as the planning base. "
+                + f"Midpoint {sam_mid*100:g}% used as the planning base. "
                 f"This is the second-largest source of uncertainty in the model — see sensitivity ranking."
             ),
             data_source=_user_overrides.get("sam") or "Assumed (method=assumed); target: structured PI interviews n≥30",
             assumptions=[
-                f"Early-adopter fraction range: {_sam_lo:.0%}–{_sam_hi:.0%} (midpoint {sam_mid:.0%})",
+                f"Early-adopter fraction range: {_sam_lo:.0%}–{_sam_hi:.0%} (midpoint {sam_mid*100:g}%)",
                 "Validate with structured interview data before fundraising",
             ],
         ),
@@ -2174,12 +2184,12 @@ def _derive_research_tool_formula(
                 f"{HORIZON_YEARS}-yr penetration [{_som_lo:.0%}–{_som_hi:.0%}] of SAM assumes: (1) 12–18 month sales cycle per lab, "
                 f"(2) referral-driven growth from early adopters, (3) pricing at or below observed spend band. "
                 + (f"Adoption pathway answer adjusts the penetration rate range. " if _user_overrides.get("som") else "")
-                + f"Midpoint {som_mid:.0%} used as planning base. "
+                + f"Midpoint {som_mid*100:g}% used as planning base. "
                 f"This is the largest single source of uncertainty in the model — see sensitivity ranking."
             ),
             data_source="Derived from adoption pathway answer" if _user_overrides.get("som") else f"Assumed (method=assumed); target: comparable research-tool SaaS launch benchmarks",
             assumptions=[
-                f"5-yr penetration range: {_som_lo:.0%}–{_som_hi:.0%} of SAM (midpoint {som_mid:.0%})",
+                f"5-yr penetration range: {_som_lo:.0%}–{_som_hi:.0%} of SAM (midpoint {som_mid*100:g}%)",
                 "No Bass diffusion calibration yet; ranges from early-stage SaaS benchmarks",
             ],
         ),
@@ -2215,8 +2225,8 @@ def _derive_research_tool_formula(
             "Buyer = academic PI on grant cycle (not hospital enterprise)",
             f"Lab population: {int(pop_lo):,}–{int(pop_hi):,} eligible labs ({pop_src})",
             f"Annualised spend: ${sp_lo:,.0f}–${sp_hi:,.0f}/lab/yr ({sp_src})",
-            f"SAM adoption rate: {_sam_lo:.0%}–{_sam_hi:.0%} (midpoint {sam_mid:.0%})" + (" — from workflow type" if _user_overrides.get("sam") else " — assumed"),
-            f"SOM 5-yr penetration: {_som_lo:.0%}–{_som_hi:.0%} (midpoint {som_mid:.0%})" + (" — from adoption pathway" if _user_overrides.get("som") else " — assumed"),
+            f"SAM adoption rate: {_sam_lo:.0%}–{_sam_hi:.0%} (midpoint {sam_mid*100:g}%)" + (" — from workflow type" if _user_overrides.get("sam") else " — assumed"),
+            f"SOM 5-yr penetration: {_som_lo:.0%}–{_som_hi:.0%} (midpoint {som_mid*100:g}%)" + (" — from adoption pathway" if _user_overrides.get("som") else " — assumed"),
         ],
         confidence_note=(
             f"Lab count unverified (NIH RePORTER queries, not executed); "
@@ -2233,6 +2243,11 @@ def _derive_research_tool_formula(
             {"ref": "SBIR.gov", "title": "Federal SBIR/STTR awards to research tool companies", "url": "https://www.sbir.gov/"},
         ],
         monte_carlo=_mc,
+        # H-07: carried out so the pricing reconciliation the Step 2 rationale
+        # promises can actually be computed against the commercial panel's price.
+        spend_ceiling_annual_usd=float(sp_hi),
+        buyer_persona="academic PI",
+        spend_source=sp_src,
     )
 
 
@@ -2429,6 +2444,8 @@ def generate_market_sizing_derivation(
             therapeutic_area=_engine_ta,
             product_type=product_type,
             bottom_up_sam_usd=deriv.us_sam_usd,
+            # compare like with like: the divergence flag is a TAM-vs-TAM check
+            bottom_up_tam_usd=deriv.us_tam_usd,
             prevalent_patients=us_patient_population or None,
             underdiagnosis_multiplier=_ud_mult,
             underdiagnosis_rationale=_ud_rationale,
@@ -2482,9 +2499,12 @@ def format_derivation_for_prompt(deriv: MarketSizingDerivation) -> str:
         tri_lines = [
             f"",
             f"CROSS-VALIDATION (Bottom-Up vs Top-Down Triangulation):",
-            f"  Bottom-up SAM (patient/buyer-based): {_fmt(tri.bottom_up_sam_usd)}",
+            f"  Bottom-up TAM (buyer population × spend): {_fmt(deriv.us_tam_usd)}",
             f"  Top-down TAM (TA anchor × disease share × product-type share): {_fmt(tri.top_down_tam_usd)}",
-            f"  Divergence: {tri.divergence_ratio:.0%} — {'FLAGGED' if tri.divergence_flagged else 'within tolerance'}",
+            f"  Divergence (TAM vs TAM, like-for-like): {tri.divergence_ratio:.0%} — "
+            f"{'FLAGGED' if tri.divergence_flagged else 'within tolerance'}",
+            f"  (For reference, bottom-up SAM after the reachability gate: {_fmt(tri.bottom_up_sam_usd)}. "
+            f"Do NOT describe the divergence as SAM-vs-TAM — it compares the two TAM estimates.)",
             f"  Reconciled estimate: {_fmt(tri.reconciled_sam_usd)} "
             f"(bottom-up weight {tri.reconciliation_weight_bottom_up:.0%} / "
             f"top-down weight {tri.reconciliation_weight_top_down:.0%})",

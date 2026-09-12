@@ -203,3 +203,88 @@ def build_sources_from_report(report: dict) -> dict:
         processed["sources"] = sources
 
     return processed
+
+
+# ── Inline citation markers resolved against the FINAL bibliography ───────────
+# extract_and_format_sources() rewrites [SOURCE: ...] -> [N] on a detached dict,
+# and the numbering it assigns is invalidated later when generate_pi_report merges
+# the pipeline bibliography in. This pass runs LAST, mutating the report object
+# in place against the finished report.sources so every [N] resolves to the entry
+# the frontend's citation linker will jump to (#src-N).
+
+_SOURCE_MARKER_RE = re.compile(r'\[SOURCE:\s*([^\]|]+?)(?:\s*\|\s*([^\]]+))?\]')
+
+# Fields that hold identifiers or URLs rather than prose — never rewrite these.
+_NON_PROSE_KEYS = {
+    "url", "source_url", "pmid", "doi", "report_id", "sub_expert_id",
+    "expert_domain", "product_type", "validated_at", "status", "category",
+    "source_record_id", "signal_type",
+}
+
+
+def apply_inline_citations(report, sources: list) -> dict:
+    """Resolve [SOURCE: ...] markers in `report` to [N] using `sources` numbering.
+
+    Mutates the report (Pydantic model or dict) in place. A marker whose URL is
+    already in the bibliography reuses that number; a marker carrying a new URL is
+    appended so the claim stays traceable. Markers with no URL are replaced with
+    their plain name — a dangling [N] pointing at nothing is worse than no marker.
+
+    Returns {"resolved": int, "appended": int, "unlinked": int}.
+    """
+    by_url: dict = {}
+    for entry in sources:
+        u = str(entry.get("url", "") or "").strip().lower().rstrip("/")
+        if u and u not in by_url:
+            by_url[u] = entry.get("number")
+
+    stats = {"resolved": 0, "appended": 0, "unlinked": 0}
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    def _rewrite(text: str) -> str:
+        def _sub(m):
+            name = (m.group(1) or "").strip()
+            url = (m.group(2) or "").strip()
+            if not url and name.startswith("http"):
+                url, name = name, _url_to_name(name)
+            key = url.lower().rstrip("/")
+            if key and key in by_url:
+                stats["resolved"] += 1
+                return f"[{by_url[key]}]"
+            if key and not _is_query_url(url):
+                number = len(sources) + 1
+                sources.append({"number": number, "name": name or _url_to_name(url),
+                                "url": url, "accessed": today})
+                by_url[key] = number
+                stats["appended"] += 1
+                return f"[{number}]"
+            stats["unlinked"] += 1
+            return name or ""
+        return _SOURCE_MARKER_RE.sub(_sub, text)
+
+    def _walk(node, key=None):
+        if isinstance(node, str):
+            return _rewrite(node) if (key not in _NON_PROSE_KEYS and "[SOURCE:" in node) else node
+        if isinstance(node, list):
+            return [_walk(v, key) for v in node]
+        if isinstance(node, dict):
+            return {k: _walk(v, k) for k, v in node.items()}
+        if hasattr(node, "model_fields"):
+            for fname in list(node.model_fields):
+                try:
+                    cur = getattr(node, fname, None)
+                except Exception:
+                    continue
+                if cur is None:
+                    continue
+                new = _walk(cur, fname)
+                if new is not cur:
+                    try:
+                        object.__setattr__(node, fname, new)
+                    except Exception:
+                        pass
+            return node
+        return node
+
+    _walk(report)
+    return stats
